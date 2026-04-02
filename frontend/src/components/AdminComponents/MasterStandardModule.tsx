@@ -1,0 +1,1371 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom'; // 1. Import useSearchParams
+import { api, ENDPOINTS } from '../../api/config';
+import { ExportMasterStandardPage } from './ExportMasterStandardPage';
+
+// --- IMPORT MANAGERS ---
+import { HTWStandardUncertaintyManager } from './HTWStandardUncertaintyForm';
+import { HTWPressureGaugeResolutionManager } from './HTWPressureGaugeResolutionForm';
+import { HTWCoverageFactorManager } from './HTWCoverageFactorManager';
+import { HTWTDistributionManager } from './HTWTDistributionManager';
+import { HTWUnPGMasterManager } from './HTWUnPGMasterForm';
+import { HTWNomenclatureRangeManager } from './HTWNomenclatureRangeForm';
+import { HTWManufacturerSpecsManager } from './HTWManufacturerSpecsManager';
+import { HTWCMCReferenceManager } from './HTWCMCReferenceManager';
+import { HTWToolTypeManager } from './HTWToolTypeManager';
+import { HTWMaxValMeasureErrorManager } from './HTWMaxValMeasureErrorManager';
+
+import {
+  ShieldCheck, Ruler, Factory, ArrowRightLeft, Activity, Gauge, Sigma,
+  ChevronRight, ChevronDown, AlertCircle, ArrowLeft, Download, Plus,
+  Search, Loader2, CheckCircle, PowerOff, Eye, Edit, Trash2, X, Save, ZoomIn, Database, Layers, Target,
+  FileText, Calendar, LineChart
+} from 'lucide-react';
+
+// --- TYPES ---
+export interface MasterStandard {
+  id?: number;
+  nomenclature: string;
+  range_min: number | string;
+  range_max: number | string;
+  range_unit: string;
+  manufacturer: string;
+  model_serial_no: string;
+  traceable_to_lab: string;
+  uncertainty: number | string;
+  uncertainty_unit: string;
+  certificate_no: string;
+  calibration_valid_upto: string;
+  accuracy_of_master: string;
+  resolution: number | string;
+  resolution_unit: string;
+  created_at?: string;
+  is_active: boolean;
+}
+
+interface MenuCard {
+  id: number;
+  title: string;
+  sub?: string;
+  icon: React.ReactNode;
+  colorClass: string;
+  desc: string;
+  viewId: string;
+}
+
+// --- SKELETON COMPONENT ---
+const MasterStandardListSkeleton = () => {
+  return (
+    <div className="animate-pulse">
+      {/* Header Skeleton */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+        <div className="flex items-center">
+          <div className="mr-4 h-10 w-10 bg-slate-200 rounded-lg"></div>
+          <div className="space-y-2">
+            <div className="h-6 w-48 bg-slate-200 rounded"></div>
+            <div className="h-4 w-32 bg-slate-200 rounded"></div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-64 bg-slate-200 rounded hidden md:block"></div>
+          <div className="h-10 w-32 bg-slate-200 rounded"></div>
+          <div className="h-10 w-24 bg-slate-200 rounded"></div>
+        </div>
+      </div>
+
+      {/* Table Skeleton */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                {[...Array(6)].map((_, i) => (
+                  <th key={i} className="px-6 py-4">
+                    <div className="h-4 w-24 bg-slate-200 rounded"></div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {[...Array(5)].map((_, i) => (
+                <tr key={i}>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center">
+                      <div className="h-10 w-10 bg-slate-200 rounded-lg mr-3"></div>
+                      <div className="space-y-2">
+                        <div className="h-4 w-32 bg-slate-200 rounded"></div>
+                        <div className="h-3 w-20 bg-slate-200 rounded"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="space-y-2">
+                      <div className="h-4 w-24 bg-slate-200 rounded"></div>
+                      <div className="h-3 w-16 bg-slate-200 rounded"></div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4"><div className="h-4 w-24 bg-slate-200 rounded"></div></td>
+                  <td className="px-6 py-4"><div className="h-4 w-24 bg-slate-200 rounded"></div></td>
+                  <td className="px-6 py-4"><div className="h-6 w-16 bg-slate-200 rounded-full"></div></td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end gap-2">
+                      <div className="h-8 w-8 bg-slate-200 rounded"></div>
+                      <div className="h-8 w-8 bg-slate-200 rounded"></div>
+                      <div className="h-8 w-8 bg-slate-200 rounded"></div>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN MODULE COMPONENT ---
+export const MasterStandardModule: React.FC = () => {
+  // 1. Setup URL Search Params
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // 2. Derive State from URL
+  const selectedCalibration = searchParams.get('calibration') || '';
+  const currentView = searchParams.get('view') || 'grid';
+  const activeItemId = searchParams.get('itemId') ? Number(searchParams.get('itemId')) : null;
+
+  // Local state for the item object (fetched or passed)
+  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [isFetchingItem, setIsFetchingItem] = useState(false);
+
+  // 3. Helper to update params without losing 'section' from parent
+  const updateParams = (updates: Record<string, string | null>) => {
+    const newParams = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === undefined) {
+        newParams.delete(key);
+      } else {
+        newParams.set(key, value);
+      }
+    });
+    setSearchParams(newParams);
+  };
+
+  const calibrationTypes = [
+    "Hydraulic Torque Wrench",
+    "Pneumatic Torque Wrench",
+    "Manual Torque Wrench",
+    "Electric Torque Wrench",
+    "Pressure Gauge"
+  ];
+
+  const menuCards: MenuCard[] = [
+    {
+      id: 1, title: "Master Standard Details", icon: <ShieldCheck size={24} strokeWidth={2} />,
+      colorClass: "bg-blue-600", desc: "Manage core standard identification data", viewId: "master-standard-list"
+    },
+    {
+      id: 2, title: "Manufacturer Specifications", icon: <Factory size={24} strokeWidth={2} />,
+      colorClass: "bg-emerald-600", desc: "View and edit OEM specs and limits", viewId: "manufacturer-specs-manager"
+    },
+    {
+      id: 3, title: "Interpolation Ranges", icon: <ArrowRightLeft size={24} strokeWidth={2} />,
+      colorClass: "bg-purple-600", desc: "Configure range interpolation logic", viewId: "htw-uncertainty-manager"
+    },
+    {
+      id: 4, title: "Nomenclature Range", icon: <Activity size={24} strokeWidth={2} />,
+      colorClass: "bg-orange-500", desc: "Standard Range for Master Selection", viewId: "nomenclature-range-manager"
+    },
+    {
+      id: 5, title: "Uncertainty of Pressure Gauge", sub: "(Un-PG)", icon: <Gauge size={24} strokeWidth={2} />,
+      colorClass: "bg-cyan-500", desc: "Specific pressure gauge uncertainty metrics", viewId: "un-pg-manager"
+    },
+    {
+      id: 6, title: "Coverage Factor (k)", icon: <Sigma size={24} strokeWidth={2} />,
+      colorClass: "bg-rose-600", desc: "Define expansion coefficients and confidence", viewId: "coverage-factor-manager"
+    },
+    {
+      id: 7, title: "Student t Table", icon: <LineChart size={24} strokeWidth={2} />,
+      colorClass: "bg-teal-600", desc: "t Distribution data", viewId: "t-distribution-manager"
+    },
+    {
+      id: 8, title: "Resolution of Pressure Gauge", icon: <ZoomIn size={24} strokeWidth={2} />,
+      colorClass: "bg-slate-600", desc: "Define pressure gauge measurement resolution", viewId: "resolution-pg-manager"
+    },
+    {
+      id: 9, title: "Hydraulic CMC Backup data", icon: <Database size={24} strokeWidth={2} />,
+      colorClass: "bg-green-600", desc: "Access and maintain backup data for CMC ", viewId: "cmc-reference-manager"
+    },
+    {
+      id: 10, title: "Tool Type", icon: <Layers size={24} strokeWidth={2} />,
+      colorClass: "bg-amber-600", desc: "Maintain Tool Classification and Measurement Behaviour", viewId: "tool-type-manager"
+    },
+    {
+      id: 11, title: "Max Val of Measurement Error", icon: <Target size={24} strokeWidth={2} />,
+      colorClass: "bg-cyan-600", desc: "Maintain Maximum Value of Measurement Error", viewId: "max-val-of-measurement-err-manager"
+    }
+  ];
+
+  // 4. Handle Restore State on Refresh (Fetching Edit Item)
+  useEffect(() => {
+    // If we have an ID in URL but no object in state, fetch it
+    const restoreItemState = async () => {
+      if (activeItemId && !selectedItem && currentView === 'master-standard-form') {
+        setIsFetchingItem(true);
+        try {
+          // Fallback: Fetch list and find item since we might not have a specific GET /id endpoint exposed in config
+          const response = await api.get(ENDPOINTS.HTW_MASTER_STANDARDS.LIST);
+          const found = response.data.find((i: any) => i.id === activeItemId);
+          if (found) setSelectedItem(found);
+        } catch (e) {
+          console.error("Failed to restore item state", e);
+        } finally {
+          setIsFetchingItem(false);
+        }
+      }
+    };
+    restoreItemState();
+  }, [activeItemId, selectedItem, currentView]);
+
+  const handleCalibrationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    updateParams({ calibration: e.target.value });
+  };
+
+  const handleCardClick = (viewId: string) => {
+    const restrictedViews = [
+      'master-standard-list',
+      'manufacturer-specs-manager',
+      'htw-uncertainty-manager',
+      'un-pg-manager',
+      'nomenclature-range-manager',
+      'resolution-pg-manager',
+      't-distribution-manager',
+      'tool-type-manager',
+      'cmc-reference-manager',
+      'max-val-of-measurement-err-manager'
+    ];
+
+    if (restrictedViews.includes(viewId)) {
+      if (selectedCalibration !== 'Hydraulic Torque Wrench') {
+        alert('This feature is currently only available for Hydraulic Torque Wrench equipment type.');
+        return;
+      }
+    }
+    setSelectedItem(null);
+    updateParams({ view: viewId, itemId: null });
+  };
+
+  const handleBackToGrid = () => {
+    setSelectedItem(null);
+    updateParams({ view: 'grid', itemId: null });
+  };
+
+  const handleEditItem = (item: any, formViewId: string) => {
+    setSelectedItem(item);
+    updateParams({ view: formViewId, itemId: item.id.toString() });
+  };
+
+  const handleAddNewItem = (formViewId: string) => {
+    setSelectedItem(null);
+    updateParams({ view: formViewId, itemId: null });
+  };
+
+  // Loading state for deep-linked edit views
+  if (isFetchingItem) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader2 className="w-10 h-10 animate-spin text-blue-600 mb-4" />
+        <p className="text-gray-500">Restoring session...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto animate-fadeIn">
+      {/* --- VIEW: GRID (Main Menu) --- */}
+      {currentView === 'grid' && (
+        <>
+          <div className="mb-8">
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600">
+                  <Ruler size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Select Calibration Type</h3>
+                  <p className="text-xs text-gray-500">Choose the equipment type to configure specifications.</p>
+                </div>
+              </div>
+
+              <div className="relative max-w-xl">
+                <select
+                  className="w-full appearance-none bg-white border border-gray-300 text-gray-900 text-sm rounded-lg focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 block p-3 pr-10 shadow-sm transition-all cursor-pointer"
+                  value={selectedCalibration}
+                  onChange={handleCalibrationChange}
+                >
+                  <option value="" disabled>Select Type...</option>
+                  {calibrationTypes.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+              </div>
+            </div>
+          </div>
+
+          {selectedCalibration ? (
+            <div className="animate-slideUp">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-bold text-gray-900">Configuration Options</h3>
+                <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+                  Active: {selectedCalibration}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {menuCards.map((card) => (
+                  <div
+                    key={card.id}
+                    onClick={() => handleCardClick(card.viewId)}
+                    className="group bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-start space-x-4 cursor-pointer hover:shadow-md hover:border-blue-200 transition-all relative overflow-hidden"
+                  >
+                    <div className={`w-12 h-12 rounded-lg ${card.colorClass} flex-shrink-0 flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform duration-200`}>
+                      {card.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-gray-900 font-bold text-base truncate group-hover:text-blue-600 transition-colors">
+                        {card.title}
+                      </h4>
+                      {card.sub && <span className="text-xs font-medium text-gray-400 block -mt-1 mb-1">{card.sub}</span>}
+                      <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+                        {card.desc}
+                      </p>
+                    </div>
+                    <ChevronRight size={18} className="text-gray-300 group-hover:text-blue-500 transition-colors self-center" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-dashed border-gray-300 text-center">
+              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                <Ruler size={32} className="text-gray-300" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900">No Standard Selected</h3>
+              <p className="text-gray-500 text-sm mt-1 max-w-sm">Please select a calibration standard type from the dropdown above.</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* --- RENDER LOGIC FOR DIFFERENT VIEWS --- */}
+
+      {currentView === 'master-standard-export' && <ExportMasterStandardPage onBack={handleBackToGrid} />}
+
+      {currentView === 'master-standard-list' && (
+        <MasterStandardList
+          onBack={handleBackToGrid}
+          onAddNew={() => handleAddNewItem('master-standard-form')}
+          onEdit={(item) => handleEditItem(item, 'master-standard-form')}
+          onExportNavigate={() => updateParams({ view: 'master-standard-export', itemId: null })}
+        />
+      )}
+
+      {currentView === 'master-standard-form' && (
+        <MasterStandardForm
+          onBack={() => updateParams({ view: 'master-standard-list', itemId: null })}
+          initialData={selectedItem}
+        />
+      )}
+
+      {/* Sub-Managers */}
+      {currentView === 'manufacturer-specs-manager' && (
+        <HTWManufacturerSpecsManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'htw-uncertainty-manager' && (
+        <HTWStandardUncertaintyManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'nomenclature-range-manager' && (
+        <HTWNomenclatureRangeManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'un-pg-manager' && (
+        <HTWUnPGMasterManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'coverage-factor-manager' && (
+        <HTWCoverageFactorManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 't-distribution-manager' && (
+        <HTWTDistributionManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'resolution-pg-manager' && (
+        <HTWPressureGaugeResolutionManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'cmc-reference-manager' && (
+        <HTWCMCReferenceManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'tool-type-manager' && (
+        <HTWToolTypeManager onBack={handleBackToGrid} />
+      )}
+      {currentView === 'max-val-of-measurement-err-manager' && (
+        <HTWMaxValMeasureErrorManager onBack={handleBackToGrid} />
+      )}
+
+    </div>
+  );
+};
+
+
+// ============================================================================
+// LOCAL SUB-COMPONENTS
+// ============================================================================
+
+// --- COMPONENT: Master Standard List ---
+interface MasterStandardListProps {
+  onBack: () => void;
+  onAddNew: () => void;
+  onEdit: (item: MasterStandard) => void;
+  onExportNavigate: () => void;
+}
+
+function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: MasterStandardListProps) {
+  const [standards, setStandards] = useState<MasterStandard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [standardToDelete, setStandardToDelete] = useState<MasterStandard | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [viewingStandard, setViewingStandard] = useState<MasterStandard | null>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
+
+  useEffect(() => {
+    if (showDeleteModal || showViewModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [showDeleteModal, showViewModal]);
+
+  const fetchStandards = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await api.get(ENDPOINTS.HTW_MASTER_STANDARDS.LIST);
+      setStandards(response.data || []);
+    } catch (err: any) {
+      console.error('Error fetching HTW master standards:', err);
+      setError(err.response?.data?.detail || 'Failed to load master standards');
+      setStandards([]);
+    } finally {
+      // Small delay to prevent flicker if API is very fast
+      setTimeout(() => setLoading(false), 300);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStandards();
+  }, [fetchStandards]);
+
+  const filteredStandards = standards.filter(standard => {
+    if (!searchTerm) return true;
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      standard.nomenclature?.toLowerCase().includes(searchLower) ||
+      standard.manufacturer?.toLowerCase().includes(searchLower) ||
+      standard.model_serial_no?.toLowerCase().includes(searchLower) ||
+      standard.certificate_no?.toLowerCase().includes(searchLower)
+    );
+  });
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const handleToggleStatus = async (standard: MasterStandard, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!standard.id) return;
+
+    try {
+      setTogglingId(standard.id);
+      const newStatus = !standard.is_active;
+      await api.patch(ENDPOINTS.HTW_MASTER_STANDARDS.UPDATE_STATUS(standard.id), null, {
+        params: { is_active: newStatus }
+      });
+      setStandards(prev => prev.map(s => s.id === standard.id ? { ...s, is_active: newStatus } : s));
+    } catch (err: any) {
+      console.error('Error toggling status:', err);
+      alert(err.response?.data?.detail || 'Failed to update status');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleView = (standard: MasterStandard, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setViewingStandard(standard);
+    setShowViewModal(true);
+  };
+
+  const handleEdit = (standard: MasterStandard, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEdit(standard);
+  };
+
+  const handleDeleteClick = (standard: MasterStandard, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setStandardToDelete(standard);
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!standardToDelete?.id) return;
+    try {
+      setDeletingId(standardToDelete.id);
+      await api.delete(ENDPOINTS.HTW_MASTER_STANDARDS.DELETE(standardToDelete.id));
+      setStandards(prev => prev.filter(s => s.id !== standardToDelete.id));
+      setShowDeleteModal(false);
+      setStandardToDelete(null);
+    } catch (err: any) {
+      console.error('Error deleting standard:', err);
+      alert(err.response?.data?.detail || 'Failed to delete standard');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="animate-fadeIn">
+      {/* Header logic included in Skeleton, but reproduced here for data view */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+        <div className="flex items-center">
+          <button onClick={onBack} className="mr-4 p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 shadow-sm"><ArrowLeft size={20} /></button>
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">Master Standard Records</h3>
+            <p className="text-sm text-gray-500">View and manage master standards</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="relative hidden md:block">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+            <input
+              type="text"
+              placeholder="Search records..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64 shadow-sm"
+            />
+          </div>
+          <button
+            onClick={onExportNavigate}
+            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm"
+          >
+            <Download size={16} className="mr-2" />
+            Export to Excel
+          </button>
+          <button onClick={onAddNew} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm">
+            <Plus size={16} className="mr-2" /> Add New
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {loading ? (
+        <MasterStandardListSkeleton />
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Nomenclature</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Manufacturer / S.No</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Cert. No</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Valid Upto</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredStandards.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                      {searchTerm ? 'No standards match your search.' : 'No standards found. Click "Add New" to create one.'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredStandards.map((item) => {
+                    const isToggling = togglingId === item.id;
+                    const isDeleting = deletingId === item.id;
+
+                    return (
+                      <tr key={item.id} className="hover:bg-blue-50/50 transition-colors group">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center">
+                            <div className="p-2 bg-gray-100 rounded-lg mr-3 text-gray-500 group-hover:text-blue-600 group-hover:bg-blue-100 transition-colors">
+                              <ShieldCheck size={18} />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-gray-900">{item.nomenclature}</p>
+                              <p className="text-xs text-gray-500">Range: {item.range_min || 'N/A'} - {item.range_max || 'N/A'} {item.range_unit || ''}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">
+                          <div className="font-medium">{item.manufacturer || 'N/A'}</div>
+                          <div className="text-xs text-gray-400">{item.model_serial_no || 'N/A'}</div>
+                        </td>
+                        <td className="px-6 py-4 text-xs text-gray-600 font-mono">{item.certificate_no || 'N/A'}</td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{formatDate(item.calibration_valid_upto || '')}</td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={(e) => handleToggleStatus(item, e)}
+                            disabled={isToggling}
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${item.is_active
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              : 'bg-red-100 text-red-700 hover:bg-red-200'
+                              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            {isToggling ? (
+                              <Loader2 size={14} className="mr-1 animate-spin" />
+                            ) : item.is_active ? (
+                              <CheckCircle size={14} className="mr-1" />
+                            ) : (
+                              <PowerOff size={14} className="mr-1" />
+                            )}
+                            {item.is_active ? 'Active' : 'Deactivated'}
+                          </button>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={(e) => handleView(item, e)}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="View Details"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              onClick={(e) => handleEdit(item, e)}
+                              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                              title="Edit"
+                            >
+                              <Edit size={16} />
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteClick(item, e)}
+                              disabled={isDeleting}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Delete"
+                            >
+                              {isDeleting ? (
+                                <Loader2 size={16} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={16} />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && standardToDelete && createPortal(
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999]">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mr-4">
+                  <AlertCircle className="text-red-600" size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Delete Master Standard</h3>
+                  <p className="text-sm text-gray-500">This action cannot be undone</p>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700 mb-6">
+                Are you sure you want to delete the master standard <strong>"{standardToDelete.nomenclature}"</strong>?
+                This will permanently remove the record from the system.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setStandardToDelete(null);
+                  }}
+                  disabled={deletingId !== null}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={deletingId !== null}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                >
+                  {deletingId !== null ? (
+                    <>
+                      <Loader2 size={16} className="mr-2 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} className="mr-2" />
+                      Delete
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* View Details Modal */}
+      {showViewModal && viewingStandard && createPortal(
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999]">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
+                    <ShieldCheck className="text-blue-600" size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Master Standard Details</h3>
+                    <p className="text-sm text-gray-500">View complete information</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowViewModal(false);
+                    setViewingStandard(null);
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Nomenclature</label>
+                  <p className="text-sm font-medium text-gray-900">{viewingStandard.nomenclature}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Manufacturer</label>
+                  <p className="text-sm text-gray-900">{viewingStandard.manufacturer || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Model / Serial No</label>
+                  <p className="text-sm text-gray-900">{viewingStandard.model_serial_no || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Range</label>
+                  <p className="text-sm text-gray-900">
+                    {viewingStandard.range_min || 'N/A'} - {viewingStandard.range_max || 'N/A'} {viewingStandard.range_unit || ''}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Uncertainty</label>
+                  <p className="text-sm text-gray-900">
+                    {viewingStandard.uncertainty || 'N/A'} {viewingStandard.uncertainty_unit || ''}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Accuracy of Master</label>
+                  <p className="text-sm text-gray-900">{viewingStandard.accuracy_of_master || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Resolution</label>
+                  <p className="text-sm text-gray-900">
+                    {viewingStandard.resolution || 'N/A'} {viewingStandard.resolution_unit || ''}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Traceable To Lab</label>
+                  <p className="text-sm text-gray-900">{viewingStandard.traceable_to_lab || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Certificate No</label>
+                  <p className="text-sm text-gray-900 font-mono">{viewingStandard.certificate_no || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Calibration Valid Upto</label>
+                  <p className="text-sm text-gray-900">{formatDate(viewingStandard.calibration_valid_upto || '')}</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${viewingStandard.is_active
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-red-700'
+                    }`}>
+                    {viewingStandard.is_active ? (
+                      <>
+                        <CheckCircle size={14} className="mr-1" />
+                        Active
+                      </>
+                    ) : (
+                      <>
+                        <PowerOff size={14} className="mr-1" />
+                        Deactivated
+                      </>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowViewModal(false);
+                    setViewingStandard(null);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+// --- COMPONENT: Master Standard Form ---
+interface MasterStandardFormProps {
+  onBack: () => void;
+  initialData: MasterStandard | null;
+}
+
+function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
+  // which fields are mandatory
+  const requiredFields = [
+    'nomenclature',
+    'range_min',
+    'range_max',
+    'range_unit',
+    'manufacturer',
+    'model_serial_no',
+    'traceable_to_lab',
+    'uncertainty',
+    'uncertainty_unit',
+    'certificate_no',
+    'calibration_valid_upto',
+    'accuracy_of_master',
+    'resolution',
+    'resolution_unit'
+  ];
+
+  const [formData, setFormData] = useState<Omit<MasterStandard, 'id' | 'created_at'>>(initialData || {
+    nomenclature: 'TORQUE TRANSDUCER (1000 - 40000 Nm)',
+    range_min: '',
+    range_max: '',
+    range_unit: '',
+    manufacturer: '',
+    model_serial_no: '',
+    traceable_to_lab: '',
+    uncertainty: '',
+    uncertainty_unit: '',
+    certificate_no: '',
+    calibration_valid_upto: '',
+    accuracy_of_master: '',
+    resolution: '',
+    resolution_unit: '',
+    is_active: true
+  });
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // Sync formData if initialData arrives late (after restore fetch)
+  useEffect(() => {
+    if (initialData) {
+      setFormData(prev => ({ ...prev, ...initialData }));
+      setErrors({});
+    }
+  }, [initialData]);
+
+  // helpers
+  const isEmpty = (v: any) => v === null || v === undefined || String(v).trim() === '';
+
+  const validateField = (name: string, value: any): string | null => {
+    // required check
+    if (requiredFields.includes(name) && isEmpty(value)) {
+      return 'This field is required';
+    }
+
+    // numeric checks
+    if (['range_min', 'range_max', 'uncertainty', 'resolution'].includes(name)) {
+      if (!isEmpty(value)) {
+        const parsed = parseFloat(String(value));
+        if (Number.isNaN(parsed)) return 'Must be a valid number';
+      }
+    }
+
+    // date check
+    if (name === 'calibration_valid_upto' && !isEmpty(value)) {
+      const d = new Date(String(value));
+      if (isNaN(d.getTime())) return 'Provide a valid date';
+    }
+
+    return null;
+  };
+
+  const validateAll = (data: typeof formData) => {
+    const newErrors: Record<string, string> = {};
+    requiredFields.forEach((f) => {
+      const err = validateField(f, (data as any)[f]);
+      if (err) newErrors[f] = err;
+    });
+
+    // cross-field: range_max >= range_min
+    const minVal = parseFloat(String(data.range_min));
+    const maxVal = parseFloat(String(data.range_max));
+    if (!Number.isNaN(minVal) && !Number.isNaN(maxVal) && maxVal < minVal) {
+      newErrors['range_max'] = 'Max must be greater than or equal to Min';
+    }
+
+    setErrors(newErrors);
+    return newErrors;
+  };
+
+  const isFormValid = () => {
+    if (Object.keys(errors).length > 0) return false;
+    for (const f of requiredFields) {
+      if (isEmpty((formData as any)[f])) return false;
+      if (['range_min', 'range_max', 'uncertainty', 'resolution'].includes(f)) {
+        const parsed = parseFloat(String((formData as any)[f]));
+        if (Number.isNaN(parsed)) return false;
+      }
+    }
+    return true;
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    const checked = (e.target as HTMLInputElement).checked;
+    let finalValue: any = type === 'checkbox' ? checked : value;
+
+    if ((name === 'range_unit' || name === 'uncertainty_unit' || name === 'resolution_unit') && typeof finalValue === 'string') {
+      finalValue = finalValue ? finalValue.charAt(0).toUpperCase() + finalValue.slice(1) : '';
+    }
+
+    setFormData(prev => {
+      const next = { ...prev, [name]: finalValue };
+      // per-field validation
+      const fieldError = validateField(name, finalValue);
+      setErrors(errs => {
+        const copy = { ...errs };
+        if (fieldError) copy[name] = fieldError;
+        else delete copy[name];
+
+        // if changing range_* re-evaluate cross-field rule
+        if (name === 'range_min' || name === 'range_max') {
+          const min = parseFloat(String(next.range_min));
+          const max = parseFloat(String(next.range_max));
+          if (!Number.isNaN(min) && !Number.isNaN(max) && max < min) {
+            copy['range_max'] = 'Max must be greater than or equal to Min';
+          } else {
+            delete copy['range_max'];
+          }
+        }
+
+        return copy;
+      });
+      return next;
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+    setSubmitSuccess(false);
+
+    const validationErrors = validateAll(formData);
+    if (Object.keys(validationErrors).length > 0) {
+      setSubmitError('Please fix the highlighted errors before saving.');
+      const firstField = Object.keys(validationErrors)[0];
+      const el = document.querySelector(`[name="${firstField}"]`) as HTMLElement | null;
+      el?.focus();
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const submitData = {
+        ...formData,
+        range_min: formData.range_min !== '' ? parseFloat(String(formData.range_min)) : null,
+        range_max: formData.range_max !== '' ? parseFloat(String(formData.range_max)) : null,
+        uncertainty: formData.uncertainty !== '' ? parseFloat(String(formData.uncertainty)) : null,
+        resolution: formData.resolution !== '' ? parseFloat(String(formData.resolution)) : null,
+        calibration_valid_upto: formData.calibration_valid_upto || null,
+      };
+
+      if (initialData?.id) {
+        await api.put(ENDPOINTS.HTW_MASTER_STANDARDS.UPDATE(initialData.id), submitData);
+      } else {
+        await api.post(ENDPOINTS.HTW_MASTER_STANDARDS.CREATE, submitData);
+      }
+
+      setSubmitSuccess(true);
+      setTimeout(() => {
+        onBack();
+      }, 1500);
+    } catch (err: any) {
+      console.error('Error saving HTW master standard:', err);
+      setSubmitError(err.response?.data?.detail || 'Failed to save master standard. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="animate-fadeIn">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center">
+          <button onClick={onBack} className="mr-4 p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 shadow-sm"><ArrowLeft size={20} /></button>
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">{initialData ? 'Edit Master Standard' : 'New Master Standard'}</h3>
+            <p className="text-sm text-gray-500">{initialData ? `Editing ID: ${initialData.id}` : 'Create a new standard identification record'}</p>
+          </div>
+        </div>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={onBack}
+            disabled={isSubmitting}
+            className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !isFormValid()}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-disabled={isSubmitting || !isFormValid()}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 size={16} className="mr-2 animate-spin" /> Saving...
+              </>
+            ) : (
+              <>
+                <Save size={16} className="mr-2" /> Save Record
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {submitSuccess && (
+        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-sm text-green-700 flex items-center">
+            <CheckCircle size={16} className="mr-2" />
+            Master standard saved successfully!
+          </p>
+        </div>
+      )}
+
+      {submitError && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700">{submitError}</p>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} noValidate className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
+        <div className="p-6 border-b border-gray-100">
+          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center">
+            <ShieldCheck size={16} className="mr-2 text-blue-600" /> General Identification
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Replace the entire "Nomenclature" div with this */}
+            <div className="col-span-1 md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Nomenclature <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.nomenclature}
+                  aria-describedby={errors.nomenclature ? 'err-nomenclature' : undefined}
+                  type="text"
+                  name="nomenclature"
+                  value={formData.nomenclature}
+                  onChange={handleChange}
+                  placeholder="Type nomenclature (free text)"
+                  className={`w-full bg-white border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 ${errors.nomenclature ? 'border-red-500' : 'border-gray-300'}`}
+                />
+                {errors.nomenclature && <p id="err-nomenclature" className="mt-1 text-xs text-red-600">{errors.nomenclature}</p>}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer <span className="text-red-500">*</span></label>
+              <input
+                required
+                aria-required
+                aria-invalid={!!errors.manufacturer}
+                aria-describedby={errors.manufacturer ? 'err-manufacturer' : undefined}
+                type="text"
+                name="manufacturer"
+                value={formData.manufacturer}
+                onChange={handleChange}
+                className={`bg-white ${errors.manufacturer ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+              />
+              {errors.manufacturer && <p id="err-manufacturer" className="mt-1 text-xs text-red-600">{errors.manufacturer}</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Model / Serial No <span className="text-red-500">*</span></label>
+              <input
+                required
+                aria-required
+                aria-invalid={!!errors.model_serial_no}
+                aria-describedby={errors.model_serial_no ? 'err-model_serial_no' : undefined}
+                type="text"
+                name="model_serial_no"
+                value={formData.model_serial_no}
+                onChange={handleChange}
+                className={`bg-white ${errors.model_serial_no ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+              />
+              {errors.model_serial_no && <p id="err-model_serial_no" className="mt-1 text-xs text-red-600">{errors.model_serial_no}</p>}
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Operating Range <span className="text-red-500">*</span></label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <input
+                    required
+                    aria-required
+                    aria-invalid={!!errors.range_min}
+                    aria-describedby={errors.range_min ? 'err-range_min' : undefined}
+                    type="number"
+                    name="range_min"
+                    value={formData.range_min as any}
+                    onChange={handleChange}
+                    placeholder="Min"
+                    className={`bg-white ${errors.range_min ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+                  />
+                  {errors.range_min && <p id="err-range_min" className="mt-1 text-xs text-red-600">{errors.range_min}</p>}
+                </div>
+
+                <span className="text-gray-400 font-bold">-</span>
+
+                <div className="flex-1">
+                  <input
+                    required
+                    aria-required
+                    aria-invalid={!!errors.range_max}
+                    aria-describedby={errors.range_max ? 'err-range_max' : undefined}
+                    type="number"
+                    name="range_max"
+                    value={formData.range_max as any}
+                    onChange={handleChange}
+                    placeholder="Max"
+                    className={`bg-white ${errors.range_max ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+                  />
+                  {errors.range_max && <p id="err-range_max" className="mt-1 text-xs text-red-600">{errors.range_max}</p>}
+                </div>
+
+                <div className="w-32">
+                  <input
+                    required
+                    aria-required
+                    aria-invalid={!!errors.range_unit}
+                    aria-describedby={errors.range_unit ? 'err-range_unit' : undefined}
+                    type="text"
+                    name="range_unit"
+                    value={formData.range_unit}
+                    onChange={handleChange}
+                    placeholder="e.g. Nm, bar"
+                    className={`w-full bg-white ${errors.range_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5`}
+                  />
+                  {errors.range_unit && <p id="err-range_unit" className="mt-1 text-xs text-red-600">{errors.range_unit}</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-gray-50/50">
+          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center">
+            <Activity size={16} className="mr-2 text-orange-500" /> Technical Specifications
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Uncertainty <span className="text-red-500">*</span></label>
+              <div className="flex items-center gap-2">
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.uncertainty}
+                  aria-describedby={errors.uncertainty ? 'err-uncertainty' : undefined}
+                  type="number"
+                  name="uncertainty"
+                  value={formData.uncertainty as any}
+                  onChange={handleChange}
+                  className={`bg-white ${errors.uncertainty ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+                />
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.uncertainty_unit}
+                  aria-describedby={errors.uncertainty_unit ? 'err-uncertainty_unit' : undefined}
+                  type="text"
+                  name="uncertainty_unit"
+                  value={formData.uncertainty_unit}
+                  onChange={handleChange}
+                  placeholder="e.g. %, Abs"
+                  className={`bg-white ${errors.uncertainty_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5 w-24`}
+                />
+              </div>
+              {errors.uncertainty && <p id="err-uncertainty" className="mt-1 text-xs text-red-600">{errors.uncertainty}</p>}
+              {errors.uncertainty_unit && <p id="err-uncertainty_unit" className="mt-1 text-xs text-red-600">{errors.uncertainty_unit}</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Accuracy of Master <span className="text-red-500">*</span></label>
+              <input
+                required
+                aria-required
+                aria-invalid={!!errors.accuracy_of_master}
+                aria-describedby={errors.accuracy_of_master ? 'err-accuracy_of_master' : undefined}
+                type="text"
+                name="accuracy_of_master"
+                value={formData.accuracy_of_master}
+                onChange={handleChange}
+                className={`bg-white ${errors.accuracy_of_master ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+              />
+              {errors.accuracy_of_master && <p id="err-accuracy_of_master" className="mt-1 text-xs text-red-600">{errors.accuracy_of_master}</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Resolution <span className="text-red-500">*</span></label>
+              <div className="flex items-center gap-2">
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.resolution}
+                  aria-describedby={errors.resolution ? 'err-resolution' : undefined}
+                  type="number"
+                  name="resolution"
+                  value={formData.resolution as any}
+                  onChange={handleChange}
+                  className={`bg-white ${errors.resolution ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+                />
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.resolution_unit}
+                  aria-describedby={errors.resolution_unit ? 'err-resolution_unit' : undefined}
+                  type="text"
+                  name="resolution_unit"
+                  value={formData.resolution_unit}
+                  onChange={handleChange}
+                  placeholder="e.g. Nm, bar"
+                  className={`bg-white ${errors.resolution_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5 w-20`}
+                />
+              </div>
+              {errors.resolution && <p id="err-resolution" className="mt-1 text-xs text-red-600">{errors.resolution}</p>}
+              {errors.resolution_unit && <p id="err-resolution_unit" className="mt-1 text-xs text-red-600">{errors.resolution_unit}</p>}
+            </div>
+
+            <div className="lg:col-span-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Traceable To Lab <span className="text-red-500">*</span></label>
+              <input
+                required
+                aria-required
+                aria-invalid={!!errors.traceable_to_lab}
+                aria-describedby={errors.traceable_to_lab ? 'err-traceable_to_lab' : undefined}
+                type="text"
+                name="traceable_to_lab"
+                value={formData.traceable_to_lab}
+                onChange={handleChange}
+                className={`bg-white ${errors.traceable_to_lab ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
+              />
+              {errors.traceable_to_lab && <p id="err-traceable_to_lab" className="mt-1 text-xs text-red-600">{errors.traceable_to_lab}</p>}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-gray-100">
+          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center">
+            <FileText size={16} className="mr-2 text-purple-600" /> Certification & Status
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Certificate No <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.certificate_no}
+                  aria-describedby={errors.certificate_no ? 'err-certificate_no' : undefined}
+                  type="text"
+                  name="certificate_no"
+                  value={formData.certificate_no}
+                  onChange={handleChange}
+                  className={`bg-white ${errors.certificate_no ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5 pl-9`}
+                />
+                <ShieldCheck size={16} className="absolute left-3 top-3 text-gray-400" />
+                {errors.certificate_no && <p id="err-certificate_no" className="mt-1 text-xs text-red-600">{errors.certificate_no}</p>}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Calibration Valid Upto <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Calendar className="w-4 h-4 text-gray-500" /></div>
+                <input
+                  required
+                  aria-required
+                  aria-invalid={!!errors.calibration_valid_upto}
+                  aria-describedby={errors.calibration_valid_upto ? 'err-calibration_valid_upto' : undefined}
+                  type="date"
+                  name="calibration_valid_upto"
+                  value={formData.calibration_valid_upto}
+                  onChange={handleChange}
+                  className={`bg-white ${errors.calibration_valid_upto ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full pl-10 p-2.5`}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">System will automatically mark status as 'Expired' if date is past.</p>
+              {errors.calibration_valid_upto && <p id="err-calibration_valid_upto" className="mt-1 text-xs text-red-600">{errors.calibration_valid_upto}</p>}
+            </div>
+
+            <div className="flex items-center h-full pt-2">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Manual Active Override' : 'Inactive'}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}

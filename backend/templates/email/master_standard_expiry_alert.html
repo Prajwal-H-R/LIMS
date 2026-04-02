@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+
+        body { font-family: Arial, sans-serif; margin: 20px; }
+
+        .header { color: #d9534f; border-bottom: 2px solid #d9534f; padding-bottom: 10px; }
+
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+
+        th { background-color: #f2f2f2; }
+
+        .footer { margin-top: 30px; font-size: 0.9em; color: #666; }
+</style>
+</head>
+<body>
+<div class="header">
+<h2>{{ title }}</h2>
+</div>
+ 
+    <p>Dear {{ admin_name }},</p>
+ 
+    <p>{{ message }}</p>
+ 
+    <table>
+<thead>
+<tr>
+<th>Nomenclature</th>
+<th>Serial No</th>
+<th>Certificate No</th>
+<th>Valid Upto</th>
+</tr>
+</thead>
+<tbody>
+
+            {% for item in standards %}
+<tr>
+<td>{{ item.nomenclature }}</td>
+<td>{{ item.serial_no }}</td>
+<td>{{ item.certificate_no }}</td>
+<td>{{ item.valid_upto }}</td>
+</tr>
+
+            {% endfor %}
+</tbody>
+</table>
+ 
+    <div class="footer">
+<p>This is an automated system notification. Please do not reply.</p>
+</div>
+</body>
+</html>
+ 

@@ -1,0 +1,1678 @@
+// frontend/src/pages/AdminDashboard.tsx
+
+import React, { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
+import { useAuth } from '../auth/AuthProvider';
+import { User as BaseUser, UserRole } from '../types'; 
+import { api, ENDPOINTS } from '../api/config';
+import { MasterStandardModule } from '../components/AdminComponents/MasterStandardModule';
+import { CertificateApprovalModule } from '../components/AdminComponents/CertificateApprovalModule';
+import { LabScopeModule } from '../components/AdminComponents/LabScopeModule';
+import { HTWEnvironmentManager } from '../components/AdminComponents/HTWEnvironmentManager'; 
+import Header from '../components/Header';
+import Footer from '../components/Footer';
+import ProfilePage from '../components/ProfilePage';
+
+import { 
+  Shield, Power, PowerOff, UserPlus, Users, Info, Loader2, Bell,
+  Settings, ChevronLeft, Ruler, AlertCircle, X, Search,
+  LayoutDashboard, Menu,  Filter, Briefcase, Wrench, 
+  Building2, Grid, AlignJustify,  Lock, CheckCircle2, 
+  XCircle, ChevronDown, Activity, UserCog, Award, Pencil,
+  Thermometer, ArrowRight, AlertTriangle
+} from 'lucide-react';
+
+import { useSearchParams } from 'react-router-dom';
+
+// --- Extended Types for UI ---
+interface User extends BaseUser {
+  customer_details?: string;
+  contact_person?: string | null;
+  phone?: string | null;
+  ship_to_address?: string | null;
+  bill_to_address?: string | null;
+}
+
+interface Customer {
+  customer_id: number;
+  customer_details: string; 
+  contact_person: string;
+  phone: string;
+  email: string;
+  ship_to_address?: string;
+  bill_to_address?: string;
+}
+
+type UserFilterTab = 'all' | 'admin' | 'engineer' | 'customer';
+
+interface UsersResponse {
+  users: User[];
+}
+
+interface InvitationResponse {
+  message: string;
+}
+
+interface AdminNotificationItem {
+  id: number;
+  subject: string;
+  body_text?: string | null;
+  created_at: string;
+  status: string;
+  error?: string | null;
+}
+
+interface AdminNotificationsResponse {
+  notifications: AdminNotificationItem[];
+}
+
+const extractCompanyFromNotification = (notification?: AdminNotificationItem | null): string | null => {
+  if (!notification) return null;
+  const bodyMatch = notification.body_text?.match(/Company:\s*([^|]+)/i);
+  if (bodyMatch?.[1]?.trim()) return bodyMatch[1].trim();
+  const subjectMatch = notification.subject?.match(/\(Company:\s*([^)]+)\)/i);
+  if (subjectMatch?.[1]?.trim()) return subjectMatch[1].trim();
+  return null;
+};
+
+// Type for the expiry check response from backend
+interface ExpiryCheckResponse {
+    message: string;
+    affected_tables: string[];
+}
+
+// --- HELPER FUNCTIONS ---
+const formatTableName = (tableName: string) => {
+    return tableName
+      .replace('htw_', '')
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+};
+
+// --- SKELETON LOADING COMPONENT ---
+const AdminSkeleton: React.FC<{ type: 'dashboard' | 'users' }> = ({ type }) => {
+  if (type === 'dashboard') {
+    return (
+      <div className="animate-pulse space-y-8 w-full">
+        {/* Header */}
+        <div className="space-y-3">
+          <div className="h-10 w-64 bg-slate-200 rounded-lg"></div>
+          <div className="h-5 w-96 bg-slate-200 rounded-lg"></div>
+        </div>
+        
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-48 rounded-2xl bg-white border border-gray-100 p-8 shadow-sm">
+              <div className="flex justify-between items-start mb-6">
+                 <div className="h-14 w-14 rounded-xl bg-slate-200"></div>
+                 <div className="h-10 w-16 bg-slate-200 rounded"></div>
+              </div>
+              <div className="space-y-2">
+                 <div className="h-6 w-32 bg-slate-200 rounded"></div>
+                 <div className="h-4 w-48 bg-slate-200 rounded"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Quick Actions Panel */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+           <div className="h-24 bg-slate-200/80"></div>
+           <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                 <div key={i} className="h-32 bg-slate-100 rounded-xl border border-slate-200"></div>
+              ))}
+           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Users Skeleton
+  return (
+    <div className="animate-pulse h-full flex flex-col w-full">
+       <div className="mb-6 space-y-2">
+          <div className="h-10 w-64 bg-slate-200 rounded-lg"></div>
+          <div className="h-4 w-96 bg-slate-200 rounded"></div>
+       </div>
+
+       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex-1">
+          {/* Header & Tabs */}
+          <div className="border-b border-gray-200 p-6 pb-0">
+             <div className="h-8 w-48 bg-slate-200 rounded mb-4"></div>
+             <div className="flex gap-4 mt-6">
+                {[1, 2, 3, 4].map(i => <div key={i} className="h-10 w-32 bg-slate-100 rounded-t-lg"></div>)}
+             </div>
+          </div>
+          
+          {/* Toolbar */}
+          <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex gap-4">
+             <div className="h-10 w-64 bg-slate-200 rounded-lg"></div>
+             <div className="h-10 w-48 bg-slate-200 rounded-lg hidden sm:block"></div>
+          </div>
+
+          {/* Table Rows */}
+          <div className="p-0">
+             {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+                   <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-slate-200"></div>
+                      <div className="space-y-2">
+                         <div className="h-4 w-40 bg-slate-200 rounded"></div>
+                         <div className="h-3 w-24 bg-slate-200 rounded"></div>
+                      </div>
+                   </div>
+                   <div className="h-6 w-24 bg-slate-200 rounded hidden md:block"></div>
+                   <div className="h-6 w-20 bg-slate-200 rounded hidden md:block"></div>
+                   <div className="h-8 w-24 bg-slate-200 rounded"></div>
+                </div>
+             ))}
+          </div>
+       </div>
+    </div>
+  );
+};
+
+// --- SHARED UI COMPONENTS ---
+
+const StatCard: React.FC<{ 
+    icon: React.ReactNode; 
+    label: string; 
+    value: number; 
+    description: string; 
+    gradient: string; 
+    bgGradient: string; 
+}> = ({ icon, label, value, description, gradient, bgGradient }) => ( 
+    <div className={`relative bg-white rounded-2xl p-8 shadow-lg border border-gray-100 hover:shadow-xl group transition-all duration-300`}> 
+        <div className={`absolute inset-0 bg-gradient-to-r ${bgGradient} opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl`} /> 
+        <div className="relative z-10"> 
+            <div className="flex items-start justify-between mb-6"> 
+                <div className={`p-4 bg-gradient-to-r ${gradient} rounded-xl text-white shadow-lg`}>{icon}</div> 
+                <div className="text-4xl font-bold text-gray-900 group-hover:text-gray-800 transition-colors">{value}</div> 
+            </div> 
+            <div> 
+                <h3 className="text-xl font-semibold text-gray-900">{label}</h3> 
+                <p className="text-gray-500 group-hover:text-gray-700 text-sm font-medium mt-1">{description}</p> 
+            </div> 
+        </div> 
+    </div> 
+);
+
+const ActionButton: React.FC<{ 
+    color: string; 
+    label: string; 
+    description: string; 
+    icon: React.ReactNode; 
+    onClick: () => void; 
+}> = ({ color, label, description, icon, onClick }) => ( 
+    <button onClick={onClick} className="relative group bg-white border border-gray-100 rounded-xl p-6 hover:shadow-lg text-left transition-all duration-300 hover:-translate-y-1"> 
+        <div className={`inline-flex p-3 bg-gradient-to-r ${color} rounded-xl text-white mb-4 shadow-md`}>{icon}</div> 
+        <h3 className="font-semibold text-lg text-gray-800">{label}</h3> 
+        <p className="text-sm text-gray-500 mt-2">{description}</p> 
+    </button> 
+);
+
+// --- INTERNAL COMPONENTS ---
+
+// 1. New Company Modal
+interface CompanyEntryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (name: string) => void;
+}
+
+const CompanyEntryModal: React.FC<CompanyEntryModalProps> = ({ isOpen, onClose, onConfirm }) => {
+  const [tempName, setTempName] = useState('');
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (tempName.trim()) {
+      onConfirm(tempName.trim());
+      setTempName('');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100">
+        <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-3">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <Building2 className="text-blue-600" size={20} />
+            Enter New Company
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Company Name (Customer Details)
+            </label>
+            <input 
+              autoFocus
+              type="text" 
+              value={tempName}
+              onChange={(e) => setTempName(e.target.value)}
+              placeholder="e.g. Acme Industries Ltd."
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              This will create a new customer record in the database upon invitation.
+            </p>
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <button 
+              type="button" 
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit"
+              disabled={!tempName.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              Confirm Name
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// 2. Sidebar Component
+interface SidebarProps {
+  isOpen: boolean;
+  setIsOpen: (val: boolean) => void;
+  activeSection: string;
+  setActiveSection: (val: string) => void;
+  unreadNotificationCount: number;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ 
+  isOpen, 
+  setIsOpen, 
+  activeSection, 
+  setActiveSection,
+  unreadNotificationCount,
+}) => {
+  const [hoveredItem, setHoveredItem] = useState<{ label: string; top: number } | null>(null);
+
+  const mainNavItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
+    { id: 'profile', label: 'My Profile', icon: <UserCog size={20} /> },
+    { id: 'notifications', label: 'Notifications', icon: <Bell size={20} /> },
+    { id: 'invite-users', label: 'Invite User', icon: <UserPlus size={20} /> },
+    { id: 'users', label: 'User Management', icon: <Users size={20} /> },
+  ];
+
+  const adminToolItems = [
+    { id: 'certificate-approval', label: 'Certificate Approval', icon: <Award size={20} /> },
+    { id: 'master-standard', label: 'Master Standards', icon: <Ruler size={20} /> },
+    { id: 'laboratory-scope', label: 'Laboratory Scope', icon: <Building2 size={20} /> },
+    { id: 'htw-environment', label: 'Environment Ranges', icon: <Thermometer size={20} /> },
+    { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
+  ];
+
+  const handleMouseEnter = (e: React.MouseEvent<HTMLButtonElement>, label: string) => {
+    if (isOpen) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoveredItem({
+      label,
+      top: rect.top + (rect.height / 2)
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredItem(null);
+  };
+
+  const renderNavButton = (item: { id: string; label: string; icon: React.ReactNode }) => {
+    const isActive = activeSection === item.id;
+    const showUnread = item.id === 'notifications' && unreadNotificationCount > 0;
+
+    return (
+      <button
+        key={item.id}
+        onClick={() => setActiveSection(item.id)}
+        onMouseEnter={(e) => handleMouseEnter(e, item.label)}
+        onMouseLeave={handleMouseLeave}
+        className={`
+          w-full flex items-center px-3 py-3 my-1 rounded-xl transition-all duration-200 group relative
+          ${isOpen ? 'justify-start' : 'justify-center'} 
+          ${isActive 
+            ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50' 
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
+          }
+        `}
+      >
+        <div className={`flex-shrink-0 transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-600'}`}>
+          {item.icon}
+        </div>
+        {showUnread && !isOpen && (
+          <span className="absolute top-2 right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] font-bold text-center">
+            {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+          </span>
+        )}
+        
+        <span 
+          className={`
+            ml-3 text-sm font-medium whitespace-nowrap transition-all duration-300 origin-left flex-1 text-left
+            ${isOpen ? 'opacity-100 w-auto translate-x-0' : 'opacity-0 w-0 -translate-x-4 overflow-hidden hidden'}
+          `}
+        >
+          {item.label}
+        </span>
+        {showUnread && isOpen && (
+          <span className="ml-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] font-bold text-center">
+            {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <aside 
+        className={`
+          relative bg-white border-r border-gray-200 flex flex-col h-full
+          transition-all duration-300 ease-in-out
+          ${isOpen ? 'w-64' : 'w-[4.5rem]'}
+        `}
+      >
+        <div className={`h-14 flex items-center px-4 flex-shrink-0 bg-white border-b border-gray-50 ${isOpen ? 'justify-between' : 'justify-center'}`}>
+           {isOpen && (
+             <div className="font-extrabold text-gray-800 text-lg tracking-tight animate-fadeIn truncate">
+                Admin<span className="text-blue-600">Portal</span>
+             </div>
+           )}
+
+           <button 
+              onClick={() => setIsOpen(!isOpen)}
+              className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-all border border-transparent hover:border-gray-100"
+              title={isOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+            >
+              {isOpen ? <ChevronLeft size={20} /> : <Menu size={20} />}
+           </button>
+        </div>
+
+        <nav className="flex-1 py-4 px-3 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-200 flex flex-col">
+          <div className="space-y-1">
+            {mainNavItems.map(renderNavButton)}
+          </div>
+
+          <div className="my-6">
+             {isOpen ? (
+              <div className="px-3 mb-2 animate-fadeIn">
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+                  Configuration
+                </span>
+              </div>
+            ) : (
+              <div className="border-t border-gray-100 mx-2 mb-3" />
+            )}
+            
+            <div className="space-y-1">
+              {adminToolItems.map(renderNavButton)}
+            </div>
+          </div>
+        </nav>
+      </aside>
+
+      {!isOpen && hoveredItem && (
+        <div 
+          className="fixed z-[150] px-3 py-2 bg-gray-900 text-white text-xs font-medium rounded-lg shadow-xl whitespace-nowrap pointer-events-none animate-fadeIn"
+          style={{ 
+            left: '5.2rem', 
+            top: hoveredItem.top,
+            transform: 'translateY(-50%)' 
+          }}
+        >
+          {hoveredItem.label}
+          <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45" />
+        </div>
+      )}
+    </>
+  );
+};
+
+// 3. Admin edit user modal
+const EditUserModal: React.FC<{
+  user: User | null;
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ user, onClose, onSaved }) => {
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [phone, setPhone] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [shipTo, setShipTo] = useState('');
+  const [billTo, setBillTo] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const isCustomerLinked = Boolean(user?.customer_id) && user?.role === 'customer';
+
+  useEffect(() => {
+    if (!user) return;
+    setEmail(user.email || '');
+    setFullName(user.full_name || '');
+    setUsername(user.username || '');
+    setContactPerson(user.contact_person || '');
+    setPhone(user.phone || '');
+    setCompanyName(user.customer_details || '');
+    setShipTo(user.ship_to_address || '');
+    setBillTo(user.bill_to_address || '');
+    setFormError(null);
+  }, [user]);
+
+  if (!user) return null;
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    setSaving(true);
+    try {
+      const payload: Record<string, string | null> = {
+        email: email.trim(),
+        username: username.trim(),
+        full_name: fullName.trim() || null,
+      };
+      if (isCustomerLinked) {
+        payload.contact_person = contactPerson.trim() || null;
+        payload.phone = phone.trim() || null;
+        payload.customer_details = companyName.trim();
+        payload.ship_to_address = shipTo.trim();
+        payload.bill_to_address = billTo.trim();
+      }
+      await api.put(ENDPOINTS.USERS.UPDATE(user.user_id), payload);
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      setFormError(typeof msg === 'string' ? msg : 'Failed to update user.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex justify-between items-center z-10">
+          <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <Pencil className="text-blue-600" size={20} />
+            Edit user
+          </h3>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+            <X size={22} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {formError && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{formError}</div>
+          )}
+          <p className="text-xs text-gray-500">User ID {user.user_id} · {user.role}</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Email</label>
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Full name</label>
+            <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Username</label>
+            <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          {isCustomerLinked && (
+            <div className="border-t border-gray-100 pt-4 space-y-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer organization</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Company / organization</label>
+                <input type="text" required value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Contact person</label>
+                  <input type="text" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Phone</label>
+                  <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Ship-to address</label>
+                <textarea required rows={2} value={shipTo} onChange={(e) => setShipTo(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y min-h-[60px]" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Bill-to address</label>
+                <textarea required rows={2} value={billTo} onChange={(e) => setBillTo(e.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y min-h-[60px]" />
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 inline-flex items-center gap-2">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Save changes
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// 4. User Table Row
+const UserTableRow: React.FC<{
+    user: User;
+    updatingUserId: number | null;
+    onToggleStatus: (userId: number, currentStatus: boolean) => void;
+    onEdit: (user: User) => void;
+    isGroupInactive?: boolean; 
+  }> = ({ user, updatingUserId, onToggleStatus, onEdit, isGroupInactive }) => {
+    const isActionBlocked = isGroupInactive && !user.is_active;
+
+    return (
+    <tr className={`hover:bg-blue-50/30 transition-colors border-b border-gray-50 last:border-b-0 ${!user.is_active ? 'bg-gray-50/40 text-gray-500' : ''}`}>
+      <td className="px-6 py-4">
+        <div className="flex flex-col">
+          <span className={`font-semibold ${user.is_active ? 'text-gray-900' : 'text-gray-500'}`}>{user.full_name || user.username}</span>
+          <span className="text-gray-400 text-xs">{user.email}</span>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        {user.role === 'customer' && user.customer_details ? (
+             <div className={`flex items-center text-sm ${user.is_active ? 'text-gray-600' : 'text-gray-400'}`}>
+                 <Building2 size={14} className="mr-2 opacity-70"/>
+                 {user.customer_details}
+             </div>
+        ) : (
+            <span className="text-gray-400 text-xs italic">N/A</span>
+        )}
+      </td>
+      <td className="px-6 py-4">
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border capitalize
+          ${user.role === 'admin' ? 'bg-purple-50 text-purple-700 border-purple-100' : ''}
+          ${user.role === 'engineer' ? 'bg-orange-50 text-orange-700 border-orange-100' : ''}
+          ${user.role === 'customer' ? 'bg-blue-50 text-blue-700 border-blue-100' : ''}
+          ${!user.is_active ? 'opacity-60 grayscale' : ''}
+        `}>
+          {user.role}
+        </span>
+      </td>
+      <td className="px-6 py-4">
+        <span
+          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+            user.is_active 
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+              : 'bg-red-50 text-red-700 border-red-100'
+          }`}
+        >
+          {user.is_active ? 'Active' : 'Inactive'}
+        </span>
+      </td>
+      <td className="px-6 py-4 text-right">
+        <div className="inline-flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onEdit(user)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 text-blue-700 bg-white hover:bg-blue-50 transition-all shadow-sm"
+            >
+              <Pencil className="w-3 h-3" />
+              Edit
+            </button>
+            <div className="relative inline-block group/tooltip">
+            <button
+            type="button"
+            onClick={() => onToggleStatus(user.user_id, Boolean(user.is_active))}
+            disabled={updatingUserId === user.user_id || isActionBlocked}
+            className={`
+                inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm
+                ${isActionBlocked 
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                    : Boolean(user.is_active)
+                    ? 'bg-white border border-red-200 text-red-600 hover:bg-red-50'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700 border border-transparent'
+                } disabled:opacity-70
+            `}
+            >
+            {updatingUserId === user.user_id ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+            ) : isActionBlocked ? (
+                <Lock className="w-3 h-3" /> 
+            ) : Boolean(user.is_active) ? (
+                <PowerOff className="w-3 h-3" />
+            ) : (
+                <Power className="w-3 h-3" />
+            )}
+            {Boolean(user.is_active) ? 'Deactivate' : 'Activate'}
+            </button>
+            {isActionBlocked && (
+                <div className="absolute bottom-full right-0 mb-2 w-max px-2 py-1 bg-gray-800 text-white text-[10px] rounded shadow-md opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-10">
+                    Activate Company First
+                    <div className="absolute top-full right-4 -mt-1 border-4 border-transparent border-t-gray-800"></div>
+                </div>
+            )}
+            </div>
+        </div>
+      </td>
+    </tr>
+  );
+};
+
+// 5. Company Group Header
+const CompanyGroupHeader: React.FC<{
+    companyName: string;
+    users: User[];
+    onBatchUpdate: (companyName: string, newStatus: boolean) => void;
+    isUpdating: boolean;
+}> = ({ companyName, users, onBatchUpdate, isUpdating }) => {
+    const hasActiveUsers = users.some(u => u.is_active);
+    const targetStatus = !hasActiveUsers; 
+
+    const handleBatchClick = (e: React.MouseEvent) => {
+        e.stopPropagation(); 
+        const action = targetStatus ? "ACTIVATE" : "DEACTIVATE";
+        if (window.confirm(`Are you sure you want to ${action} all ${users.length} users in ${companyName}?`)) {
+            onBatchUpdate(companyName, targetStatus);
+        }
+    };
+
+    if (companyName === 'Unassigned / Independent') {
+        return (
+            <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="bg-gray-200 p-2 rounded-lg text-gray-500"><Users size={18} /></div>
+                    <div><h4 className="font-bold text-gray-800 text-sm">{companyName}</h4><span className="text-xs text-gray-500">{users.length} user(s)</span></div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className={`px-6 py-4 border-b border-gray-200 flex flex-wrap justify-between items-center gap-3 transition-colors ${hasActiveUsers ? 'bg-blue-50/30' : 'bg-red-50/30'}`}>
+            <div className="flex items-center gap-4">
+                <div className={`p-2.5 rounded-xl shadow-sm ${hasActiveUsers ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-500'}`}>
+                    <Building2 size={20} />
+                </div>
+                <div>
+                    <h4 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                        {companyName}
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide font-bold border ${hasActiveUsers ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                            {hasActiveUsers ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
+                            {hasActiveUsers ? 'Active' : 'Inactive'}
+                        </span>
+                    </h4>
+                    <span className="text-xs text-gray-500 font-medium">{users.length} associated account(s)</span>
+                </div>
+            </div>
+
+            <button
+                onClick={handleBatchClick}
+                disabled={isUpdating}
+                className={`
+                    flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm
+                    ${targetStatus 
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-emerald-200' 
+                        : 'bg-white text-red-600 border border-red-200 hover:bg-red-50 hover:border-red-300'
+                    } disabled:opacity-50 disabled:cursor-not-allowed
+                `}
+            >
+                {isUpdating ? (
+                    <Loader2 size={14} className="animate-spin" />
+                ) : targetStatus ? (
+                    <Power size={14} />
+                ) : (
+                    <PowerOff size={14} />
+                )}
+                {targetStatus ? 'Activate Company' : 'Deactivate Company'}
+            </button>
+        </div>
+    );
+};
+
+// 6. User Management Component
+const UserManagementSystem: React.FC<{
+  users: User[];
+  updatingUserId: number | null;
+  onToggleStatus: (userId: number, currentStatus: boolean) => void;
+  onRefreshData: () => void; 
+}> = ({ users, updatingUserId, onToggleStatus, onRefreshData }) => {
+  const [activeFilter, setActiveFilter] = useState<UserFilterTab>('all');
+  const [groupByCompany, setGroupByCompany] = useState(false); 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [updatingCompany, setUpdatingCompany] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    setSearchTerm('');
+  }, [activeFilter]);
+
+  const handleBatchUpdate = async (companyName: string, newStatus: boolean) => {
+      setUpdatingCompany(companyName);
+      try {
+          await api.post('/users/batch-status-by-customer', {
+              customer_details: companyName,
+              is_active: newStatus
+          });
+          onRefreshData(); 
+      } catch (error) {
+          console.error("Batch update failed", error);
+          alert("Failed to update company users.");
+      } finally {
+          setUpdatingCompany(null);
+      }
+  };
+
+  const filteredUsers = users.filter((user) => {
+    if (activeFilter !== 'all' && user.role !== activeFilter) return false;
+    if (searchTerm.trim() !== '') {
+        const lowerTerm = searchTerm.toLowerCase();
+        const matchesName = (user.full_name || user.username).toLowerCase().includes(lowerTerm);
+        const matchesEmail = user.email.toLowerCase().includes(lowerTerm);
+        const matchesCompany = (user.customer_details || '').toLowerCase().includes(lowerTerm);
+        return matchesName || matchesEmail || matchesCompany;
+    }
+    return true;
+  });
+
+  const groupedCustomers = activeFilter === 'customer' && groupByCompany
+    ? filteredUsers.reduce((groups, user) => {
+        const company = user.customer_details || 'Unassigned / Independent';
+        if (!groups[company]) {
+          groups[company] = [];
+        }
+        groups[company].push(user);
+        return groups;
+      }, {} as Record<string, User[]>)
+    : null;
+
+  const TabButton = ({ id, label, icon, count }: { id: UserFilterTab; label: string; icon: React.ReactNode, count: number }) => (
+    <button
+      onClick={() => setActiveFilter(id)}
+      className={`
+        flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 whitespace-nowrap
+        ${activeFilter === id 
+          ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
+          : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+        }
+      `}
+    >
+      {icon}
+      {label}
+      <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${activeFilter === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+        {count}
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col h-full">
+      <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onSaved={onRefreshData} />
+      <div className="border-b border-gray-200 bg-white">
+         <div className="p-6 pb-4">
+            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Users size={24} className="text-blue-600"/>
+                User Directory
+            </h3>
+            <p className="text-gray-500 text-sm mt-1">Manage system access for staff and clients.</p>
+         </div>
+         
+         <div className="flex overflow-x-auto scrollbar-hide px-2">
+            <TabButton id="all" label="All Users" icon={<Users size={16}/>} count={users.length} />
+            <TabButton id="admin" label="Administrators" icon={<Shield size={16}/>} count={users.filter(u => u.role === 'admin').length} />
+            <TabButton id="engineer" label="Engineers" icon={<Wrench size={16}/>} count={users.filter(u => u.role === 'engineer').length} />
+            <TabButton id="customer" label="Customers" icon={<Briefcase size={16}/>} count={users.filter(u => u.role === 'customer').length} />
+         </div>
+      </div>
+
+      <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-64">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                    <Search size={16} />
+                </div>
+                <input 
+                    type="text"
+                    placeholder={activeFilter === 'customer' ? "Search Company or User..." : "Search Users..."}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 pr-4 py-2 w-full text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                />
+            </div>
+            <div className="relative hidden sm:block">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                    <Filter size={16} />
+                </div>
+                <select
+                    value={activeFilter}
+                    onChange={(e) => setActiveFilter(e.target.value as UserFilterTab)}
+                    className="pl-10 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none cursor-pointer shadow-sm hover:border-gray-400 transition-colors"
+                >
+                    <option value="all">All Roles</option>
+                    <option value="admin">Administrators</option>
+                    <option value="engineer">Engineers</option>
+                    <option value="customer">Customers</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-gray-500">
+                    <ChevronDown size={14} />
+                </div>
+            </div>
+        </div>
+
+        {activeFilter === 'customer' && (
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:inline">
+                    {groupByCompany ? 'Grouped View' : 'List View'}
+                </span>
+                <div className="flex bg-white rounded-lg p-1 border border-gray-200 shadow-sm">
+                    <button 
+                        onClick={() => setGroupByCompany(false)} 
+                        className={`p-1.5 rounded-md transition-all ${!groupByCompany ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`} 
+                        title="List View"
+                    >
+                        <AlignJustify size={18} />
+                    </button>
+                    <button 
+                        onClick={() => setGroupByCompany(true)} 
+                        className={`p-1.5 rounded-md transition-all ${groupByCompany ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`} 
+                        title="Group by Customer Details"
+                    >
+                        <Grid size={18} />
+                    </button>
+                </div>
+            </div>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white min-h-[400px]">
+        {groupedCustomers ? (
+            <div className="p-6 space-y-6">
+                {Object.entries(groupedCustomers).map(([companyName, companyUsers], index) => {
+                    const isCompanyInactive = !companyUsers.some(u => u.is_active);
+                    return (
+                        <div key={index} className={`border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow ${isCompanyInactive ? 'border-gray-200 bg-gray-50' : 'border-blue-100 bg-white'}`}>
+                            <CompanyGroupHeader 
+                                companyName={companyName} 
+                                users={companyUsers}
+                                onBatchUpdate={handleBatchUpdate}
+                                isUpdating={updatingCompany === companyName}
+                            />
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50/50 text-gray-400 border-b border-gray-100 uppercase font-semibold text-[10px] tracking-wider">
+                                        <tr>
+                                            <th className="px-6 py-3">User</th>
+                                            <th className="px-6 py-3">Company Details</th>
+                                            <th className="px-6 py-3">Role</th>
+                                            <th className="px-6 py-3">Status</th>
+                                            <th className="px-6 py-3 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                        {companyUsers.map(u => (
+                                            <UserTableRow 
+                                                key={u.user_id} 
+                                                user={u} 
+                                                updatingUserId={updatingUserId} 
+                                                onToggleStatus={onToggleStatus}
+                                                onEdit={(row) => setEditingUser(row)}
+                                                isGroupInactive={isCompanyInactive && companyName !== 'Unassigned / Independent'} 
+                                            />
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50 text-gray-500 uppercase font-semibold text-xs border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-4">User Profile</th>
+                    <th className="px-6 py-4">Company / Details</th>
+                    <th className="px-6 py-4">Role</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredUsers.length > 0 ? (
+                    filteredUsers.map((u) => (
+                        <UserTableRow 
+                            key={u.user_id} 
+                            user={u} 
+                            updatingUserId={updatingUserId} 
+                            onToggleStatus={onToggleStatus}
+                            onEdit={(row) => setEditingUser(row)}
+                        />
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                        <div className="flex flex-col items-center justify-center">
+                          <Filter size={24} className="text-gray-400 mb-2" />
+                          <p className="font-medium">No users found</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// 6. Invite Users Section 
+const InviteUsersSection: React.FC<{ existingCustomers: Customer[] }> = ({ existingCustomers }) => {
+    const [email, setEmail] = useState('');
+    const [role, setRole] = useState<UserRole>('customer');
+    const [invitedName, setInvitedName] = useState('');
+    const [companyName, setCompanyName] = useState('');
+    const [shipToAddress, setShipToAddress] = useState('');
+    const [billToAddress, setBillToAddress] = useState('');
+    const [sameAsShip, setSameAsShip] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState('');
+    const [isInviting, setIsInviting] = useState(false);
+    const [inviteMessage, setInviteMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [isCompanyModalOpen, setCompanyModalOpen] = useState(false);
+    const [isCustomCompany, setIsCustomCompany] = useState(false);
+    const isCustomerRole = role === 'customer';
+
+    const handleSameAsShipChange = (checked: boolean) => {
+        setSameAsShip(checked);
+        if (checked) {
+          setBillToAddress(shipToAddress);
+        }
+      };
+    
+      const handleCompanySelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+          const val = e.target.value;
+          if (val === '__NEW_COMPANY_TRIGGER__') {
+              setCompanyModalOpen(true);
+              setCompanyName('');
+              setShipToAddress('');
+              setBillToAddress('');
+          } else {
+              setCompanyName(val);
+              setIsCustomCompany(false);
+              const selectedCustomer = existingCustomers.find(c => c.customer_details === val);
+              if (selectedCustomer) {
+                  setShipToAddress(selectedCustomer.ship_to_address || '');
+                  setBillToAddress(selectedCustomer.bill_to_address || selectedCustomer.ship_to_address || '');
+              }
+          }
+      };
+  
+      const handleNewCompanyConfirm = (name: string) => {
+          setCompanyName(name);
+          setIsCustomCompany(true);
+          setCompanyModalOpen(false);
+          setShipToAddress('');
+          setBillToAddress('');
+      };
+  
+      const handleResetCompany = () => {
+          setCompanyName('');
+          setIsCustomCompany(false);
+          setShipToAddress('');
+          setBillToAddress('');
+      };
+    
+      const handleInvite = async (e: FormEvent) => {
+        e.preventDefault();
+        setInviteMessage(null);
+        let payload: any = { email, role };
+        setIsInviting(true);
+        try {
+            if (isCustomerRole) {
+                 payload = { 
+                     ...payload, 
+                     company_name: companyName.trim(), 
+                     ship_to_address: shipToAddress.trim(), 
+                     bill_to_address: billToAddress.trim(), 
+                     invited_name: invitedName.trim(), 
+                     phone_number: phoneNumber.trim() 
+                  };
+            } else {
+                 payload = { ...payload, invited_name: invitedName.trim() };
+            }
+            const response = await api.post<InvitationResponse>(ENDPOINTS.INVITATIONS.SEND, payload);
+            setInviteMessage({ type: 'success', text: response.data.message || `Invitation sent successfully to ${email}!` });
+            setEmail(''); setRole('customer'); setInvitedName(''); setCompanyName(''); setShipToAddress(''); setBillToAddress(''); setSameAsShip(false); setPhoneNumber(''); setIsCustomCompany(false);
+        } catch (error: any) {
+            setInviteMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to send invitation.' });
+        } finally {
+            setIsInviting(false);
+        }
+      };
+
+    return (
+        <div className="max-w-3xl mx-auto p-8 bg-white border border-gray-100 rounded-2xl shadow-lg">
+          <CompanyEntryModal isOpen={isCompanyModalOpen} onClose={() => setCompanyModalOpen(false)} onConfirm={handleNewCompanyConfirm} />
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center mb-6">
+            <div className="p-2 bg-blue-100 rounded-lg mr-3"><UserPlus className="w-6 h-6 text-blue-600" /></div>
+            Invite New System User
+          </h2>
+          <form onSubmit={handleInvite} className="space-y-5">
+            {inviteMessage && <div className={`p-4 rounded-xl text-sm font-medium flex items-center ${inviteMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}><Info size={16} className="mr-2" />{inviteMessage.text}</div>}
+            <div className="grid grid-cols-1 gap-5">
+                <div>
+                  <label htmlFor="role" className="block text-sm font-semibold text-gray-700 mb-1">Assign Role</label>
+                  <select id="role" value={role} onChange={(e) => setRole(e.target.value as UserRole)} required disabled={isInviting} className="w-full border border-gray-300 rounded-xl shadow-sm px-4 py-2.5 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                    <option value="customer">Customer</option>
+                    <option value="engineer">Engineer</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                {!isCustomerRole && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label><input type="text" value={invitedName} onChange={(e) => setInvitedName(e.target.value)} required={!isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all" /></div>
+                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required={!isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all" /></div>
+                  </div>
+                )}
+                {isCustomerRole && (
+                  <>
+                    <div className="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
+                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">Company Details</h3>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                            {isCustomCompany ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="flex-1 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-800 font-medium">{companyName}</div>
+                                    <button type="button" onClick={handleResetCompany} className="px-3 py-2.5 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors">Change</button>
+                                </div>
+                            ) : (
+                                <div className="relative">
+                                  <select value={companyName} onChange={handleCompanySelectChange} required={isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all appearance-none bg-white">
+                                      <option value="" disabled>Select an existing company...</option>
+                                      <option value="__NEW_COMPANY_TRIGGER__" className="font-bold text-blue-600 bg-blue-50">+ Add New Company</option>
+                                      <option disabled>────────────────────</option>
+                                      {existingCustomers.map((c, idx) => (<option key={idx} value={c.customer_details}>{c.customer_details}</option>))}
+                                  </select>
+                                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-500"><ChevronLeft size={16} className="-rotate-90" /></div>
+                                </div>
+                            )}
+                            <p className="text-xs text-gray-400 mt-1">Select existing or add new to create customer entry.</p>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label className="block text-sm font-medium text-gray-700 mb-1">Ship To Address</label><textarea rows={3} value={shipToAddress} onChange={(e) => {setShipToAddress(e.target.value); if(sameAsShip) setBillToAddress(e.target.value);}} required={isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all resize-none" /></div>
+                            <div><div className="flex justify-between items-center mb-1"><label className="block text-sm font-medium text-gray-700">Bill To Address</label><label className="text-xs flex items-center cursor-pointer text-gray-600"><input type="checkbox" checked={sameAsShip} onChange={(e) => handleSameAsShipChange(e.target.checked)} className="mr-1 rounded text-blue-600 focus:ring-blue-500" /> Same as Ship</label></div><textarea rows={3} value={billToAddress} onChange={(e) => setBillToAddress(e.target.value)} required={isCustomerRole} disabled={isInviting || sameAsShip} className={`w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all resize-none ${sameAsShip ? 'bg-gray-100 text-gray-500' : ''}`} /></div>
+                        </div>
+                    </div>
+                    <div className="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
+                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">Contact Person</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label><input type="text" value={invitedName} onChange={(e) => setInvitedName(e.target.value)} required={isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all" /></div>
+                            <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label><input type="tel" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} required={isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all" /></div>
+                        </div>
+                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required={isCustomerRole} disabled={isInviting} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 transition-all" /></div>
+                    </div>
+                  </>
+                )}
+            </div>
+            <button type="submit" disabled={isInviting} className="w-full flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-200 transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed">
+              {isInviting ? <Loader2 className="animate-spin mr-2" size={20} /> : <UserPlus className="mr-2" size={20} />}
+              {isInviting ? 'Sending Invitation...' : 'Send Invitation'}
+            </button>
+          </form>
+        </div>
+      );
+};
+
+// --- DASHBOARD HOME VIEW ---
+const AdminDashboardHome: React.FC<{ 
+    users: User[], 
+    onNavigate: (section: string) => void,
+    expiredTables: string[]
+}> = ({ users, onNavigate, expiredTables }) => {
+
+    const totalUsers = users.length;
+    const activeUsers = users.filter(u => u.is_active).length;
+    const inactiveUsers = totalUsers - activeUsers;
+    const adminCount = users.filter(u => u.role === 'admin').length;
+
+    return (
+        <div className="space-y-8 animate-fadeIn">
+            {/* Header Area */}
+             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-4xl font-extrabold text-gray-900 flex items-center gap-3">
+                        <Shield className="w-10 h-10 text-blue-600" />
+                        Admin Portal
+                    </h1>
+                    <p className="text-lg text-gray-500 mt-2">System overview and management controls.</p>
+                </div>
+            </div>
+
+            {/* EXPIRATION NOTIFICATION BAR */}
+            {expiredTables.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 shadow-sm animate-slideUp relative group">
+                    <div className="flex items-start gap-4">
+                        <div className="p-2.5 bg-amber-100 rounded-lg text-amber-600 shrink-0 mt-1 shadow-sm">
+                            <AlertTriangle size={24} />
+                        </div>
+                        <div className="flex-1 pr-6">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-amber-900 font-bold text-lg flex items-center gap-2">
+                                    Calibration Records Expired
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 border border-red-200 shadow-sm">
+                                        Deactivated
+                                    </span>
+                                </h3>
+                            </div>
+                            <p className="text-amber-800 text-sm mt-2 leading-relaxed">
+                                Records in the following tables have expired dates (valid_upto &lt; today). 
+                                Please update the dates or remove the records in Master Standards. 
+                            </p>
+                            
+                            <div className="flex flex-wrap gap-2 mt-4">
+                                {expiredTables.map(table => (
+                                    <span key={table} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-amber-200 text-amber-800 shadow-sm hover:bg-amber-50 cursor-default transition-colors">
+                                        <XCircle size={12} className="mr-1.5 text-red-500" />
+                                        {formatTableName(table)}
+                                    </span>
+                                ))}
+                            </div>
+
+                            <div className="mt-6 flex flex-wrap items-center gap-3">
+                                <button 
+                                    onClick={() => onNavigate('master-standard')}
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all hover:translate-y-px active:translate-y-0.5"
+                                >
+                                    Review & Fix Master Standards <ArrowRight size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <StatCard 
+                    icon={<Users className="w-10 h-10" />} 
+                    label="Total Users" 
+                    value={totalUsers} 
+                    description={`${adminCount} Administrator(s)`}
+                    gradient="from-blue-500 to-indigo-600"
+                    bgGradient="from-blue-50 to-indigo-50"
+                />
+                 <StatCard 
+                    icon={<Activity className="w-10 h-10" />} 
+                    label="Active Accounts" 
+                    value={activeUsers} 
+                    description="Currently enabled"
+                    gradient="from-emerald-500 to-green-600"
+                    bgGradient="from-emerald-50 to-green-50"
+                />
+                 <StatCard 
+                    icon={<PowerOff className="w-10 h-10" />} 
+                    label="Inactive Accounts" 
+                    value={inactiveUsers} 
+                    description="Disabled or suspended"
+                    gradient="from-orange-500 to-red-600"
+                    bgGradient="from-orange-50 to-red-50"
+                />
+            </div>
+
+            {/* Quick Actions Panel */}
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                <div className="px-8 py-6 bg-gradient-to-r from-gray-900 to-gray-800">
+                    <h2 className="text-2xl font-bold text-white">Administrative Actions</h2>
+                    <p className="text-gray-400 mt-1">Common tasks and configurations</p>
+                </div>
+                <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <ActionButton 
+                        color="from-blue-500 to-cyan-500" 
+                        label="Invite New User" 
+                        description="Send email invitations to staff or customers." 
+                        icon={<UserPlus className="h-8 w-8" />} 
+                        onClick={() => onNavigate('invite-users')} 
+                    />
+                    <ActionButton 
+                        color="from-purple-500 to-violet-500" 
+                        label="Manage Users" 
+                        description="View directory, toggle access, or update roles." 
+                        icon={<UserCog className="h-8 w-8" />} 
+                        onClick={() => onNavigate('users')} 
+                    />
+                    <ActionButton 
+                        color="from-pink-500 to-rose-500" 
+                        label="Master Standards" 
+                        description="Configure calibration standards and references." 
+                        icon={<Ruler className="h-8 w-8" />} 
+                        onClick={() => onNavigate('master-standard')} 
+                    />
+                    <ActionButton 
+                        color="from-teal-500 to-emerald-500" 
+                        label="Environment Ranges" 
+                        description="Set temperature and humidity limits." 
+                        icon={<Thermometer className="h-8 w-8" />} 
+                        onClick={() => onNavigate('htw-environment')} 
+                    />
+                    <ActionButton 
+                        color="from-indigo-500 to-indigo-600" 
+                        label="Laboratory Scope" 
+                        description="Manage scope of accreditation parameters." 
+                        icon={<Building2 className="h-8 w-8" />} 
+                        onClick={() => onNavigate('laboratory-scope')} 
+                    />
+                    <ActionButton 
+                        color="from-amber-500 to-orange-500" 
+                        label="Certificate Approval" 
+                        description="Approve and issue calibration certificates." 
+                        icon={<Award className="h-8 w-8" />} 
+                        onClick={() => onNavigate('certificate-approval')} 
+                    />
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN DASHBOARD COMPONENT ---
+const AdminDashboard: React.FC = () => {
+  const { user, logout } = useAuth();
+  
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeSection = searchParams.get('section') || 'dashboard';
+
+  const [users, setUsers] = useState<User[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [profileUpdateNotifications, setProfileUpdateNotifications] = useState<AdminNotificationItem[]>([]);
+  const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
+  const [profileUpdateError, setProfileUpdateError] = useState<string | null>(null);
+  const [showProfileUpdatePopup, setShowProfileUpdatePopup] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+
+  // --- EXPIRY LOGIC ---
+  const [expiredTables, setExpiredTables] = useState<string[]>([]);
+  const expiryCheckedRef = useRef(false);
+  const PROFILE_UPDATE_LAST_POPUP_SEEN_KEY = 'admin_profile_update_last_popup_seen_id';
+  const PROFILE_UPDATE_LAST_READ_KEY = 'admin_profile_update_last_read_id';
+  const latestPopupCompany = extractCompanyFromNotification(profileUpdateNotifications[0]);
+
+  const handleNavigate = (section: string) => {
+    setSearchParams({ section });
+  };
+
+  // --- CHECK CALIBRATION EXPIRY ---
+  const checkCalibrationExpiry = useCallback(async () => {
+    if (expiryCheckedRef.current) return;
+    expiryCheckedRef.current = true;
+
+    try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const response = await api.post<ExpiryCheckResponse>('/calibration/check-expiry', { 
+            reference_date: todayStr 
+        });
+
+        if (response.data) {
+            if ('affected_tables' in response.data && Array.isArray(response.data.affected_tables)) {
+                setExpiredTables(response.data.affected_tables);
+            } else if (Array.isArray(response.data)) {
+                setExpiredTables(response.data as unknown as string[]);
+            } else {
+                setExpiredTables([]);
+            }
+        } else {
+            setExpiredTables([]);
+        }
+    } catch (apiErr) {
+        console.error("Backend expiry check failed", apiErr);
+    }
+  }, []);
+
+  // --- FETCH DATA ---
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const usersRes = await api.get<UsersResponse>(ENDPOINTS.USERS.ALL_USERS);
+      setUsers(usersRes.data.users);
+      const customersRes = await api.get<Customer[]>(ENDPOINTS.PORTAL.CUSTOMERS_DROPDOWN);
+      setCustomers(customersRes.data);
+    } catch (e: unknown) {
+      console.error("Error fetching admin data:", e);
+      if (e && typeof e === 'object' && 'isAxiosError' in e) {
+        const axiosError = e as any;
+        if (axiosError.response?.status !== 401) {
+          setError(axiosError.response?.data?.detail || 'Failed to fetch admin data.');
+        }
+      } else {
+        setError('An unknown error occurred.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // --- USE EFFECTS ---
+  useEffect(() => {
+    checkCalibrationExpiry();
+  }, [checkCalibrationExpiry]);
+
+  useEffect(() => {
+    if (activeSection === 'dashboard' || activeSection === 'users' || activeSection === 'invite-users') {
+      fetchData();
+    }
+  }, [fetchData, activeSection]);
+
+  const fetchProfileUpdateNotifications = useCallback(async () => {
+    setProfileUpdateLoading(true);
+    setProfileUpdateError(null);
+    try {
+      const res = await api.get<AdminNotificationsResponse>(ENDPOINTS.NOTIFICATIONS);
+      const notifications = res.data.notifications || [];
+      setProfileUpdateNotifications(notifications);
+
+      const newestId = notifications[0]?.id;
+      const lastPopupSeenId = Number(localStorage.getItem(PROFILE_UPDATE_LAST_POPUP_SEEN_KEY) || '0');
+      if (newestId && newestId > lastPopupSeenId) {
+        setShowProfileUpdatePopup(true);
+        localStorage.setItem(PROFILE_UPDATE_LAST_POPUP_SEEN_KEY, String(newestId));
+      }
+
+      const lastReadId = Number(localStorage.getItem(PROFILE_UPDATE_LAST_READ_KEY) || '0');
+      if (activeSection === 'notifications') {
+        if (newestId) {
+          localStorage.setItem(PROFILE_UPDATE_LAST_READ_KEY, String(newestId));
+        }
+        setUnreadNotificationCount(0);
+      } else {
+        const unread = notifications.filter((n) => n.id > lastReadId).length;
+        setUnreadNotificationCount(unread);
+      }
+    } catch (err: unknown) {
+      const maybeMsg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      setProfileUpdateError(maybeMsg || 'Failed to load notifications.');
+    } finally {
+      setProfileUpdateLoading(false);
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    fetchProfileUpdateNotifications();
+    const interval = setInterval(fetchProfileUpdateNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [fetchProfileUpdateNotifications]);
+
+  useEffect(() => {
+    if (activeSection === 'notifications') {
+      setShowProfileUpdatePopup(false);
+      const newestId = profileUpdateNotifications[0]?.id;
+      if (newestId) {
+        localStorage.setItem(PROFILE_UPDATE_LAST_READ_KEY, String(newestId));
+      }
+      setUnreadNotificationCount(0);
+    }
+  }, [activeSection, profileUpdateNotifications]);
+
+  const handleToggleStatus = useCallback(async (userId: number, currentStatus: boolean) => {
+      setStatusMessage(null);
+      setUpdatingUserId(userId);
+      try {
+        const response = await api.patch<User>(ENDPOINTS.USERS.UPDATE_STATUS(userId), { is_active: !currentStatus });
+        const nextStatus = response.data.is_active ?? !currentStatus;
+        setUsers((prev) => prev.map((u) => u.user_id === userId ? { ...u, is_active: nextStatus } : u));
+        setStatusMessage({ type: 'success', text: `${response.data.full_name || 'User'} is now ${nextStatus ? 'Active' : 'Inactive'}.` });
+      } catch (e: unknown) {
+        setStatusMessage({ type: 'error', text: 'Failed to update user status.' });
+      } finally {
+        setUpdatingUserId(null);
+      }
+  }, []);
+
+  const handleLogout = () => {
+    if (logout) logout();
+  };
+
+  const userName = user?.full_name || user?.username || 'User';
+  const userRole = user?.role || 'Admin';
+
+  return (
+    <div className="flex flex-col h-screen bg-[#f8f9fc] font-sans text-gray-900 overflow-hidden">
+      <div className="flex-none w-full bg-white border-b border-gray-200 shadow-sm z-50">
+         <Header
+           username={userName}
+           role={userRole}
+           onLogout={handleLogout}
+           profilePath="/admin?section=profile"
+           notificationsPath="/admin?section=notifications"
+         />
+      </div>
+      <div className="flex flex-1 overflow-hidden relative">
+        <div className="flex-none h-full bg-white border-r border-gray-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] z-40">
+            <Sidebar 
+                isOpen={isSidebarOpen} 
+                setIsOpen={setSidebarOpen} 
+                activeSection={activeSection} 
+                setActiveSection={handleNavigate}
+                unreadNotificationCount={unreadNotificationCount}
+            />
+        </div>
+        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-white to-blue-50 relative z-0">
+            <div className="flex flex-col min-h-full">
+                <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
+                  {error && (<div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 animate-fadeIn"><AlertCircle className="w-5 h-5 mr-2" /><span>{error}</span></div>)}
+
+                  {activeSection === 'dashboard' && (
+                    loading ? <AdminSkeleton type="dashboard" /> : 
+                    <AdminDashboardHome 
+                        users={users} 
+                        onNavigate={handleNavigate} 
+                        expiredTables={expiredTables}
+                    />
+                  )}
+
+                  {activeSection === 'profile' && (
+                    <div className="animate-fadeIn w-full max-w-3xl mx-auto">
+                      <ProfilePage />
+                    </div>
+                  )}
+
+                  {activeSection === 'notifications' && (
+                    <div className="animate-fadeIn w-full max-w-4xl mx-auto">
+                      <div className="mb-6">
+                        <h2 className="text-3xl font-bold text-gray-900">Notifications</h2>
+                        <p className="text-gray-500 mt-1">Customer profile updates from the customer portal.</p>
+                      </div>
+                      {profileUpdateLoading && <div className="text-gray-500">Loading notifications...</div>}
+                      {!profileUpdateLoading && profileUpdateError && (
+                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">{profileUpdateError}</div>
+                      )}
+                      {!profileUpdateLoading && !profileUpdateError && profileUpdateNotifications.length === 0 && (
+                        <div className="p-4 bg-white border border-gray-200 rounded-xl text-gray-500">No notifications yet.</div>
+                      )}
+                      {!profileUpdateLoading && !profileUpdateError && profileUpdateNotifications.length > 0 && (
+                        <div className="space-y-3">
+                          {profileUpdateNotifications.map((n) => (
+                            <div key={n.id} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                  <h3 className="text-lg font-bold text-gray-900 break-words">{n.subject}</h3>
+                                  {n.body_text && (
+                                    <div className="mt-2">
+                                      <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
+                                        {n.body_text
+                                          .replace(/^Customer profile updated:\s*/i, "")
+                                          .split(",")
+                                          .map((item) => item.trim())
+                                          .filter(Boolean)
+                                          .map((item, idx) => (
+                                            <li key={idx}>{item}</li>
+                                          ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  <div className="mt-4">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleNavigate('users')}
+                                      className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                                    >
+                                      Go to User Management
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                  <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-100">
+                                    {n.status}
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-2">
+                                    {new Date(n.created_at).toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeSection === 'invite-users' && (
+                    <div className="animate-fadeIn">
+                       <InviteUsersSection existingCustomers={customers} />
+                    </div>
+                  )}
+
+                  {activeSection === 'users' && (
+                    loading ? <AdminSkeleton type="users" /> : (
+                      <div className="animate-fadeIn h-full flex flex-col">
+                        <div className="mb-6">
+                          <h2 className="text-3xl font-bold text-gray-900">User Management</h2>
+                          <p className="text-gray-500 mt-1">View and manage all registered system users.</p>
+                        </div>
+                        <div className="flex-1 min-h-0">
+                          {statusMessage && (
+                              <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-medium flex items-center shadow-sm ${statusMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                              <Info size={16} className="mr-2"/>{statusMessage.text}
+                              </div>
+                          )}
+                          <UserManagementSystem 
+                              users={users} 
+                              updatingUserId={updatingUserId} 
+                              onToggleStatus={handleToggleStatus}
+                              onRefreshData={fetchData} 
+                          />
+                        </div>
+                      </div>
+                    )
+                  )}
+
+                  {activeSection === 'certificate-approval' && (
+                    <div className="animate-slideUp">
+                      <CertificateApprovalModule />
+                    </div>
+                  )}
+
+                  {activeSection === 'master-standard' && <div className="animate-slideUp"><MasterStandardModule /></div>}
+
+                  {activeSection === 'htw-environment' && (
+                    <div className="animate-slideUp">
+                      <HTWEnvironmentManager onBack={() => handleNavigate('dashboard')} />
+                    </div>
+                  )}
+
+                  {activeSection === 'laboratory-scope' && (
+                    <div className="animate-slideUp">
+                      <LabScopeModule onBack={() => handleNavigate('dashboard')} />
+                    </div>
+                  )}
+
+                  {activeSection === 'settings' && (
+                    <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400 animate-fadeIn">
+                      <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6"><Settings size={40} className="text-gray-400" /></div>
+                      <h2 className="text-2xl font-semibold text-gray-300">Settings Configuration</h2>
+                      <p className="text-gray-500 mt-2">Global system settings functionality is coming soon.</p>
+                    </div>
+                  )}
+                </div>
+                
+                <footer className="w-full bg-white border-t border-gray-200 mt-auto">
+                    <Footer />
+                </footer>
+            </div>
+        </main>
+      </div>
+      {showProfileUpdatePopup && (
+        <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md p-6">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-6 w-6 text-red-600 mt-1 flex-shrink-0" />
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">New Customer Profile Update</h3>
+                <p className="text-gray-600 mt-2 text-sm">
+                  {latestPopupCompany ? (
+                    <>
+                      <span className="font-semibold text-gray-900">{latestPopupCompany}</span> updated customer profile details. Open Notifications to review the changes.
+                    </>
+                  ) : (
+                    'A customer updated their profile details. Open Notifications to review the changes.'
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowProfileUpdatePopup(false)}
+                className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowProfileUpdatePopup(false);
+                  handleNavigate('notifications');
+                }}
+                className="inline-flex items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700"
+              >
+                View Notifications
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminDashboard;

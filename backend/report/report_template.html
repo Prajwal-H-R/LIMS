@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4e73df 0%, #1c3faa 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            letter-spacing: 1px;
+        }
+
+        .header p {
+            margin-top: 8px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .meta-info {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #555;
+        }
+
+        .date-range {
+            background-color: #f8f9fa;
+            border-left: 4px solid #4e73df;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 25px;
+            font-weight: bold;
+        }
+
+        .summary-box {
+            background-color: #eef3ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .summary-box h3 {
+            margin-top: 0;
+            color: #1c3faa;
+        }
+
+        .section-title {
+            margin-top: 40px;
+            margin-bottom: 15px;
+            color: #333;
+            border-left: 4px solid #4e73df;
+            padding-left: 10px;
+            font-size: 18px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        th,
+        td {
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #4e73df;
+            color: white;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .total-row {
+            font-weight: bold;
+            background-color: #f2f2f2;
+        }
+
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 13px;
+            border-top: 1px solid #dee2e6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+
+        <div class="header">
+            <h1>{{ title }}</h1>
+            <p>Yatharthata LIMS Usage & System Activity Summary</p>
+        </div>
+
+        <div class="content">
+
+            <div class="meta-info">
+                <strong>Generated On:</strong> {{ generated_on }}
+            </div>
+
+            <div class="date-range">
+                Report Period: {{ from_date }} → {{ to_date }}
+            </div>
+
+            <div class="summary-box">
+                <h3>Activity Overview</h3>
+                <p>
+                    This report provides system activity statistics including inward processing,
+                    SRFs, job execution status, and license extension audit records.
+                </p>
+            </div>
+
+            {% for table, table_data in status_data.items() %}
+
+            <h2 class="section-title">
+                {{ table.replace("_", " ").upper() }}
+            </h2>
+
+            <table>
+                <tr>
+                    <th>Status</th>
+                    <th>Count</th>
+                </tr>
+
+                {% for status, count in table_data.statuses.items() %}
+                <tr>
+                    <td>{{ status }}</td>
+                    <td>{{ count }}</td>
+                </tr>
+                {% endfor %}
+
+                <tr class="total-row">
+                    <td>Total</td>
+                    <td>{{ table_data.total }}</td>
+                </tr>
+            </table>
+
+            {% endfor %}
+
+            <h2 class="section-title">License Audit History</h2>
+
+            <table>
+                <tr>
+                    <th>Old Valid Until</th>
+                    <th>New Valid Until</th>
+                    <th>Extended By</th>
+                    <th>Extended At</th>
+                </tr>
+
+                {% for row in audit %}
+                <tr>
+                    <td>{{ row[0] }}</td>
+                    <td>{{ row[1] }}</td>
+                    <td>{{ row[2] }}</td>
+                    <td>{{ row[3] }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+
+        </div>
+
+        <div class="footer">
+            <p>This is an automated report generated by the Yatharthata LIMS System.</p>
+            <p>Please do not reply to this email. Contact system administrator for assistance.</p>
+            <p><small>© 2026 Yatharthata LIMS Services</small></p>
+        </div>
+
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,744 @@
+{% extends "certificate/base_template.html" %}
+
+{% block content %}
+<!-- PAGE 1 -->
+<div class="page">
+    <div class="header">
+        <div class="header-top">
+            <div class="logo-left">
+                <!-- Logo placeholder - left -->
+                {% if logo_left %}
+                <img src="{{ logo_left }}" alt="Logo Left"
+                    style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; background: transparent;">
+                {% else %}
+                <img src="logo_left.png" alt="Logo Left"
+                    style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; background: transparent;">
+                {% endif %}
+            </div>
+            <div class="logo-right">
+                {% if logo_right %}
+                <img src="{{ logo_right }}" alt="Logo Right" class="logo-right-img">
+                {% else %}
+                <img src="logo_right.png" alt="Logo Right" class="logo-right-img">
+                {% endif %}
+                <div class="logo-right-text">{{ lab_unique_number or '' }}</div>
+            </div>
+        </div>
+        <div class="header-bottom">
+            <div class="certificate-title">CALIBRATION CERTIFICATE</div>
+        </div>
+    </div>
+
+    <div class="content-wrapper">
+        <div class="page-number">Page 1 of 3</div>
+
+        <table class="outer-border-only" style="border: 1px solid #000;">
+            <tr>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Certificate No</td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ certificate_no }}</td>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Date of Calibration
+                </td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ calibration_date }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">NEPL ID</td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ nepl_id }}</td>
+                <td class="label-cell"
+                    style="border: none; text-align: right; padding-right: 4px; white-space: nowrap;">
+                    Recommended Cal Due Date
+                </td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ cal_due_date }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">ULR No.</td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ ulr_no }}</td>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Date Of Issue:</td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ issue_date }}</td>
+            </tr>
+        </table>
+
+        <table class="outer-border-only">
+            <tr>
+                <td style="text-align: left; padding: 3px 5px;">
+                    <strong>Field of Parameter :</strong> {{ field_of_parameter }}
+                </td>
+            </tr>
+        </table>
+
+        <table style="table-layout: fixed;">
+            <colgroup>
+                <col style="width: 50%;">
+                <col style="width: 18%;">
+                <col style="width: 1%;">
+                <col style="width: 31%;">
+            </colgroup>
+            <tr>
+                <td class="label-cell">Customer Name & Address :</td>
+                <td class="label-cell" colspan="3">Customer Reference:</td>
+            </tr>
+            <tr>
+                <td class="value-cell" rowspan="4">{{ customer_name }}<br>{{ customer_address }}</td>
+                <td class="label-cell">Reference DC No</td>
+                <td class="colon-cell">:</td>
+                <td class="value-cell">{{ reference_dc_no }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Reference No Date</td>
+                <td class="colon-cell">:</td>
+                <td class="value-cell">{{ reference_no_date }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Date of Receipt</td>
+                <td class="colon-cell">:</td>
+                <td class="value-cell">{{ receipt_date }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Status of item on Receipt</td>
+                <td class="colon-cell">:</td>
+                <td class="value-cell">{{ item_status }}</td>
+            </tr>
+        </table>
+
+        <table class="device-under-calibration"
+            style="width: 100%; border-collapse: collapse; border: 1px solid #000; table-layout: fixed;">
+            <colgroup>
+                <col style="width: 18%;">
+                <col style="width: 1%;">
+                <col style="width: 31%;">
+                <col style="width: 18%;">
+                <col style="width: 1%;">
+                <col style="width: 12%;">
+                <col style="width: 19%;">
+            </colgroup>
+            <thead>
+                <tr>
+                    <!-- Colspan is 7 because the last column is effectively split into two for the resolution row -->
+                    <th colspan="7" style="border: 1px solid #000; text-align: left; padding: 5px;">Device Under
+                        Calibration :</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- ROW 1 -->
+                <tr>
+                    <td class="label-cell">Nomenclature</td>
+                    <td class="colon-cell">:</td>
+                    <td class="value-cell">{{ device_nomenclature }}</td>
+                    <td class="label-cell">Units of measurement</td>
+                    <td class="colon-cell">:</td>
+                    <!-- colspan="2" to span across the split resolution columns below -->
+                    <td class="value-cell" colspan="2">{{ units_of_measurement }}</td>
+                </tr>
+
+                <!-- ROW 2 -->
+                <tr>
+                    <td class="label-cell">Make/Model</td>
+                    <td class="colon-cell">:</td>
+                    <td class="value-cell">{{ device_make_model }}</td>
+                    <td class="label-cell">Calibration Mode</td>
+                    <td class="colon-cell">:</td>
+                    <!-- colspan="2" -->
+                    <td class="value-cell" colspan="2">{{ calibration_mode }}</td>
+                </tr>
+
+                <!-- ROW 3 -->
+                <tr>
+                    <td class="label-cell">Type/Classification</td>
+                    <td class="colon-cell">:</td>
+                    <td class="value-cell" style="padding: 0;">
+                        <div class="typeclass-split">
+                            <div class="typeclass-left">{{ device_type }}</div>
+                            <div class="typeclass-right">{{ device_classification }}</div>
+                        </div>
+                    </td>
+                    <td class="label-cell">Place of Calibration</td>
+                    <td class="colon-cell">:</td>
+                    <td class="value-cell" colspan="2">{{ place_of_calibration }}</td>
+                </tr>
+
+                <!-- ROW 4: SI NO + RESOLUTION START -->
+                <tr>
+                    <td class="label-cell">SI No</td>
+                    <td class="colon-cell">:</td>
+                    <td class="value-cell">{{ si_no }}</td>
+
+                    <!-- Resolution Label (Spans 2 rows) -->
+                    <td class="label-cell" rowspan="2" style="vertical-align: middle;">Resolution of the pressure gauge
+                    </td>
+                    <!-- Resolution Colon (Spans 2 rows) -->
+                    <td class="colon-cell" rowspan="2" style="vertical-align: middle;">:</td>
+
+                    <!-- SPLIT VALUE CELL 1: The Number (Spans 2 rows) -->
+                    <td class="value-cell" rowspan="2" style="vertical-align: middle; border-right: 1px solid #000;">
+                        {{ pressure_gauge_resolution }}
+                    </td>
+
+                    <!-- SPLIT VALUE CELL 2: The Unit (Spans 2 rows) -->
+                    <td class="value-cell" rowspan="2" style="vertical-align: middle;">
+                        {{ pressure_gauge_unit }}
+                    </td>
+                </tr>
+
+                <!-- ROW 5: TORQUE RANGE (Resolution cells from above span down here) -->
+                <tr>
+                    <td class="label-cell">Torque Range</td>
+                    <td class="colon-cell">:</td>
+                    <td class="value-cell">{{ torque_range }}</td>
+                    <!-- No cells here for the right side because the rows above are spanning down -->
+                </tr>
+            </tbody>
+        </table>
+
+        <div style="margin: 5px 0 10px 0; white-space: nowrap; font-size: 7pt; border: 1px solid #000; padding: 5px;">
+            <strong>Calibration Procedure :</strong> Done as per NEPL Ref: CP .No 02 in accordance with ISO/IEC
+            :17025:2017, ISO :6789-1 & 2:2017
+        </div>
+
+        {% set has_standard3 = (standard3_nomenclature or standard3_manufacturer or standard3_model or
+        standard3_uncertainty or standard3_cert_no or standard3_valid_upto or standard3_traceability) %}
+        <table style="table-layout: fixed; width: 100%;">
+            {% if has_standard3 %}
+            <colgroup>
+                <col style="width: 25%;">
+                <col style="width: 25%;">
+                <col style="width: 25%;">
+                <col style="width: 25%;">
+            </colgroup>
+            {% else %}
+            <colgroup>
+                <col style="width: 25%;">
+                <col style="width: 37.5%;">
+                <col style="width: 37.5%;">
+            </colgroup>
+            {% endif %}
+            <thead>
+                <tr>
+                    <th>Reference Standard Details</th>
+                    <th style="text-align: center;">Standard 1</th>
+                    <th style="text-align: center;">Standard 2</th>
+                    {% if has_standard3 %}
+                    <th style="text-align: center;">Standard 3</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="label-cell">Nomenclature</td>
+                    <td style="text-align: left;">{{ standard1_nomenclature }}</td>
+                    <td style="text-align: left;">{{ standard2_nomenclature }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_nomenclature }}</td>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <td class="label-cell">Manufacturer</td>
+                    <td style="text-align: left;">{{ standard1_manufacturer }}</td>
+                    <td style="text-align: left;">{{ standard2_manufacturer }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_manufacturer }}</td>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <td class="label-cell">Model/serial No</td>
+                    <td style="text-align: left;">{{ standard1_model }}</td>
+                    <td style="text-align: left;">{{ standard2_model }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_model }}</td>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <td class="label-cell">Uncertainty</td>
+                    <td style="text-align: left;">{{ standard1_uncertainty }}</td>
+                    <td style="text-align: left;">{{ standard2_uncertainty }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_uncertainty }}</td>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <td class="label-cell">Certificate No</td>
+                    <td style="text-align: left;">{{ standard1_cert_no }}</td>
+                    <td style="text-align: left;">{{ standard2_cert_no }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_cert_no }}</td>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <td class="label-cell">Calibration Valid Upto</td>
+                    <td style="text-align: left;">{{ standard1_valid_upto }}</td>
+                    <td style="text-align: left;">{{ standard2_valid_upto }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_valid_upto }}</td>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <td class="label-cell">Traceability</td>
+                    <td style="text-align: left;">{{ standard1_traceability }}</td>
+                    <td style="text-align: left;">{{ standard2_traceability }}</td>
+                    {% if has_standard3 %}
+                    <td style="text-align: left;">{{ standard3_traceability }}</td>
+                    {% endif %}
+                </tr>
+            </tbody>
+        </table>
+
+        <table style="margin-top: 5px;">
+            <tr>
+                <td class="label-cell">Environmental condition:</td>
+                <td class="label-cell" style="text-align: center;">Temp</td>
+                <td class="value-cell" style="text-align: center;">{{ temperature }} °C</td>
+                <td class="label-cell" style="text-align: center;">Humidity</td>
+                <td class="value-cell" style="text-align: center;">{{ humidity }}%</td>
+            </tr>
+        </table>
+
+        <!-- SIGNATURE BLOCK START -->
+        <div style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between;">
+            <div style="width: 175px; text-align: center; margin-left: 8px;">
+                <div style="margin-bottom: 3px;"><strong>Checked By</strong></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="margin-top: 3px;"><strong>Calibration Engineer</strong></div>
+            </div>
+            <div style="width: 200px; text-align: center; margin-right: 55px;">
+                <div style="margin-bottom: 3px;"><strong>Authorised Signatory</strong></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="margin-top: 3px;"><strong>{{ authorised_signatory or 'Ramesh Ramakrishna' }}</strong></div>
+            </div>
+        </div>
+        <!-- SIGNATURE BLOCK END -->
+
+
+        <div class="notes">
+            <ul>
+                <li>All Calibrations are traceable to National/International standards as required in ISO/IEC 17025</li>
+                <pre><li>This Certificate refers only to the item calibrated and shall not be reproduced except in full,without approval of the Laboratory,<br>   Nextage Engineering Pvt Ltd. Bangalore - 560043.</li></pre>
+
+                <li>Results reported are valid at the time of and under the stated conditions of measurement.</li>
+                <li>Conformity Statement is given only when requested by the customer as per the Decision Rule applied.
+                </li>
+            </ul>
+            <div class="qr-code">
+                {% if qr_code %}
+                <img src="{{ qr_code }}" alt="QR Code" style="max-width: 100%; max-height: 100%;">
+                {% else %}
+                <img src="htw_qr_code_certificate.png" alt="QR Code" style="max-width: 100%; max-height: 100%;">
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="footer-company">NEXTAGE ENGINEERING PRIVATE LIMITED</div>
+        <div class="footer-address">GF-01, Emerald Icon, #104, 5BC, III Block, HRBR Layout, Kalyan Nagar, Bangalore -
+            560043</div>
+        <div class="footer-contact">Ph: 9606957683/84, E-mail: next.info@nextelengg.com Web: www.nextelengg.com CIN No.
+            U29100KA2019PTC127799</div>
+    </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+    <div class="header">
+        <div class="header-top">
+            <div class="logo-left">
+                <!-- Logo placeholder - left -->
+                {% if logo_left %}
+                <img src="{{ logo_left }}" alt="Logo Left"
+                    style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; background: transparent;">
+                {% else %}
+                <img src="logo_left.png" alt="Logo Left"
+                    style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; background: transparent;">
+                {% endif %}
+            </div>
+            <div class="logo-right">
+                {% if logo_right %}
+                <img src="{{ logo_right }}" alt="Logo Right" class="logo-right-img">
+                {% else %}
+                <img src="logo_right.png" alt="Logo Right" class="logo-right-img">
+                {% endif %}
+                <div class="logo-right-text">{{ lab_unique_number or '' }}</div>
+            </div>
+        </div>
+        <div class="header-bottom">
+            <div class="certificate-title">CALIBRATION CERTIFICATE</div>
+        </div>
+    </div>
+
+    <div class="content-wrapper">
+        <div class="page-number">Page 2 of 3</div>
+
+        <table class="outer-border-only" style="border: 1px solid #000;">
+            <tr>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Certificate No</td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ certificate_no }}</td>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Date of Calibration
+                </td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ calibration_date }}</td>
+            </tr>
+        </table>
+
+        <div style="text-align: center; font-weight: bold; font-size: 10pt; margin: 8px 0 5px 0;">Calibration Result
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="7" style="text-align: left; font-size: 9pt;">A. Repeatability</th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">Set Pressure</th>
+                    <th style="text-align: center;">Target Value <br>X<sub>a</sub></th>
+                    <th style="text-align: center;">Reference Value <br> X<sub>r</sub></th>
+                    <th style="text-align: center;">Measurement error <br> a<sub>s</sub> = X<sub>a</sub> - X<sub>r</sub></th>
+                    <th style="text-align: center;">Relative Measurement error <br> a<sub>s</sub></th>
+                    <th colspan="2" style="text-align: center;">Repeatability error <br> b<sub>re</sub></th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">bar</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for repeat in repeatability_data %}
+                {% set row_count = repeat.readings|length %}
+                <tr>
+                    <td rowspan="{{ row_count }}">{{ repeat.pressure }}</td>
+                    <td rowspan="{{ row_count }}">{{ repeat.target }}</td>
+                    <td>{{ repeat.readings[0] }}</td>
+                    <td>{{ repeat.readings[0] - repeat.target }}</td>
+                    <td>{{ ((repeat.readings[0] - repeat.target) / repeat.target * 100)|round(2) }}</td>
+                    <td rowspan="{{ row_count }}">{{ repeat.repeatability }}</td>
+                    <td rowspan="{{ row_count }}">{{ repeat.repeatability_pct }}</td>
+                </tr>
+                {% for reading in repeat.readings[1:] %}
+                <tr>
+                    <td>{{ reading }}</td>
+                    <td>{{ reading - repeat.target }}</td>
+                    <td>{{ ((reading - repeat.target) / repeat.target * 100)|round(2) }}</td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="7" style="text-align: left; font-size: 9pt;">B. Reproducability</th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">Target Value <br>X<sub>a</sub></th>
+                    <th style="text-align: center;">Series-1 <br></br> Mean Value</th>
+                    <th style="text-align: center;">Series-2 <br></br> Mean Value</th>
+                    <th style="text-align: center;">Series-3 <br></br> Mean Value</th>
+                    <th style="text-align: center;">Series-4 <br></br> Mean Value</th>
+                    <th colspan="2" style="text-align: center;">Reproducability error <br>b<sub>rep</sub></th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in {{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for reprod in reproducability_data %}
+                <tr>
+                    <td>{{ reprod.target }}</td>
+                    <td>{{ reprod.series1 }}</td>
+                    <td>{{ reprod.series2 }}</td>
+                    <td>{{ reprod.series3 }}</td>
+                    <td>{{ reprod.series4 }}</td>
+                    <td>{{ reprod.error }}</td>
+                    <td>{{ reprod.error_pct }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="7" style="text-align: left; font-size: 9pt;">C. Geometric effect of the output drive of
+                        the torque tool</th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">Target Value <br>X<sub>a</sub></th>
+                    <th style="text-align: center;">Position 0° <br></br> Mean Value</th>
+                    <th style="text-align: center;">Position 90° <br></br> Mean Value</th>
+                    <th style="text-align: center;">Position 180° <br></br> Mean Value</th>
+                    <th style="text-align: center;">Position 270° <br></br> Mean Value</th>
+                    <th colspan="2" style="text-align: center;">Error due to output drive <br>b<sub>od</sub></th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in {{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for geo in geometric_data %}
+                <tr>
+                    <td>{{ geo.target }}</td>
+                    <td>{{ geo.pos0 }}</td>
+                    <td>{{ geo.pos90 }}</td>
+                    <td>{{ geo.pos180 }}</td>
+                    <td>{{ geo.pos270 }}</td>
+                    <td>{{ geo.error }}</td>
+                    <td>{{ geo.error_pct }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- SIGNATURE BLOCK START -->
+        <div style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between;">
+            <div style="width: 150px; text-align: center; margin-left: 8px;">
+                <div style="margin-bottom: 3px;"><strong>Checked By</strong></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="margin-top: 3px;"><strong>Calibration Engineer</strong></div>
+            </div>
+            <div style="width: 220px; text-align: center; margin-right: 30px;">
+                <div style="margin-bottom: 3px;"><strong>Authorised Signatory</strong></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="margin-top: 3px;"><strong>{{ authorised_signatory or 'Ramesh Ramakrishna' }}</strong></div>
+            </div>
+        </div>
+        <!-- SIGNATURE BLOCK END -->
+    </div>
+
+    <div class="footer">
+        <div class="footer-company">NEXTAGE ENGINEERING PRIVATE LIMITED</div>
+        <div class="footer-address">GF-01, Emerald Icon, #104, 5BC, III Block, HRBR Layout, Kalyan Nagar, Bangalore -
+            560043</div>
+        <div class="footer-contact">Ph: 9606957683/84, E-mail: next.info@nextelengg.com Web: www.nextelengg.com CIN No.
+            U29100KA2019PTC127799</div>
+    </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+    <div class="header">
+        <div class="header-top">
+            <div class="logo-left">
+                <!-- Logo placeholder - left -->
+                {% if logo_left %}
+                <img src="{{ logo_left }}" alt="Logo Left"
+                    style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; background: transparent;">
+                {% else %}
+                <img src="logo_left.png" alt="Logo Left"
+                    style="max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; background: transparent;">
+                {% endif %}
+            </div>
+            <div class="logo-right">
+                {% if logo_right %}
+                <img src="{{ logo_right }}" alt="Logo Right" class="logo-right-img">
+                {% else %}
+                <img src="logo_right.png" alt="Logo Right" class="logo-right-img">
+                {% endif %}
+                <div class="logo-right-text">{{ lab_unique_number or '' }}</div>
+            </div>
+        </div>
+        <div class="header-bottom">
+            <div class="certificate-title">CALIBRATION CERTIFICATE</div>
+        </div>
+    </div>
+
+    <div class="content-wrapper">
+        <div class="page-number">Page 3 of 3</div>
+
+        <table class="outer-border-only" style="border: 1px solid #000;">
+            <tr>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Certificate No</td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ certificate_no }}</td>
+                <td class="label-cell" style="border: none; text-align: right; padding-right: 4px;">Date of Calibration
+                </td>
+                <td class="colon-cell" style="border: none;">:</td>
+                <td class="value-cell" style="border: none;">{{ calibration_date }}</td>
+            </tr>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="7" style="text-align: left; font-size: 9pt;">D. Variation of interface between the tool
+                        and the calibration system</th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">Target Value <br>X<sub>a</sub></th>
+                    <th style="text-align: center;">Series-1 <br></br> Mean Value</th>
+                    <th style="text-align: center;">Series-2 <br></br> Mean Value</th>
+                    <th style="text-align: center;">Series-3 <br></br> Mean Value</th>
+                    <th style="text-align: center;">Series-4 <br></br> Mean Value</th>
+                    <th colspan="2" style="text-align: center;">Error due to Interface <br>b<sub>int</sub></th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in {{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for interface in interface_data %}
+                <tr>
+                    <td>{{ interface.target }}</td>
+                    <td>{{ interface.series1 }}</td>
+                    <td>{{ interface.series2 }}</td>
+                    <td>{{ interface.series3 }}</td>
+                    <td>{{ interface.series4 }}</td>
+                    <td>{{ interface.error }}</td>
+                    <td>{{ interface.error_pct }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="5" style="text-align: left; font-size: 9pt;">E. Variation due to Loading point</th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">SET TORQUE</th>
+                    <th rowspan="2" style="text-align: center;">POSITION</th>
+                    <th style="text-align: center;">Mean Value</th>
+                    <th colspan="2" style="text-align: center;">Error due to Loading point <br>b<sub>l</sub></th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in {{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for loading in loading_data %}
+                <tr>
+                    <td rowspan="2">{{ loading.torque }}</td>
+                    <td>Position 1 <br></br> ({{ loading.position1 }})</td>
+                    <td>{{ loading.mean1 }}</td>
+                    <td rowspan="2">{{ loading.error }}</td>
+                    <td rowspan="2">{{ loading.error_pct }}</td>
+                </tr>
+                <tr>
+                    <td>Position 2 <br></br> ({{ loading.position2 }})</td>
+                    <td>{{ loading.mean2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="{{ 8 if show_statement_of_conformity_columns else 6 }}" style="text-align: left; font-size: 9pt;">F. Measurement Uncertainties</th>
+                </tr>
+                <tr>
+                    <th style="text-align: center;">Calibration <br>Value <br>X<sub>a</sub></th>
+                    <th style="text-align: center;">Average <br> Value of <br>X<sub>a</sub></th>
+                    <th style="text-align: center;">Mean Value of the error</th>
+                    <th style="text-align: center;">Relative <br>expanded <br> measurement <br>uncertainty W</th>
+                    <th style="text-align: center;">Max. value of <br> the calibration <br>device <br> measurement <br> error</th>
+                    <th style="text-align: center;">Relative measurement <br>uncertainty interval <br>W'</th>
+                    {% if show_statement_of_conformity_columns %}
+                    <th style="text-align: center;">Permissible devation as per ISO 6789</th>
+                    <th style="text-align: center;">Results</th>
+                    {% endif %}
+                </tr>
+                <tr>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">{{ torque_unit }}</th>
+                    <th style="text-align: center;">in %</th>
+                    <th style="text-align: center;">in %</th>
+                    <th style="text-align: center;">in %</th>
+                    <th style="text-align: center;">in %</th>
+                    {% if show_statement_of_conformity_columns %}
+                    <th style="text-align: center;">in %</th>
+                    <th style="text-align: center;"></th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for uncertainty in uncertainty_data %}
+                <tr>
+                    <td>{{ uncertainty.calibration }}</td>
+                    <td>{{ uncertainty.average }}</td>
+                    <td>{{ uncertainty.error_pct }}</td>
+                    <td>{{ uncertainty.uncertainty_w }}</td>
+                    <td>{{ uncertainty.max_error }}</td>
+                    <td>{{ uncertainty.uncertainty_w_prime }}</td>
+                    {% if show_statement_of_conformity_columns %}
+                    <td>{{ uncertainty.permissible_deviation_iso_6789 }}</td>
+                    <td>{{ uncertainty.result }}</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div
+            style="text-align: center; margin-top: 15px; font-size: 8pt; border: 1px solid #000; padding: 8px; background-color: white;">
+            The Estimated Uncertainty of Measurement associated with the results is calculated at a confidence level of 95% <br>approximately with a coverage factor k={{ coverage_factor_k | default(2) }}
+        </div>
+
+        <!-- SIGNATURE BLOCK START -->
+        <div style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between;">
+            <div style="width: 175px; text-align: center; margin-left: 8px;">
+                <div style="margin-bottom: 3px;"><strong>Checked By</strong></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="margin-top: 3px;"><strong>Calibration Engineer</strong></div>
+            </div>
+            <div style="width: 200px; text-align: center; margin-right: 55px;">
+                <div style="margin-bottom: 3px;"><strong>Authorised Signatory</strong></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="height: 25px; margin-bottom: 3px;"></div>
+                <div style="margin-top: 3px;"><strong>{{ authorised_signatory or 'Ramesh Ramakrishna' }}</strong></div>
+            </div>
+        </div>
+        <!-- SIGNATURE BLOCK END -->
+
+        <div style="text-align: center; margin-top: 30px; font-weight: bold;">
+            *** END OF CERTIFICATE ***
+        </div>
+
+    </div>
+
+        <div class="footer">
+            <div class="footer-company">NEXTAGE ENGINEERING PRIVATE LIMITED</div>
+            <div class="footer-address">GF-01, Emerald Icon, #104, 5BC, III Block, HRBR Layout, Kalyan Nagar, Bangalore
+                -
+                560043</div>
+            <div class="footer-contact">Ph: 9606957683/84, E-mail: next.info@nextelengg.com Web: www.nextelengg.com CIN
+                No.
+                U29100KA2019PTC127799</div>
+        </div>
+    </div>
+    {% endblock %}

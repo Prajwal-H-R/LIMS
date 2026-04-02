@@ -1,0 +1,57 @@
+from typing import List, TYPE_CHECKING
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship, Mapped
+
+from backend.db import Base
+
+if TYPE_CHECKING:
+    from .inward import Inward
+    from .srf_equipments import SrfEquipment
+    # ✅ ADDED: Import HTWJob for type checking
+    from .htw_job import HTWJob
+
+class InwardEquipment(Base):
+    __tablename__ = "inward_equipments"
+
+    inward_eqp_id = Column(Integer, primary_key=True)
+    inward_id = Column(Integer, ForeignKey("inward.inward_id", ondelete="CASCADE"))
+
+    nepl_id = Column(String(100), unique=True, nullable=False, index=True)
+    material_description = Column(String(500))
+    make = Column(String(255))
+    model = Column(String(255))
+    range = Column(String(255))
+    unit = Column(String(50))
+    status = Column(String(50), default='pending')
+    serial_no = Column(String(255))
+    quantity = Column(Integer, default=1, nullable=False)
+    visual_inspection_notes = Column(Text)
+    photos = Column(JSONB)
+    calibration_by = Column(String(50))
+    supplier = Column(String(255))
+    out_dc = Column(String(255))
+    in_dc = Column(String(255))
+    nextage_contract_reference = Column(String(255))
+    
+    accessories_included = Column(Text)
+    qr_code = Column(Text)
+    barcode = Column(Text)
+
+    engineer_remarks = Column(String(255))
+    customer_remarks = Column(String(255))
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True))
+
+    # --- Relationships ---
+    inward: Mapped["Inward"] = relationship("Inward", back_populates="equipments")
+    srf_equipment: Mapped["SrfEquipment"] = relationship(
+        "SrfEquipment",
+        back_populates="inward_equipment",
+        uselist=False
+    )
+
+    # ✅ ADDED: Relationship to HTWJob
+    # This matches 'equipment_rel' defined in htw_job.py
+    jobs: Mapped[List["HTWJob"]] = relationship("HTWJob", back_populates="equipment_rel")
