@@ -93,13 +93,19 @@ async def send_email_with_logging(
     db: Session = None,
     recipient_user_id: int = None,
     inward_id: int = None,
-    created_by: str = "system"
+    created_by: str = "system",
+    body_text_override: Optional[str] = None   # ✅ ADD THIS
 ):
     """Send email with comprehensive logging to notifications table."""
     notification_id = None
-
+ 
     if db:
-        body_text = f"Template: {template_name}, Data: {str(template_body)}"
+        body_text = (
+    body_text_override
+    if body_text_override
+    else f"Template: {template_name}, Data: {str(template_body)}"
+)
+ 
 
         notification_id = log_notification_to_db(
             db=db,
@@ -109,7 +115,7 @@ async def send_email_with_logging(
             status="pending",
             recipient_user_id=recipient_user_id,
             inward_id=inward_id,
-            created_by=created_by
+            created_by=created_by,
         )
 
     template_path = conf.TEMPLATE_FOLDER / template_name

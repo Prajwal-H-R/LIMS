@@ -12,8 +12,8 @@ class LabScope(Base):
     accreditation_standard = Column(String(255), nullable=True)
     lab_unique_number = Column(String(100), nullable=True)
     # Map API/model attribute names to existing DB column names.
-    valid_from = Column("validity_from", Date, nullable=True)
-    valid_upto = Column("validity_upto", Date, nullable=True)
+    valid_from = Column(Date, nullable=True)
+    valid_upto = Column(Date, nullable=True)
     is_active = Column(Boolean, default=False)
     document_data = Column(LargeBinary, nullable=True)
     document_filename = Column(String(255), nullable=True)
