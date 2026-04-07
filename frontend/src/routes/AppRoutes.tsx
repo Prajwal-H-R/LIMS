@@ -12,6 +12,7 @@ import AdminDashboard from '../pages/AdminDashboard';
 import EngineerPortal from '../pages/EngineerPortal';
 import CustomerPortal from '../pages/CustomerPortal';
 import { CustomerRemarksPortal } from '../components/CustomerRemarksPortal';
+import { CertificateQrPublicView } from '../components/CertificateQrPublicView';
 
 
 const RootRedirect = () => {
@@ -89,6 +90,7 @@ const AppRoutes = () => {
       
       {/* --- NEW: Direct access route for inspection reports --- */}
       <Route path="/report/inward/:inwardId" element={<DirectInwardAccess />} />
+      <Route path="/certificate-qr/:certificateId" element={<CertificateQrPublicView />} />
       
       {/* --- Protected Routes --- */}
       <Route 

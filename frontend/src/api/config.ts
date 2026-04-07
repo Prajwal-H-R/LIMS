@@ -242,6 +242,10 @@ export const ENDPOINTS = {
     PREVIEW: (id: number) => `/certificates/${id}/preview`,
     DOWNLOAD_PDF: (id: number) => `/certificates/${id}/download-pdf`,
     DOWNLOAD_BULK_PDF: `/certificates/download-bulk-pdf`,
+    GENERATE_QR: (id: number) => `/certificates/${id}/qr/generate`,
+    GENERATE_QR_BULK: `/certificates/qr/generate-bulk`,
+    VIEW_BY_QR: (token: string) => `/certificates/qr/${token}`,
+    VIEW_BY_QR_CERT: (id: number) => `/certificates/qr/certificate/${id}`,
     JOB_PREVIEW: (jobId: number) => `/certificates/jobs/${jobId}/preview-data`,
   },
 } as const;

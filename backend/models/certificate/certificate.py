@@ -10,7 +10,7 @@ from backend.db import Base
 
 
 class HTWCertificate(Base):
-    __tablename__ = "certificate"
+    __tablename__ = "htw_certificate"
 
     certificate_id = Column(Integer, primary_key=True, autoincrement=True)
     job_id = Column(Integer, ForeignKey("htw_job.job_id", ondelete="CASCADE"), nullable=False)
@@ -38,5 +38,8 @@ class HTWCertificate(Base):
     approved_by = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(TIMESTAMP(timezone=True), nullable=True)
     issued_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    qr_token = Column(String(128), nullable=True, unique=True, index=True)
+    qr_image_base64 = Column(Text, nullable=True)
+    qr_generated_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     job_rel = relationship("HTWJob", backref="certificates")

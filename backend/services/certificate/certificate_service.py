@@ -2,6 +2,8 @@
  
 from datetime import date, datetime, timedelta
 from typing import Optional, Dict, Any, List
+import secrets
+from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
  
@@ -9,7 +11,6 @@ from backend.models.certificate.certificate import HTWCertificate
 from backend.services.certificate.certificate_assets_helper import get_certificate_asset_urls
 from backend.models.htw.htw_job import HTWJob
 from backend.models.htw.htw_job_standard_snapshot import HTWJobStandardSnapshot
-from backend.models.lab_scope import LabScope
 from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 from backend.models.htw.htw_uncertainty_budget import HTWUncertaintyBudget
@@ -405,9 +406,17 @@ def build_template_data(
                     row["result"] = saved_results[idx]
 
     # --- Lab Scope (lab_unique_number for text under right logo) ---
-    active_lab = db.query(LabScope).filter(LabScope.is_active == True).first()
-    if active_lab and active_lab.lab_unique_number:
-        template_data["lab_unique_number"] = active_lab.lab_unique_number
+    try:
+        # Use a minimal raw SQL query to avoid ORM mapping failures when optional
+        # lab_scope columns differ across deployed database versions.
+        row = db.execute(
+            text("SELECT lab_unique_number FROM lab_scope WHERE is_active = true LIMIT 1")
+        ).first()
+        if row and row[0]:
+            template_data["lab_unique_number"] = str(row[0])
+    except Exception:
+        # Keep certificate preview resilient even if lab_scope schema differs.
+        pass
 
     # --- Environment Data ---
     try:
@@ -632,6 +641,58 @@ def get_certificate_by_id(db: Session, certificate_id: int) -> Optional[HTWCerti
     return db.query(HTWCertificate).filter(HTWCertificate.certificate_id == certificate_id).first()
 
 
+def _ensure_qr_eligible(cert: HTWCertificate) -> None:
+    if cert.status not in ("APPROVED", "ISSUED"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"QR can only be generated for APPROVED or ISSUED certificates. Current: {cert.status}",
+        )
+
+
+def upsert_certificate_qr(db: Session, certificate_id: int, qr_image_base64: str) -> HTWCertificate:
+    cert = get_certificate_by_id(db, certificate_id)
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    _ensure_qr_eligible(cert)
+    # Keep QR static once generated for a certificate/equipment.
+    # Subsequent requests return existing QR without modifying token/image/timestamp.
+    if cert.qr_image_base64:
+        if not cert.qr_token:
+            cert.qr_token = secrets.token_urlsafe(24)
+            db.commit()
+            db.refresh(cert)
+        return cert
+    if not qr_image_base64 or not qr_image_base64.strip():
+        raise HTTPException(status_code=400, detail="QR image payload is required")
+    if not cert.qr_token:
+        cert.qr_token = secrets.token_urlsafe(24)
+    cert.qr_image_base64 = qr_image_base64.strip()
+    cert.qr_generated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(cert)
+    return cert
+
+
+def bulk_upsert_certificate_qr(db: Session, items: List[Dict[str, Any]]) -> List[HTWCertificate]:
+    out: List[HTWCertificate] = []
+    for item in items:
+        out.append(upsert_certificate_qr(db, item["certificate_id"], item["qr_image_base64"]))
+    return out
+
+
+def get_certificate_by_qr_token(db: Session, qr_token: str) -> Optional[HTWCertificate]:
+    return db.query(HTWCertificate).filter(HTWCertificate.qr_token == qr_token).first()
+
+
+def get_calibration_status(cert: HTWCertificate) -> str:
+    if not cert.recommended_cal_due_date:
+        return "Due date not available"
+    today = date.today()
+    if cert.recommended_cal_due_date < today:
+        return "Calibration overdue"
+    return "Calibration valid"
+
+
 def _sanitize_filename_part(value: str) -> str:
     """Replace characters invalid in filenames with underscore; collapse spaces."""
     if not value or not isinstance(value, str):
@@ -809,6 +870,9 @@ def list_srf_groups_with_eligible_equipment(db: Session) -> List[Dict[str, Any]]
                     "item_status": cert.item_status or "Satisfactory",
                     "authorised_signatory": cert.authorised_signatory,
                     "admin_rework_comment": getattr(cert, "admin_rework_comment", None) or "",
+                    "qr_token": cert.qr_token if cert else None,
+                    "qr_image_base64": cert.qr_image_base64 if cert else None,
+                    "qr_generated_at": cert.qr_generated_at.isoformat() if cert and cert.qr_generated_at else None,
                 } if cert else None,
             })
         if eligible:

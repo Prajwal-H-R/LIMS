@@ -21,11 +21,13 @@ import {
   AlertCircle,
   User,
   ArrowLeft,
-  Printer
+  Printer,
+  QrCode
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ENDPOINTS } from "../api/config";
 import { CustomerCertificatePrintView } from "./CustomerCertificatePrintView";
+import QRCode from "qrcode";
 
 // --- Types ---
 
@@ -47,6 +49,9 @@ interface Certificate {
   srf_no?: string | null;
   nepl_id?: string | null;
   material_description?: string | null;
+  qr_token?: string | null;
+  qr_image_base64?: string | null;
+  qr_generated_at?: string | null;
 }
 
 interface SrfGroupEquipment {
@@ -86,7 +91,7 @@ interface HtwJob {
 const STATUS_KEYS = ["DRAFT", "CREATED", "REWORK", "APPROVED", "ISSUED"] as const;
 type StatusKey = (typeof STATUS_KEYS)[number];
 
-type CertTabKey = "pending_gen" | "draft" | "rework" | "approval" | "approved" | "issued";
+type CertTabKey = "pending_gen" | "draft" | "rework" | "approval" | "approved" | "issued" | "generate_qr";
 
 const STATUS_LABELS: Record<StatusKey, string> = {
   DRAFT: "Draft",
@@ -202,6 +207,9 @@ export const CertificatesPage: React.FC = () => {
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [showBulkDownloadModal, setShowBulkDownloadModal] = useState(false);
   const [bulkIncludeLetterhead, setBulkIncludeLetterhead] = useState(true);
+  const [qrGeneratingCertId, setQrGeneratingCertId] = useState<number | null>(null);
+  const [bulkQrGenerating, setBulkQrGenerating] = useState(false);
+  const [bulkQrPrinting, setBulkQrPrinting] = useState(false);
 
   // --- Scrollbar Management (FIXED) ---
   // Removed the padding-right calculation to prevent Header jumping/misalignment.
@@ -265,6 +273,137 @@ useEffect(() => {
     if (status === "APPROVED") return "approved";
     if (status === "ISSUED") return "issued";
     return "pending_gen";
+  };
+
+  const getCalibrationDueStatus = (dueDate?: string | null) => {
+    if (!dueDate) return "Due date not available";
+    const due = new Date(dueDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return due < today ? "Calibration overdue" : "Calibration valid";
+  };
+
+  const getQrScanUrlForCertificate = (certificateId: number) => {
+    const configuredPublicBase = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim();
+    const base = configuredPublicBase && configuredPublicBase.length > 0
+      ? configuredPublicBase.replace(/\/+$/, "")
+      : window.location.origin;
+    return `${base}/certificate-qr/${certificateId}`;
+  };
+
+  const generateQrForCertificate = async (cert: Certificate) => {
+    setQrGeneratingCertId(cert.certificate_id);
+    try {
+      const qrImageBase64 = await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), {
+        width: 320,
+        margin: 1,
+      });
+      await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR(cert.certificate_id), {
+        qr_image_base64: qrImageBase64,
+      });
+      await fetchSrfGroups();
+      toast.success(`QR generated for ${cert.certificate_no}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to generate QR.");
+    } finally {
+      setQrGeneratingCertId(null);
+    }
+  };
+
+  const printQrCards = (rows: Array<{ cert: Certificate; neplId?: string; description?: string }>) => {
+    const htmlRows = rows
+      .filter((r) => !!r.cert.qr_image_base64)
+      .map((r) => {
+        const due = formatDate(r.cert.recommended_cal_due_date);
+        const status = getCalibrationDueStatus(r.cert.recommended_cal_due_date);
+        return `
+          <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:8px;display:inline-block;width:260px;vertical-align:top;">
+            <img src="${r.cert.qr_image_base64}" alt="QR" style="width:180px;height:180px;display:block;margin:0 auto 8px;" />
+            <div style="font-size:12px;line-height:1.5;">
+              <div><strong>Certificate:</strong> ${r.cert.certificate_no || "-"}</div>
+              <div><strong>NEPL ID:</strong> ${r.neplId || "-"}</div>
+              <div><strong>Equipment:</strong> ${r.description || "-"}</div>
+              <div><strong>Cal Due Date:</strong> ${due}</div>
+              <div><strong>Status:</strong> ${status}</div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    if (!htmlRows) {
+      toast.error("No generated QR images available to print.");
+      return;
+    }
+    const w = window.open("", "_blank", "width=1000,height=800");
+    if (!w) {
+      toast.error("Unable to open print window.");
+      return;
+    }
+    w.document.write(`
+      <html>
+        <head><title>QR Print</title></head>
+        <body style="font-family:Arial,sans-serif;padding:16px;">
+          ${htmlRows}
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>
+    `);
+    w.document.close();
+  };
+
+  const bulkGenerateQrForSrf = async (equipments: SrfGroupEquipment[]) => {
+    const qrEligibleCerts = equipments
+      .map((e) => e.certificate)
+      .filter((c): c is Certificate => !!c && (c.status === "APPROVED" || c.status === "ISSUED"));
+    if (qrEligibleCerts.length === 0) {
+      toast.error("No APPROVED/ISSUED certificates found in this SRF.");
+      return;
+    }
+    setBulkQrGenerating(true);
+    try {
+      const items = await Promise.all(
+        qrEligibleCerts.map(async (cert) => ({
+          certificate_id: cert.certificate_id,
+          qr_image_base64: await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), {
+            width: 320,
+            margin: 1,
+          }),
+        }))
+      );
+      await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR_BULK, { items });
+      await fetchSrfGroups();
+      toast.success(`Generated QR for ${qrEligibleCerts.length} certificate(s).`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Bulk QR generation failed.");
+    } finally {
+      setBulkQrGenerating(false);
+    }
+  };
+
+  const printQrForSrfLot = async (equipments: SrfGroupEquipment[]) => {
+    setBulkQrPrinting(true);
+    try {
+      const approvedRows = equipments
+        .filter((e) => e.certificate?.status === "APPROVED" || e.certificate?.status === "ISSUED")
+        .map((e) => ({ cert: e.certificate as Certificate, neplId: e.nepl_id, description: e.material_description }));
+      if (approvedRows.length === 0) {
+        toast.error("No APPROVED/ISSUED certificates found in this SRF.");
+        return;
+      }
+      const needsGenerate = approvedRows.some((r) => !r.cert.qr_image_base64);
+      if (needsGenerate) {
+        await bulkGenerateQrForSrf(equipments);
+      }
+      const latest = await fetchSrfGroups();
+      const group = latest.find((g) => g.inward_id === activeSrfId);
+      const latestRows = (group?.equipments || [])
+        .filter((e) => e.certificate?.status === "APPROVED" || e.certificate?.status === "ISSUED")
+        .map((e) => ({ cert: e.certificate as Certificate, neplId: e.nepl_id, description: e.material_description }));
+      printQrCards(latestRows);
+    } finally {
+      setBulkQrPrinting(false);
+    }
   };
 
   const getStatusBadge = (cert: Certificate | null) => {
@@ -632,9 +771,19 @@ useEffect(() => {
       approval: selectedGroup.equipments.filter(e => getEquipmentCategory(e) === "approval").length,
       approved: selectedGroup.equipments.filter(e => getEquipmentCategory(e) === "approved").length,
       issued: selectedGroup.equipments.filter(e => getEquipmentCategory(e) === "issued").length,
+      generate_qr: selectedGroup.equipments.filter(e => {
+        const st = (e.certificate?.status || "").toUpperCase();
+        return st === "APPROVED" || st === "ISSUED";
+      }).length,
     };
 
-    const filteredEquipments = selectedGroup.equipments.filter(e => getEquipmentCategory(e) === activeTab);
+    const filteredEquipments = selectedGroup.equipments.filter(e => {
+      if (activeTab === "generate_qr") {
+        const st = (e.certificate?.status || "").toUpperCase();
+        return st === "APPROVED" || st === "ISSUED";
+      }
+      return getEquipmentCategory(e) === activeTab;
+    });
 
     return (
       <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -715,6 +864,9 @@ useEffect(() => {
                   <button onClick={() => handleTabChange("issued")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "issued" ? "bg-white text-green-700 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
                     <CheckCircle2 className="h-4 w-4" /> Issued <span className="ml-1 bg-green-100 text-green-800 px-2 py-0.5 rounded-full text-xs">{counts.issued}</span>
                   </button>
+                  <button onClick={() => handleTabChange("generate_qr")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "generate_qr" ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
+                    <QrCode className="h-4 w-4" /> Generate QR <span className="ml-1 bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full text-xs">{counts.generate_qr}</span>
+                  </button>
                 </div>
                 {isBulkDownloadTab && (
                   <button
@@ -726,6 +878,28 @@ useEffect(() => {
                     {bulkDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                     Download selected ({selectedForBulkDownload.size}) as ZIP
                   </button>
+                )}
+                {activeTab === "generate_qr" && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => bulkGenerateQrForSrf(selectedGroup.equipments)}
+                      disabled={bulkQrGenerating || bulkQrPrinting}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
+                    >
+                      {bulkQrGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                      Bulk Generate QR
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => printQrForSrfLot(selectedGroup.equipments)}
+                      disabled={bulkQrGenerating || bulkQrPrinting}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
+                    >
+                      {bulkQrPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                      Print QR (SRF Lot)
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -749,6 +923,7 @@ useEffect(() => {
                     )}
                     <th className="px-6 py-4 font-semibold">NEPL ID / Description</th>
                     <th className="px-6 py-4 font-semibold">Certificate No</th>
+                    {activeTab === "generate_qr" && <th className="px-6 py-4 font-semibold">Cal Due / Status</th>}
                     <th className="px-6 py-4 font-semibold">Status</th>
                     <th className="px-6 py-4 font-semibold text-right">Actions</th>
                   </tr>
@@ -800,6 +975,16 @@ useEffect(() => {
                           <td className="px-6 py-4 align-top font-mono text-gray-700">
                             {cert ? cert.certificate_no : <span className="text-gray-400 italic">Not Generated</span>}
                           </td>
+                          {activeTab === "generate_qr" && (
+                            <td className="px-6 py-4 align-top">
+                              {cert ? (
+                                <div className="text-xs text-gray-700 space-y-1">
+                                  <div><span className="font-medium">Due:</span> {formatDate(cert.recommended_cal_due_date)}</div>
+                                  <div><span className="font-medium">Status:</span> {getCalibrationDueStatus(cert.recommended_cal_due_date)}</div>
+                                </div>
+                              ) : "-"}
+                            </td>
+                          )}
                           <td className="px-6 py-4 align-top">
                             {cert ? (
                               <div className="flex flex-col gap-1">
@@ -833,6 +1018,28 @@ useEffect(() => {
                                   )}
 
                                   <button onClick={() => handleInitiateDownload(cert)} className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Download PDF"><Download className="h-4 w-4" /></button>
+                                  {activeTab === "generate_qr" && (cert.status === "APPROVED" || cert.status === "ISSUED") && (
+                                    <>
+                                      <button
+                                        onClick={() => generateQrForCertificate(cert)}
+                                        disabled={qrGeneratingCertId === cert.certificate_id}
+                                        className="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+                                        title="Generate QR"
+                                      >
+                                        {qrGeneratingCertId === cert.certificate_id ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <QrCode className="h-3.5 w-3.5 mr-1" />}
+                                        Generate QR
+                                      </button>
+                                      <button
+                                        onClick={() => printQrCards([{ cert, neplId: item.nepl_id, description: item.material_description }])}
+                                        disabled={!cert.qr_image_base64}
+                                        className="inline-flex items-center px-3 py-1.5 bg-gray-700 text-white text-xs font-semibold rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors shadow-sm"
+                                        title="Print QR"
+                                      >
+                                        <Printer className="h-3.5 w-3.5 mr-1" />
+                                        Print QR
+                                      </button>
+                                    </>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -841,7 +1048,7 @@ useEffect(() => {
                       )
                     })
                   ) : (
-                    <tr><td colSpan={isBulkDownloadTab ? 5 : 4} className="px-6 py-16 text-center text-gray-400"><div className="flex flex-col items-center"><Package className="h-10 w-10 mb-2 opacity-30" /><p>No items found in this category.</p></div></td></tr>
+                    <tr><td colSpan={activeTab === "generate_qr" ? (isBulkDownloadTab ? 6 : 5) : (isBulkDownloadTab ? 5 : 4)} className="px-6 py-16 text-center text-gray-400"><div className="flex flex-col items-center"><Package className="h-10 w-10 mb-2 opacity-30" /><p>No items found in this category.</p></div></td></tr>
                   )}
                 </tbody>
               </table>

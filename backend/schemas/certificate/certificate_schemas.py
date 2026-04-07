@@ -40,6 +40,36 @@ class CertificateBulkDownloadRequest(BaseModel):
     no_header_footer: bool = False
 
 
+class CertificateQrGenerateRequest(BaseModel):
+    qr_image_base64: str = Field(..., min_length=16)
+
+
+class CertificateQrBulkGenerateItem(BaseModel):
+    certificate_id: int
+    qr_image_base64: str = Field(..., min_length=16)
+
+
+class CertificateQrBulkGenerateRequest(BaseModel):
+    items: List[CertificateQrBulkGenerateItem] = Field(..., min_length=1, max_length=200)
+
+
+class CertificateQrGenerateResponse(BaseModel):
+    certificate_id: int
+    qr_token: str
+    qr_generated_at: Optional[datetime] = None
+
+
+class QrScanCertificateView(BaseModel):
+    certificate_id: int
+    certificate_no: str
+    status: str
+    date_of_calibration: Optional[str] = None
+    recommended_cal_due_date: Optional[str] = None
+    calibration_status: str
+    template_data: Dict[str, Any] = Field(default_factory=dict)
+    print_pdf_url: str
+
+
 # --- Certificate Response (for API) ---
 class CertificateResponse(BaseModel):
     certificate_id: int
@@ -62,6 +92,9 @@ class CertificateResponse(BaseModel):
     approved_by: Optional[int] = None
     approved_at: Optional[datetime] = None
     issued_at: Optional[datetime] = None
+    qr_token: Optional[str] = None
+    qr_image_base64: Optional[str] = None
+    qr_generated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

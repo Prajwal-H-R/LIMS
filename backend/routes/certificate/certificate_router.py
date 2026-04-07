@@ -20,6 +20,10 @@ from backend.schemas.certificate.certificate_schemas import (
     CertificateRework,
     CertificateRenderData,
     CertificateBulkDownloadRequest,
+    CertificateQrGenerateRequest,
+    CertificateQrBulkGenerateRequest,
+    CertificateQrGenerateResponse,
+    QrScanCertificateView,
 )
 from backend.services.certificate import certificate_service as cert_service
 from backend.services.certificate import certificate_pdf_service as pdf_service
@@ -72,6 +76,101 @@ def generate_certificate(
     """
     cert = cert_service.generate_certificate(db, job_id, created_by=current_user.user_id)
     return cert
+
+
+@router.post("/{certificate_id}/qr/generate", response_model=CertificateQrGenerateResponse)
+def generate_qr_for_certificate(
+    certificate_id: int,
+    payload: CertificateQrGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(check_staff_role),
+):
+    cert = cert_service.upsert_certificate_qr(db, certificate_id, payload.qr_image_base64)
+    return CertificateQrGenerateResponse(
+        certificate_id=cert.certificate_id,
+        qr_token=cert.qr_token or "",
+        qr_generated_at=cert.qr_generated_at,
+    )
+
+
+@router.post("/qr/generate-bulk", response_model=List[CertificateQrGenerateResponse])
+def generate_qr_bulk(
+    payload: CertificateQrBulkGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(check_staff_role),
+):
+    certs = cert_service.bulk_upsert_certificate_qr(
+        db,
+        [item.model_dump() for item in payload.items],
+    )
+    return [
+        CertificateQrGenerateResponse(
+            certificate_id=c.certificate_id,
+            qr_token=c.qr_token or "",
+            qr_generated_at=c.qr_generated_at,
+        )
+        for c in certs
+    ]
+
+
+@router.get("/qr/{qr_token}", response_model=QrScanCertificateView)
+def view_certificate_by_qr(
+    qr_token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    cert = cert_service.get_certificate_by_qr_token(db, qr_token)
+    if not cert:
+        raise HTTPException(status_code=404, detail="QR code not found")
+    if cert.status not in ("APPROVED", "ISSUED"):
+        raise HTTPException(status_code=400, detail="Certificate is not available for QR view")
+
+    base_url = str(request.base_url).rstrip("/")
+    template_data = cert_service.build_template_data(
+        db, cert.job_id, certificate=cert, base_url=base_url, use_data_uris=False
+    )
+    cal_str = cert.date_of_calibration.strftime("%d-%m-%Y") if cert.date_of_calibration else ""
+    rec_str = cert.recommended_cal_due_date.strftime("%d-%m-%Y") if cert.recommended_cal_due_date else ""
+    return QrScanCertificateView(
+        certificate_id=cert.certificate_id,
+        certificate_no=cert.certificate_no,
+        status=cert.status,
+        date_of_calibration=cal_str,
+        recommended_cal_due_date=rec_str,
+        calibration_status=cert_service.get_calibration_status(cert),
+        template_data=template_data,
+        print_pdf_url=f"{base_url}/api/certificates/{cert.certificate_id}/download-pdf",
+    )
+
+
+@router.get("/qr/certificate/{certificate_id}", response_model=QrScanCertificateView)
+def view_certificate_by_id_for_qr(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    cert = cert_service.get_certificate_by_id(db, certificate_id)
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    if cert.status not in ("APPROVED", "ISSUED"):
+        raise HTTPException(status_code=400, detail="Certificate is not available for QR view")
+
+    base_url = str(request.base_url).rstrip("/")
+    template_data = cert_service.build_template_data(
+        db, cert.job_id, certificate=cert, base_url=base_url, use_data_uris=False
+    )
+    cal_str = cert.date_of_calibration.strftime("%d-%m-%Y") if cert.date_of_calibration else ""
+    rec_str = cert.recommended_cal_due_date.strftime("%d-%m-%Y") if cert.recommended_cal_due_date else ""
+    return QrScanCertificateView(
+        certificate_id=cert.certificate_id,
+        certificate_no=cert.certificate_no,
+        status=cert.status,
+        date_of_calibration=cal_str,
+        recommended_cal_due_date=rec_str,
+        calibration_status=cert_service.get_calibration_status(cert),
+        template_data=template_data,
+        print_pdf_url=f"{base_url}/api/certificates/{cert.certificate_id}/download-pdf",
+    )
 
 
 @router.get("/srf-groups")
