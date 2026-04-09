@@ -483,6 +483,7 @@ def get_uncertainty_references(db: Session):
         ).order_by(asc(HTWStandardUncertaintyReference.indicated_torque)).all()
         return [{"indicated_torque": float(r.indicated_torque), "error_value": float(r.error_value)} for r in refs]
     except Exception as e:
+        db.rollback()
         print(f"DB Error getting references: {e}")
         return []
 
@@ -596,6 +597,7 @@ def get_stored_reproducibility(db: Session, job_id: int):
         reference_torque_val, specs = get_job_and_reference_torque(db, job_id)
         torque_unit = specs.torque_unit or ""
     except Exception:
+        db.rollback()
         reference_torque_val = 0.0
         torque_unit = ""
 
@@ -730,6 +732,7 @@ def get_stored_output_drive(db: Session, job_id: int):
         reference_torque_val, specs = get_job_and_reference_torque(db, job_id)
         torque_unit = specs.torque_unit or ""
     except:
+        db.rollback()
         reference_torque_val = 0.0
         torque_unit = ""
 
@@ -866,6 +869,7 @@ def get_stored_drive_interface(db: Session, job_id: int):
         reference_torque_val, specs = get_job_and_reference_torque(db, job_id)
         torque_unit = specs.torque_unit or ""
     except:
+        db.rollback()
         reference_torque_val = 0.0
         torque_unit = ""
 
@@ -1003,6 +1007,7 @@ def get_stored_loading_point(db: Session, job_id: int):
         reference_torque_val, specs = get_job_and_reference_torque(db, job_id)
         torque_unit = specs.torque_unit or ""
     except:
+        db.rollback()
         reference_torque_val = 0.0
         torque_unit = ""
 

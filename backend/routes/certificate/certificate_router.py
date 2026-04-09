@@ -48,7 +48,6 @@ async def render_certificate_preview_html(
     request: Request,
     payload: Dict[str, Any],
     db: Session = Depends(get_db),
-    current_user: UserResponse = Depends(check_staff_role),
 ):
     """
     Takes raw JSON data (certificate fields) and renders the 
@@ -173,6 +172,69 @@ def view_certificate_by_id_for_qr(
     )
 
 
+@router.get("/qr/certificate/{certificate_id}/view", response_class=HTMLResponse)
+def view_certificate_page_by_id_for_qr(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    cert = cert_service.get_certificate_by_id(db, certificate_id)
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    if cert.status not in ("APPROVED", "ISSUED"):
+        raise HTTPException(status_code=400, detail="Certificate is not available for QR view")
+
+    base_url = str(request.base_url).rstrip("/")
+    cal_str = cert.date_of_calibration.strftime("%d-%m-%Y") if cert.date_of_calibration else "-"
+    rec_str = cert.recommended_cal_due_date.strftime("%d-%m-%Y") if cert.recommended_cal_due_date else "-"
+    cal_status = cert_service.get_calibration_status(cert)
+    pdf_url = f"{base_url}/api/certificates/{cert.certificate_id}/download-pdf"
+
+    html = f"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Certificate View</title>
+  <style>
+    body {{ margin: 0; font-family: Arial, sans-serif; background: #f1f5f9; }}
+    .wrap {{ max-width: 1080px; margin: 0 auto; padding: 16px; }}
+    .card {{
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    }}
+    .title {{ margin: 0; font-size: 24px; }}
+    .meta {{ color: #475569; margin-top: 6px; font-size: 14px; }}
+    .btn {{
+      display: inline-block; text-decoration: none; background: #16a34a; color: #fff;
+      padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    }}
+    .viewer {{
+      margin-top: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+    }}
+    iframe {{ width: 100%; min-height: 80vh; border: 0; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div>
+        <h1 class="title">Certificate View</h1>
+        <div class="meta">{cert.certificate_no or "-"} | Calibration Date: {cal_str} | Cal Due: {rec_str} | {cal_status}</div>
+      </div>
+      <a class="btn" href="{pdf_url}" target="_blank" rel="noreferrer">Download PDF</a>
+    </div>
+    <div class="viewer">
+      <iframe src="{pdf_url}" title="Certificate PDF"></iframe>
+    </div>
+  </div>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
 @router.get("/srf-groups")
 def list_srf_groups_with_eligible_equipment(
     db: Session = Depends(get_db),
@@ -239,8 +301,11 @@ def download_bulk_certificate_pdf(
 def download_certificate_pdf(
     certificate_id: int,
     no_header_footer: bool = Query(False, description="Use no-header-footer template for engineer/admin"),
+    inline: bool = Query(
+        False,
+        description="If true, use Content-Disposition: inline so browsers/PDF viewers can embed or open the file without forcing download.",
+    ),
     db: Session = Depends(get_db),
-    current_user: UserResponse = Depends(check_staff_role),
 ):
     """Download certificate as PDF. Use no_header_footer=true for engineer/admin (clean print)."""
     try:
@@ -249,12 +314,20 @@ def download_certificate_pdf(
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    # Defensive: optional data-fetching code in PDF generation may catch DB exceptions
+    # internally; ensure session is usable before subsequent metadata queries.
+    db.rollback()
     cert = cert_service.get_certificate_by_id(db, certificate_id)
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    if cert.status not in ("APPROVED", "ISSUED"):
+        raise HTTPException(status_code=403, detail="Certificate PDF is available only for APPROVED/ISSUED certificates")
     filename = cert_service.get_certificate_pdf_filename(db, certificate_id)
+    disposition = "inline" if inline else "attachment"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
     )
 
 

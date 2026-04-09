@@ -415,6 +415,9 @@ def build_template_data(
         if row and row[0]:
             template_data["lab_unique_number"] = str(row[0])
     except Exception:
+        # A DBAPI error here marks the current transaction as failed.
+        # Roll back so subsequent queries in the same request can proceed.
+        db.rollback()
         # Keep certificate preview resilient even if lab_scope schema differs.
         pass
 

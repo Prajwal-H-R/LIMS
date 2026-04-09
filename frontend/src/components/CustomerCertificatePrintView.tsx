@@ -87,13 +87,16 @@ export const CustomerCertificatePrintView: React.FC<{
       setError(null);
       try {
         const token = localStorage.getItem('access_token') || localStorage.getItem('token');
-        if (!token) throw new Error("No authentication token found.");
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
 
         const response = await axios.post(
           '/api/certificates/render-preview', 
           data,
           { 
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            headers,
             responseType: 'text' 
           }
         );
