@@ -121,12 +121,22 @@ export const ENDPOINTS = {
     CERTIFICATES: `/portal/certificates`,
     CERTIFICATE_VIEW: (id: number) => `/portal/certificates/${id}/view`,
     CERTIFICATE_DOWNLOAD_PDF: (id: number) => `/portal/certificates/${id}/download-pdf`,
+    DEVIATIONS: `/portal/deviations`,
+    DEVIATION_DETAIL: (id: number) => `/portal/deviations/${id}`,
+  },
+
+  STAFF_DEVIATIONS: {
+    MANUAL: `/deviations/manual`,
+    DETAIL: (id: number) => `/deviations/${id}`,
+    UPDATE_ENGINEER_REMARKS: (id: number) => `/deviations/${id}/engineer-remarks`,
+    CLOSE: (id: number) => `/deviations/${id}/close`,
+    TERMINATE_JOB: (id: number) => `/deviations/${id}/terminate-job`,
+    ATTACHMENTS: (id: number) => `/deviations/${id}/attachments`,
   },
 
   // Common
   CUSTOMERS: `/customers`,
   JOBS: `/jobs`,
-  DEVIATIONS: `/deviations`,
   NOTIFICATIONS: `/notifications`,
   SRFS: `/srfs/`,
   GET_SRF: (id: number) => `/srfs/${id}`,

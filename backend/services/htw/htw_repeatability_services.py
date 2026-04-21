@@ -1,12 +1,14 @@
 import math
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, asc
+from sqlalchemy import and_, desc, asc, func
 from datetime import datetime
 
 # --- MODELS ---
 from backend.models import (
     HTWJob, 
+    Inward,
     InwardEquipment, 
+    Deviation,
     HTWManufacturerSpec, 
     HTWStandardUncertaintyReference, 
     HTWRepeatability, 
@@ -1042,4 +1044,135 @@ def get_stored_loading_point(db: Session, job_id: int):
         "error_due_to_loading_point": round(b_l, 4),
         "torque_unit": torque_unit,
         "positions": positions
+    }
+
+
+def get_oot_deviations(db: Session, threshold: float = 4.0):
+    """
+    Returns OOT deviations linked through the deviation table.
+    Automatically creates missing Deviation rows for OOT repeatability entries.
+    """
+    # Backfill old records so historical OPEN entries with customer decisions show correctly.
+    legacy_rows = db.query(Deviation).filter(Deviation.customer_decision.isnot(None)).all()
+    legacy_changed = False
+    for d in legacy_rows:
+        decision = (d.customer_decision or "").strip()
+        status = (d.status or "").strip().upper()
+        if decision and status in ("", "OPEN"):
+            d.status = "IN_PROGRESS"
+            legacy_changed = True
+    if legacy_changed:
+        db.commit()
+
+    oot_rows = (
+        db.query(
+            HTWRepeatability.id.label("repeatability_id"),
+            HTWJob.inward_eqp_id.label("inward_eqp_id"),
+        )
+        .join(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
+        .filter(
+            HTWRepeatability.deviation_percent.isnot(None),
+            func.abs(HTWRepeatability.deviation_percent) > threshold,
+            HTWJob.inward_eqp_id.isnot(None),
+        )
+        .all()
+    )
+
+    existing_by_repeatability = {
+        d.repeatability_id: d
+        for d in db.query(Deviation)
+        .filter(Deviation.repeatability_id.isnot(None))
+        .all()
+    }
+
+    created_any = False
+    for row in oot_rows:
+        existing = existing_by_repeatability.get(row.repeatability_id)
+        if existing:
+            if existing.inward_eqp_id != row.inward_eqp_id:
+                existing.inward_eqp_id = row.inward_eqp_id
+                created_any = True
+            continue
+
+        db.add(
+            Deviation(
+                inward_eqp_id=row.inward_eqp_id,
+                repeatability_id=row.repeatability_id,
+                status="OPEN",
+            )
+        )
+        created_any = True
+
+    if created_any:
+        db.commit()
+
+    rows = (
+        db.query(
+            Deviation.id.label("deviation_id"),
+            Deviation.status.label("status"),
+            Deviation.engineer_remarks.label("engineer_remarks"),
+            Deviation.customer_decision.label("customer_decision"),
+            Deviation.report.label("report"),
+            HTWRepeatability.id.label("repeatability_id"),
+            HTWRepeatability.job_id.label("job_id"),
+            HTWRepeatability.step_percent.label("step_percent"),
+            HTWRepeatability.set_torque_ts.label("set_torque"),
+            HTWRepeatability.corrected_mean.label("corrected_mean"),
+            HTWRepeatability.deviation_percent.label("deviation_percent"),
+            InwardEquipment.inward_eqp_id.label("inward_eqp_id"),
+            InwardEquipment.nepl_id.label("nepl_id"),
+            InwardEquipment.make.label("make"),
+            InwardEquipment.model.label("model"),
+            InwardEquipment.serial_no.label("serial_no"),
+            HTWJob.inward_id.label("inward_id"),
+            Inward.srf_no.label("srf_no"),
+            Inward.customer_dc_no.label("customer_dc_no"),
+            Inward.customer_dc_date.label("customer_dc_date"),
+        )
+        .join(HTWRepeatability, HTWRepeatability.id == Deviation.repeatability_id)
+        .join(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
+        .outerjoin(Inward, Inward.inward_id == HTWJob.inward_id)
+        .outerjoin(InwardEquipment, InwardEquipment.inward_eqp_id == HTWJob.inward_eqp_id)
+        .filter(
+            HTWRepeatability.deviation_percent.isnot(None),
+            func.abs(HTWRepeatability.deviation_percent) > threshold,
+        )
+        .order_by(desc(func.abs(HTWRepeatability.deviation_percent)))
+        .all()
+    )
+
+    return {
+        "section": "OOT - Out of Tolerance",
+        "tolerance_limit_percent": threshold,
+        "count": len(rows),
+        "items": [
+            {
+                "deviation_id": r.deviation_id,
+                "status": r.status,
+                "engineer_remarks": r.engineer_remarks,
+                "customer_decision": r.customer_decision,
+                "report": r.report.isoformat() if r.report else None,
+                "deviation_type": "OOT",
+                "repeatability_id": r.repeatability_id,
+                "job_id": r.job_id,
+                "inward_id": r.inward_id,
+                "srf_no": r.srf_no,
+                "customer_dc_no": r.customer_dc_no,
+                "customer_dc_date": (
+                    r.customer_dc_date.isoformat()
+                    if hasattr(r.customer_dc_date, "isoformat")
+                    else (str(r.customer_dc_date) if r.customer_dc_date is not None else None)
+                ),
+                "inward_eqp_id": r.inward_eqp_id,
+                "nepl_id": r.nepl_id,
+                "make": r.make,
+                "model": r.model,
+                "serial_no": r.serial_no,
+                "step_percent": float(r.step_percent) if r.step_percent is not None else None,
+                "set_torque": float(r.set_torque) if r.set_torque is not None else None,
+                "corrected_mean": float(r.corrected_mean) if r.corrected_mean is not None else None,
+                "deviation_percent": float(r.deviation_percent) if r.deviation_percent is not None else None,
+            }
+            for r in rows
+        ],
     }

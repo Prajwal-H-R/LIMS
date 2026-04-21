@@ -41,4 +41,6 @@ from .record_lock import RecordLock
 from .certificate.certificate import HTWCertificate
 from .htw.htw_job_standard_snapshot import HTWJobStandardSnapshot
 from .lab_scope import LabScope
+from .deviation import Deviation
+from .deviation_attachments import DeviationAttachment
 from backend.db import Base

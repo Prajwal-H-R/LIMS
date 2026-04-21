@@ -73,6 +73,7 @@ const customStyles = `
 interface HTWJobResponse {
   job_id: number;
   inward_eqp_id: number;
+  job_status?: string;
   calibration_date?: string;
   material_nomenclature?: string;
   make?: string;
@@ -485,6 +486,7 @@ const CalibrationPage: React.FC = () => {
   const [equipment, setEquipment] = useState<InwardEquipment | null>(null);
   
   const [jobId, setJobId] = useState<number | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [isValidated, setIsValidated] = useState(false);
   const [validating, setValidating] = useState(false);
   const [isWorksheetSaved, setIsWorksheetSaved] = useState(false);
@@ -492,6 +494,12 @@ const CalibrationPage: React.FC = () => {
   
   const [showTerminateModal, setShowTerminateModal] = useState(false);
   const [terminating, setTerminating] = useState(false);
+  const [showManualDeviationModal, setShowManualDeviationModal] = useState(false);
+  const [creatingManualDeviation, setCreatingManualDeviation] = useState(false);
+  const [manualDeviationRemarks, setManualDeviationRemarks] = useState("");
+  const [manualDeviationFiles, setManualDeviationFiles] = useState<File[]>([]);
+  const [manualDeviationUploadProgress, setManualDeviationUploadProgress] = useState(0);
+  const [manualDeviationUploadStage, setManualDeviationUploadStage] = useState("");
   
   const [showMissingStandardsModal, setShowMissingStandardsModal] = useState(false);
   const [missingStandardsList, setMissingStandardsList] = useState<string[]>([]);
@@ -607,6 +615,7 @@ const CalibrationPage: React.FC = () => {
 
         if (existingJob) {
             setJobId(existingJob.job_id);
+            setJobStatus(existingJob.job_status || null);
             setIsValidated(true);
             setIsWorksheetSaved(true);
             await fetchSavedStandards(existingJob.job_id);
@@ -761,6 +770,7 @@ const CalibrationPage: React.FC = () => {
       const res = await api.post<HTWJobResponse>(ENDPOINTS.HTW_JOBS.CREATE, payload);
       const newJobId = res.data.job_id;
       setJobId(newJobId);
+      setJobStatus("Created");
       await fetchSavedStandards(newJobId);
       setIsValidated(true);
 
@@ -807,6 +817,7 @@ const CalibrationPage: React.FC = () => {
     try {
         await api.post("/uncertainty/uncertainity-calculation", { inward_id: Number(inwardId), inward_eqp_id: Number(equipmentId) });
         await api.patch(`/htw-jobs/${jobId}`, { job_status: "Calibrated" });
+        setJobStatus("Calibrated");
         navigate("/engineer/jobs", { state: { viewJobId: Number(inwardId), activeTab: "completed" } });
     } catch (err: any) {
         console.error("Finish process failed:", err);
@@ -819,11 +830,71 @@ const CalibrationPage: React.FC = () => {
       setTerminating(true);
       try {
           await api.patch(`/htw-jobs/${jobId}`, { job_status: "Terminated" });
+          setJobStatus("Terminated");
           navigate("/engineer/jobs", { state: { viewJobId: Number(inwardId), activeTab: "terminated" } });
       } catch (err: any) {
           console.error("Termination failed:", err);
           alert(`Error: ${err.response?.data?.detail || "Failed to terminate job"}`);
       } finally { setTerminating(false); setShowTerminateModal(false); }
+  };
+
+  const handleManualDeviationCreate = async () => {
+      if (!jobId || !inwardId || !equipmentId || isLocked) return;
+      const remarks = manualDeviationRemarks.trim();
+      if (!remarks) {
+          alert("Please enter engineer remarks for manual deviation.");
+          return;
+      }
+
+      setCreatingManualDeviation(true);
+      setManualDeviationUploadProgress(0);
+      setManualDeviationUploadStage("Creating deviation...");
+      try {
+          const createRes = await api.post(ENDPOINTS.STAFF_DEVIATIONS.MANUAL, {
+              inward_id: Number(inwardId),
+              inward_eqp_id: Number(equipmentId),
+              job_id: jobId,
+              engineer_remarks: remarks,
+          });
+          setManualDeviationUploadProgress(manualDeviationFiles.length > 0 ? 10 : 100);
+          const createdDeviationId = createRes?.data?.deviation_id;
+
+          if (createdDeviationId && manualDeviationFiles.length > 0) {
+              setManualDeviationUploadStage("Uploading attachments...");
+              const formData = new FormData();
+              manualDeviationFiles.forEach((file) => formData.append("files", file));
+              await api.post(
+                  ENDPOINTS.STAFF_DEVIATIONS.ATTACHMENTS(Number(createdDeviationId)),
+                  formData,
+                  {
+                    headers: { "Content-Type": "multipart/form-data" },
+                    onUploadProgress: (progressEvent) => {
+                      const total = progressEvent.total || 0;
+                      if (!total) return;
+                      const pct = Math.round((progressEvent.loaded * 100) / total);
+                      // Reserve first 10% for deviation creation; attachments fill remaining 90%.
+                      const adjusted = Math.min(100, 10 + Math.round((pct * 90) / 100));
+                      setManualDeviationUploadProgress(adjusted);
+                    },
+                  }
+              );
+          }
+          setManualDeviationUploadStage("Finalizing...");
+          setManualDeviationUploadProgress(100);
+
+          setJobStatus("On Hold");
+          setManualDeviationRemarks("");
+          setManualDeviationFiles([]);
+          setShowManualDeviationModal(false);
+          alert("Manual deviation created successfully. Job status moved to On Hold.");
+      } catch (err: any) {
+          console.error("Manual deviation creation failed:", err);
+          alert(`Error: ${err.response?.data?.detail || "Failed to create manual deviation."}`);
+      } finally {
+          setManualDeviationUploadStage("");
+          setManualDeviationUploadProgress(0);
+          setCreatingManualDeviation(false);
+      }
   };
 
   const goToNextStep = () => {
@@ -902,6 +973,12 @@ const CalibrationPage: React.FC = () => {
 
       {/* Header */}
       <div className="flex-none px-8 py-5 border-b border-gray-100 bg-white">
+        {(jobStatus || "").toLowerCase() === "on hold" && (
+            <div className="mb-3 bg-amber-50 border border-amber-200 px-4 py-2 rounded-lg text-amber-800 text-xs font-semibold flex items-center gap-2">
+                <FileWarning className="h-4 w-4" />
+                This job is currently On Hold due to an active deviation.
+            </div>
+        )}
         <div className="flex items-center justify-between gap-4">
           <div className="flex flex-col">
             <h1 className="text-xl font-bold text-gray-900 leading-tight">Calibration Worksheet</h1>
@@ -913,6 +990,14 @@ const CalibrationPage: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {jobId && !isLocked && (
+                <button
+                    onClick={() => setShowManualDeviationModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-100 rounded-lg text-sm font-semibold text-amber-700 transition-colors"
+                >
+                    <AlertTriangle size={18} /> Manual Deviation
+                </button>
+            )}
             {jobId && !isLocked && (
                 <button 
                     onClick={() => setShowTerminateModal(true)} 
@@ -1129,6 +1214,87 @@ const CalibrationPage: React.FC = () => {
                     <div className="flex justify-end gap-3">
                         <button onClick={() => setShowTerminateModal(false)} className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors" disabled={terminating}>Cancel</button>
                         <button onClick={handleTerminateConfirm} disabled={terminating} className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition-colors flex items-center gap-2">{terminating ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}{terminating ? "Terminating..." : "Confirm Terminate"}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {showManualDeviationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl overflow-hidden transform transition-all scale-100">
+                <div className="p-6">
+                    <div className="flex items-center gap-4 mb-4">
+                        <div className="p-3 bg-amber-100 text-amber-700 rounded-full">
+                            <AlertTriangle className="h-6 w-6" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-gray-900">Create Manual Deviation</h3>
+                            <p className="text-sm text-gray-500">Add remarks and optional attachments to place this job On Hold.</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-1">Engineer Remarks</label>
+                            <textarea
+                                className="w-full border border-gray-300 rounded-lg p-3 text-sm min-h-[120px] focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                                placeholder="Enter reason for manual deviation..."
+                                value={manualDeviationRemarks}
+                                onChange={(e) => setManualDeviationRemarks(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-1">Attachments (optional)</label>
+                            <input
+                                type="file"
+                                multiple
+                                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                                onChange={(e) => setManualDeviationFiles(Array.from(e.target.files || []))}
+                                className="w-full border border-gray-300 rounded-lg p-2 text-sm"
+                            />
+                            {manualDeviationFiles.length > 0 && (
+                                <p className="text-xs text-gray-500 mt-1">{manualDeviationFiles.length} file(s) selected</p>
+                            )}
+                        </div>
+                        {creatingManualDeviation && (
+                            <div>
+                                <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                                    <span>{manualDeviationUploadStage || "Uploading..."}</span>
+                                    <span>{manualDeviationUploadProgress}%</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                                    <div
+                                        className="h-2.5 rounded-full bg-amber-600 transition-all duration-200"
+                                        style={{ width: `${manualDeviationUploadProgress}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end gap-3 mt-6">
+                        <button
+                            onClick={() => {
+                                if (!creatingManualDeviation) {
+                                    setShowManualDeviationModal(false);
+                                    setManualDeviationRemarks("");
+                                    setManualDeviationFiles([]);
+                                }
+                            }}
+                            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                            disabled={creatingManualDeviation}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleManualDeviationCreate}
+                            disabled={creatingManualDeviation}
+                            className="px-4 py-2 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                        >
+                            {creatingManualDeviation ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
+                            {creatingManualDeviation ? "Creating..." : "Create Deviation"}
+                        </button>
                     </div>
                 </div>
             </div>

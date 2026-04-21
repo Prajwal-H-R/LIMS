@@ -26,6 +26,12 @@ from backend.schemas.srf_schemas import SrfApiResponse, SrfResponse
 from backend.schemas.certificate.certificate_schemas import CertificateResponse, CertificateRenderData, CustomerCertificateResponse
 from backend.services.certificate import certificate_service as cert_service
 from backend.services.certificate import certificate_pdf_service as pdf_service
+from backend.services import deviation_service as deviation_svc
+from backend.schemas.deviation_schemas import (
+    CustomerDeviationItem,
+    CustomerDecisionUpdate,
+    DeviationDetailOut,
+)
 
 router = APIRouter(prefix="/portal", tags=["Customer Portal"])
 logger = logging.getLogger(__name__)
@@ -166,6 +172,52 @@ async def submit_fir_remarks(
 ):
     service = CustomerPortalService(db)
     return service.submit_customer_remarks(inward_id, request, current_user.customer_id)
+
+
+# --- DEVIATIONS (customer equipment only) ---
+
+
+@router.get("/deviations", response_model=List[CustomerDeviationItem])
+async def list_customer_deviations(
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_customer_user),
+):
+    return deviation_svc.list_deviations_for_customer(db, current_user.customer_id)
+
+
+@router.get("/deviations/{deviation_id}", response_model=DeviationDetailOut)
+async def get_customer_deviation_detail(
+    deviation_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_customer_user),
+):
+    detail = deviation_svc.get_deviation_detail_for_customer(
+        db, deviation_id, current_user.customer_id
+    )
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deviation not found or you do not have permission to view it.",
+        )
+    return detail
+
+
+@router.patch("/deviations/{deviation_id}", response_model=CustomerDeviationItem)
+async def update_deviation_customer_decision(
+    deviation_id: int,
+    body: CustomerDecisionUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_customer_user),
+):
+    updated = deviation_svc.update_customer_decision(
+        db, deviation_id, current_user.customer_id, body.customer_decision
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deviation not found or you do not have permission to update it.",
+        )
+    return updated
 
 
 # --- TRACKING ENDPOINT ---

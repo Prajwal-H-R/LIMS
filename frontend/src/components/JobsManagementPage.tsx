@@ -76,6 +76,11 @@ interface ExpiryCheckResponse {
 }
 
 type EquipmentTab = "pending" | "in_progress" | "completed" | "terminated";
+interface ListStatusCounts {
+  pending: number;
+  in_progress: number;
+  completed: number;
+}
 
 // --- Skeleton Components ---
 
@@ -162,6 +167,7 @@ const JobsManagementPage: React.FC = () => {
   const [selectedJob, setSelectedJob] = useState<InwardDetailResponse | null>(null);
 
   const [jobs, setJobs] = useState<InwardJob[]>([]);
+  const [jobStatusCountsByInward, setJobStatusCountsByInward] = useState<Record<number, ListStatusCounts>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filterStartDate, setFilterStartDate] = useState("");
@@ -214,6 +220,60 @@ const JobsManagementPage: React.FC = () => {
     }
   }, [activeJobId]);
 
+  const getEquipmentCategoryForRecord = (
+    item: InwardEquipment,
+    inwardTerminated: boolean
+  ): EquipmentTab | null => {
+    if (inwardTerminated) return "terminated";
+
+    const inwardStatus = (item.status || "").toLowerCase();
+    if (inwardStatus === "pending") return null;
+
+    if (!item.job_id) return "pending";
+
+    const jobStatus = (item.job_status || "").toLowerCase();
+    if (jobStatus.includes("term") || jobStatus.includes("cancel") || jobStatus.includes("reject")) return "terminated";
+    if (jobStatus.includes("complete") || jobStatus.includes("calibrated") || jobStatus.includes("done")) return "completed";
+    return "in_progress";
+  };
+
+  const buildRecordStatusCounts = async (inwardId: number): Promise<ListStatusCounts> => {
+    try {
+      const res = await api.get<InwardDetailResponse>(`${ENDPOINTS.STAFF.INWARDS}/${inwardId}`);
+      const inwardData = res.data;
+      const equipments = inwardData?.equipments || [];
+
+      const enrichedEquipments = await Promise.all(
+        equipments.map(async (eq) => {
+          try {
+            const jobRes = await api.get<HtwJobResponse[]>(`/htw-jobs/`, {
+              params: { inward_eqp_id: eq.inward_eqp_id },
+            });
+            const jobData = Array.isArray(jobRes.data) && jobRes.data.length > 0 ? jobRes.data[0] : null;
+            return {
+              ...eq,
+              job_id: jobData ? jobData.job_id : null,
+              job_status: jobData ? jobData.job_status : null,
+            };
+          } catch {
+            return { ...eq, job_id: null, job_status: null };
+          }
+        })
+      );
+
+      const counts: ListStatusCounts = { pending: 0, in_progress: 0, completed: 0 };
+      enrichedEquipments.forEach((eq) => {
+        const category = getEquipmentCategoryForRecord(eq, !!inwardData.inward_srf_flag);
+        if (category === "pending") counts.pending += 1;
+        if (category === "in_progress") counts.in_progress += 1;
+        if (category === "completed") counts.completed += 1;
+      });
+      return counts;
+    } catch {
+      return { pending: 0, in_progress: 0, completed: 0 };
+    }
+  };
+
   const fetchJobs = async () => {
     try {
       if(!activeJobId) setLoading(true);
@@ -221,6 +281,13 @@ const JobsManagementPage: React.FC = () => {
       const res = await api.get<InwardJob[]>(`${ENDPOINTS.STAFF.INWARDS}`);
       const data = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
       setJobs(data);
+      const inwardIds = data
+        .map((j) => j.inward_id || j.id)
+        .filter((id): id is number => typeof id === "number");
+      const entries = await Promise.all(
+        inwardIds.map(async (id) => [id, await buildRecordStatusCounts(id)] as const)
+      );
+      setJobStatusCountsByInward(Object.fromEntries(entries));
     } catch (error) {
       console.error("Failed to fetch inward jobs", error);
       setErrorMsg("Failed to load jobs list.");
@@ -745,6 +812,8 @@ const JobsManagementPage: React.FC = () => {
                     <div className="space-y-3">
                         {filteredJobs.map((job) => {
                             const config = getStatusConfig(job.status);
+                            const inwardKey = job.inward_id || job.id;
+                            const counts = inwardKey ? jobStatusCountsByInward[inwardKey] : undefined;
                             return (
                                 <div 
                                     key={job.inward_id || job.id}
@@ -762,13 +831,23 @@ const JobsManagementPage: React.FC = () => {
                                                 <p className="font-semibold text-lg text-gray-800">
                                                     SRF No: {job.srf_no || "N/A"}
                                                 </p>
-                                                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium border ${config.badge}`}>
-                                                    {job.status}
-                                                </span>
                                             </div>
                                             <p className="text-sm text-gray-600 mt-1">
                                                 DC: <span className="font-medium text-gray-900">{job.customer_dc_no || "N/A"}</span> — Received on <span className="font-medium text-gray-700">{formatDate(job.customer_dc_date)}</span>
                                             </p>
+                                            {counts && (
+                                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                                <span className="px-2 py-0.5 rounded-full border bg-gray-100 text-gray-700 border-gray-200">
+                                                  Pending: {counts.pending}
+                                                </span>
+                                                <span className="px-2 py-0.5 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
+                                                  In Progress: {counts.in_progress}
+                                                </span>
+                                                <span className="px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">
+                                                  Completed: {counts.completed}
+                                                </span>
+                                              </div>
+                                            )}
                                         </div>
                                     </div>
                                     <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-colors" />
