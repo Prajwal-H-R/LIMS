@@ -25,6 +25,8 @@ import CustomerSrfDetailView from "../components/CustomerSrfDetailView";
 import CustomerSrfListView from "../components/CustomerSrfListView";
 import TrackStatusPage from "../components/TrackStatusPage";
 import { CustomerCertificatesPage } from "../components/CustomerCertificatesPage";
+import CustomerDeviationsPage from "../components/CustomerDeviationsPage";
+import CustomerDeviationDetailPage from "../components/CustomerDeviationDetailPage";
 import ProfilePage from "../components/ProfilePage";
 
 // --- LOCAL TYPE DEFINITIONS ---
@@ -181,9 +183,6 @@ const FirListView: React.FC<{ firs: FirForReview[] }> = ({ firs }) => {
     );
 };
 
-// --- PLACEHOLDER SUB-PAGES ---
-const ViewDeviationsPage = () => <div className="p-8 bg-white rounded-2xl shadow-md"><h2 className="text-2xl font-bold mb-4">View Deviations</h2><Link to="/customer" className="text-blue-600">&larr; Back to Dashboard</Link></div>;
-
 // --- DASHBOARD COMPONENTS ---
 
 // 1. Notification Center
@@ -202,7 +201,7 @@ const NotificationCenter: React.FC<{ stats: DashboardStats }> = ({ stats }) => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const totalNotifications = stats.firsForReview + stats.draftSrfs;
+    const totalNotifications = stats.firsForReview + stats.draftSrfs + stats.activeDeviations;
 
     const handleNavigate = (path: string) => {
         setIsOpen(false);
@@ -285,6 +284,29 @@ const NotificationCenter: React.FC<{ stats: DashboardStats }> = ({ stats }) => {
                                             {/* Button Style Link */}
                                             <span className="inline-flex items-center px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg shadow-sm group-hover:bg-blue-700 transition-colors">
                                                 View Details
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* OOT Deviation Notification Item */}
+                                {stats.activeDeviations > 0 && (
+                                    <div
+                                        onClick={() => handleNavigate('/customer/deviations')}
+                                        className="p-4 hover:bg-red-50 transition-colors cursor-pointer group flex items-start gap-3"
+                                    >
+                                        <div className="p-2 bg-red-100 rounded-lg shrink-0 mt-1">
+                                            <AlertCircle className="h-5 w-5 text-red-600" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-semibold text-gray-800">
+                                                Deviation Alert
+                                            </p>
+                                            <p className="text-xs text-gray-600 mt-1 mb-3">
+                                                You have <span className="font-bold text-red-600">{stats.activeDeviations}</span> deviation record(s) waiting for your decision.
+                                            </p>
+                                            <span className="inline-flex items-center px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg shadow-sm group-hover:bg-blue-700 transition-colors">
+                                                View Deviations
                                             </span>
                                         </div>
                                     </div>
@@ -465,6 +487,7 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
     const [srfs, setSrfs] = useState<Srf[]>([]);
     const [firs, setFirs] = useState<FirForReview[]>([]);
     const [certificateCount, setCertificateCount] = useState(0);
+    const [deviationCount, setDeviationCount] = useState(0);
     const [loading, setLoading] = useState(true);
 
     const fetchSrfs = useCallback(async () => {
@@ -497,22 +520,39 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
         }
     }, [user]);
 
+    const fetchDeviationCount = useCallback(async () => {
+        if (!user?.user_id) return;
+        try {
+            const response = await api.get<unknown[]>(ENDPOINTS.PORTAL.DEVIATIONS);
+            setDeviationCount(Array.isArray(response.data) ? response.data.length : 0);
+        } catch (err) {
+            console.error("[CustomerPortal] Failed to fetch deviations:", err);
+        }
+    }, [user]);
+
     useEffect(() => {
         const initialLoad = async () => {
             setLoading(true);
-            await Promise.all([fetchSrfs(), fetchFirsForReview(), fetchCertificateCount()]);
+            await Promise.all([
+                fetchSrfs(),
+                fetchFirsForReview(),
+                fetchCertificateCount(),
+                fetchDeviationCount(),
+            ]);
             setLoading(false);
         };
         initialLoad();
         const srfInterval = setInterval(fetchSrfs, 30000);
         const firInterval = setInterval(fetchFirsForReview, 30000);
         const certInterval = setInterval(fetchCertificateCount, 60000);
+        const devInterval = setInterval(fetchDeviationCount, 60000);
         return () => {
             clearInterval(srfInterval);
             clearInterval(firInterval);
             clearInterval(certInterval);
+            clearInterval(devInterval);
         };
-    }, [fetchSrfs, fetchFirsForReview, fetchCertificateCount]);
+    }, [fetchSrfs, fetchFirsForReview, fetchCertificateCount, fetchDeviationCount]);
 
     const handleStatusChange = (srfId: number, status: string) => {
         setSrfs((prev) => prev.map((srf) => (srf.srf_id === srfId ? { ...srf, status } as Srf : srf)));
@@ -520,7 +560,7 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
 
     const dashboardStats: DashboardStats = {
         totalSrfs: srfs.length,
-        activeDeviations: 0, 
+        activeDeviations: deviationCount,
         readyCertificates: certificateCount, 
         draftSrfs: srfs.filter((srf) => {
             const status = srf.status.toLowerCase();
@@ -548,7 +588,8 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
                         <Route path="srfs/:srfId" element={<CustomerSrfDetailView onStatusChange={handleStatusChange} />} />
                         <Route path="view-firs" element={<FirListView firs={firs} />} />
                         <Route path="fir-remarks/:inwardId" element={<CustomerRemarksPortal />} />
-                        <Route path="deviations" element={<ViewDeviationsPage />} />
+                        <Route path="deviations" element={<CustomerDeviationsPage />} />
+                        <Route path="deviations/:deviationId" element={<CustomerDeviationDetailPage />} />
                         <Route path="certificates" element={<CustomerCertificatesPage />} />
                     </Routes>
                 )}

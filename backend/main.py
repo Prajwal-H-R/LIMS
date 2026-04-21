@@ -55,6 +55,7 @@ from backend.routes.htw.htw_environment_config import router as config_router
 from backend.routes.htw.expiry_routes import router as expiry_router
 from backend.routes.lock_router import router as lock_router
 from backend.routes.lab_scope_router import router as lab_scope_router
+from backend.routes.deviation_router import router as deviation_router
 
 
 # --- BACKGROUND TASKS & LIFESPAN ---
@@ -180,6 +181,7 @@ app.include_router(license_router)
 
 # Lock Router
 app.include_router(lock_router, prefix="/api")
+app.include_router(deviation_router, prefix="/api")
 
 
 # --- ROOT ENDPOINT ---

@@ -238,3 +238,21 @@ def get_loading_point(job_id: int, db: Session = Depends(get_db)):
         return services.get_stored_loading_point(db, job_id)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ==============================================================================
+#                     DEVIATION VIEW (OOT ONLY)
+# ==============================================================================
+
+@router.get("/deviations/oot")
+def get_out_of_tolerance_deviations(
+    threshold: float = 4.0,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns repeatability entries with deviation outside +/- threshold.
+    """
+    try:
+        return services.get_oot_deviations(db, threshold=threshold)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

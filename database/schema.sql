@@ -382,6 +382,58 @@ CREATE TABLE IF NOT EXISTS public.htw_repeatability_reading
         ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS public.deviation
+(
+    id serial NOT NULL,
+    inward_eqp_id integer NOT NULL,
+    certificate_id integer,
+    repeatability_id integer,
+    created_by integer,
+    status character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'OPEN'::character varying,
+    engineer_remarks text COLLATE pg_catalog."default",
+    customer_decision text COLLATE pg_catalog."default",
+    report date,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT deviation_pkey PRIMARY KEY (id),
+    CONSTRAINT deviation_inward_eqp_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT deviation_certificate_fkey FOREIGN KEY (certificate_id)
+        REFERENCES public.htw_certificate (certificate_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT deviation_repeatability_fkey FOREIGN KEY (repeatability_id)
+        REFERENCES public.htw_repeatability (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT deviation_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.deviation_attachments
+(
+    id serial NOT NULL,
+    deviation_id integer NOT NULL,
+    file_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    file_type character varying(50) COLLATE pg_catalog."default",
+    file_url text COLLATE pg_catalog."default" NOT NULL,
+    uploaded_by integer,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT deviation_attachments_pkey PRIMARY KEY (id),
+    CONSTRAINT deviation_attachment_fkey FOREIGN KEY (deviation_id)
+        REFERENCES public.deviation (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT deviation_attachment_uploaded_by_fkey FOREIGN KEY (uploaded_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS public.htw_reproducibility
 (
     id serial NOT NULL,

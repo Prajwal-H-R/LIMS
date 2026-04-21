@@ -1,13 +1,60 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { Routes, Route, useNavigate, useLocation, useParams } from "react-router-dom";
 import { 
   Wrench, FileText, Award, ClipboardList, AlertTriangle, 
-  ArrowRight, Mail, Download, Briefcase, ChevronLeft, XCircle
+  ArrowRight, Mail, Download, Briefcase, ChevronLeft, ChevronDown, ChevronRight, XCircle, Loader2, Eye, Save
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { User } from "../types";
 import { api, ENDPOINTS } from "../api/config";
+
+interface DeviationDetailResponse {
+  deviation_id: number;
+  inward_id?: number | null;
+  inward_eqp_id: number;
+  srf_no?: string | null;
+  customer_dc_no?: string | null;
+  customer_dc_date?: string | null;
+  customer_details?: string | null;
+  nepl_id?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serial_no?: string | null;
+  job_id?: number | null;
+  repeatability_id?: number | null;
+  step_percent?: number | null;
+  set_torque?: number | null;
+  corrected_mean?: number | null;
+  deviation_percent?: number | null;
+  certificate_id?: number | null;
+  status: string;
+  calibration_status?: string | null;
+  engineer_remarks?: string | null;
+  customer_decision?: string | null;
+  report?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  attachments: { id: number; file_name: string; file_type?: string | null; file_url: string; created_at: string }[];
+}
+
+interface OOTDeviationItem {
+  deviation_id?: number | null;
+  status?: string | null;
+  engineer_remarks?: string | null;
+  repeatability_id?: number | null;
+  srf_no?: string | null;
+  customer_dc_no?: string | null;
+  customer_dc_date?: string | null;
+  job_id?: number | null;
+  step_percent?: number | null;
+  deviation_percent?: number | null;
+  customer_decision?: string | null;
+  nepl_id?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serial_no?: string | null;
+}
 
 // --- Import page components ---
 import { CreateInwardPage } from "../components/CreateInwardPage"; 
@@ -78,6 +125,119 @@ const formatTableName = (tableName: string) => {
 
 const DeviationPage = () => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [ootItems, setOotItems] = useState<OOTDeviationItem[]>([]);
+  const [manualItems, setManualItems] = useState<OOTDeviationItem[]>([]);
+  const [activeDeviationSection, setActiveDeviationSection] = useState<"OOT" | "MANUAL">("OOT");
+  const [expandedSrfGroups, setExpandedSrfGroups] = useState<Record<string, boolean>>({});
+  const [expandedNeplGroups, setExpandedNeplGroups] = useState<Record<string, boolean>>({});
+
+  const loadOOT = useCallback(async () => {
+    try {
+      const res = await api.get("/htw-calculations/deviations/oot", { params: { threshold: 4 } });
+      setOotItems(res.data?.items || []);
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      throw new Error(msg || "Failed to load OOT deviations.");
+    }
+  }, []);
+
+  const loadManual = useCallback(async () => {
+    try {
+      const res = await api.get<OOTDeviationItem[]>(ENDPOINTS.STAFF_DEVIATIONS.MANUAL);
+      setManualItems(Array.isArray(res.data) ? res.data : []);
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      throw new Error(msg || "Failed to load manual deviations.");
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadAll = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await Promise.all([loadOOT(), loadManual()]);
+      } catch (e: any) {
+        setError(e?.message || "Failed to load deviations.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadAll();
+  }, [loadOOT, loadManual]);
+
+  const groupedBySrf = useMemo(() => {
+    return ootItems.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
+      const key = item.srf_no?.trim() || "Without SRF";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+  }, [ootItems]);
+
+  const groupKeys = useMemo(() => {
+    const keys = Object.keys(groupedBySrf);
+    return keys.sort((a, b) => {
+      if (a === "Without SRF") return 1;
+      if (b === "Without SRF") return -1;
+      return b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [groupedBySrf]);
+
+  const groupedManualBySrf = useMemo(() => {
+    return manualItems.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
+      const key = item.srf_no?.trim() || "Without SRF";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+  }, [manualItems]);
+
+  const manualGroupKeys = useMemo(() => {
+    const keys = Object.keys(groupedManualBySrf);
+    return keys.sort((a, b) => {
+      if (a === "Without SRF") return 1;
+      if (b === "Without SRF") return -1;
+      return b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [groupedManualBySrf]);
+
+  const truncate = (s: string | null | undefined, n: number) => {
+    if (!s) return "—";
+    const t = s.trim();
+    if (t.length <= n) return t;
+    return `${t.slice(0, n)}…`;
+  };
+
+  const formatDcDate = (value?: string | null) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  const toggleNeplGroup = (groupKey: string) => {
+    setExpandedNeplGroups((prev) => ({
+      ...prev,
+      [groupKey]: !(prev[groupKey] ?? false),
+    }));
+  };
+
+  const toggleSrfGroup = (srfKey: string) => {
+    setExpandedSrfGroups((prev) => ({
+      ...prev,
+      [srfKey]: !(prev[srfKey] ?? false),
+    }));
+  };
+
   return (
     <div className="p-8 bg-white rounded-2xl shadow-lg">
       <div className="flex items-center justify-between mb-6">
@@ -91,7 +251,591 @@ const DeviationPage = () => {
           <span>Back to Dashboard</span>
         </button>
       </div>
-      <p className="text-gray-500">Deviation View Page Content</p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <button
+          type="button"
+          onClick={() => setActiveDeviationSection("OOT")}
+          className={`rounded-xl border p-4 text-left transition-colors ${
+            activeDeviationSection === "OOT"
+              ? "border-red-200 bg-red-50"
+              : "border-gray-200 bg-white hover:bg-gray-50"
+          }`}
+        >
+          <h3 className="font-bold text-red-800">OOT - Out of Tolerance</h3>
+          <p className="text-sm text-red-700 mt-1">Grouped by SRF number. {ootItems.length} record(s).</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveDeviationSection("MANUAL")}
+          className={`rounded-xl border p-4 text-left transition-colors ${
+            activeDeviationSection === "MANUAL"
+              ? "border-gray-300 bg-gray-50"
+              : "border-gray-200 bg-white hover:bg-gray-50"
+          }`}
+        >
+          <h3 className="font-bold text-gray-800">Manual Deviation</h3>
+          <p className="text-sm text-gray-600 mt-1">Grouped by SRF number. {manualItems.length} record(s).</p>
+        </button>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-gray-600 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading OOT deviations...
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">{error}</div>
+      )}
+
+      {!loading && !error && activeDeviationSection === "OOT" && groupKeys.length === 0 && (
+        <div className="p-8 text-center text-gray-500 border border-gray-200 rounded-xl">No OOT entries found.</div>
+      )}
+
+      {!loading && !error && activeDeviationSection === "OOT" && groupKeys.length > 0 && (
+        <div className="space-y-4">
+          {groupKeys.map((srfKey) => {
+            const items = groupedBySrf[srfKey] || [];
+            const first = items[0];
+            const srfStateKey = `OOT__${srfKey}`;
+            const isSrfExpanded = expandedSrfGroups[srfStateKey] ?? false;
+            return (
+              <div key={srfKey} className="border border-gray-200 rounded-xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSrfGroup(srfStateKey)}
+                  className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isSrfExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                    )}
+                    <div className="font-medium text-slate-600">SRF: {srfKey}</div>
+                    {(first?.customer_dc_no || first?.customer_dc_date) && (
+                      <>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold">
+                          DC No: {first?.customer_dc_no || "—"}
+                        </span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold">
+                          DC Date: {formatDcDate(first?.customer_dc_date)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                    {items.length} deviation{items.length > 1 ? "s" : ""}
+                  </span>
+                </button>
+                {isSrfExpanded && <div className="p-3 space-y-3">
+                  {Object.entries(
+                    items.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
+                      const neplKey = item.nepl_id?.trim() || "Without NEPL ID";
+                      if (!acc[neplKey]) acc[neplKey] = [];
+                      acc[neplKey].push(item);
+                      return acc;
+                    }, {})
+                  )
+                    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+                    .map(([neplKey, neplItems]) => {
+                      const expandedKey = `OOT__${srfKey}__${neplKey}`;
+                      const isExpanded = expandedNeplGroups[expandedKey] ?? false;
+                      const statusSet = Array.from(
+                        new Set(neplItems.map((item) => (item.status || "OPEN").toUpperCase()))
+                      );
+                      const neplStatus = statusSet.length === 1 ? statusSet[0] : "MIXED";
+                      return (
+                        <div key={expandedKey} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleNeplGroup(expandedKey)}
+                            className="w-full px-3 py-2 bg-white hover:bg-gray-50 border-b border-gray-100 flex items-center justify-between text-left"
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
+                              )}
+                              <span className="font-medium text-gray-800">NEPL ID: {neplKey}</span>
+                              <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-medium text-xs">
+                                {neplStatus}
+                              </span>
+                            </div>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+                              {neplItems.length} record{neplItems.length > 1 ? "s" : ""}
+                            </span>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead className="bg-slate-50 border-b border-slate-200">
+                                  <tr className="text-left text-slate-600">
+                                    <th className="px-3 py-2 min-w-[220px]">Equipment</th>
+                                    <th className="px-3 py-2">Step %</th>
+                                    <th className="px-3 py-2">Deviation %</th>
+                                    <th className="px-3 py-2 min-w-[220px]">Engineer remarks</th>
+                                    <th className="px-3 py-2 min-w-[240px]">Your decision</th>
+                                    <th className="px-3 py-2 w-[120px]">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {neplItems.map((item) => (
+                                    <tr key={item.deviation_id ?? item.repeatability_id} className="border-t border-slate-100 align-top">
+                                      <td className="px-3 py-3">
+                                        <div className="font-semibold text-slate-900">{item.nepl_id || "Equipment"}</div>
+                                        <div className="text-xs text-slate-600 mt-0.5">
+                                          {[item.make, item.model, item.serial_no].filter(Boolean).join(" · ") || "—"}
+                                        </div>
+                                        <div className="mt-1 text-xs">
+                                          {item.job_id != null ? <span className="text-slate-500">Job #{item.job_id}</span> : <span className="text-slate-400">Job —</span>}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-3 text-slate-700">{item.step_percent ?? "-"}</td>
+                                      <td className="px-3 py-3 font-medium text-red-700">{item.deviation_percent ?? "-"}</td>
+                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.engineer_remarks || undefined}>
+                                        {truncate(item.engineer_remarks, 80)}
+                                      </td>
+                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.customer_decision || undefined}>
+                                        {truncate(item.customer_decision, 60)}
+                                      </td>
+                                      <td className="px-3 py-3">
+                                        {item.deviation_id != null ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => navigate(`/engineer/deviations/${item.deviation_id}`)}
+                                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                            Open
+                                          </button>
+                                        ) : (
+                                          "—"
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!loading && !error && activeDeviationSection === "MANUAL" && manualGroupKeys.length === 0 && (
+        <div className="mt-6 p-8 text-center text-gray-500 border border-gray-200 rounded-xl">No Manual deviation entries found.</div>
+      )}
+
+      {!loading && !error && activeDeviationSection === "MANUAL" && manualGroupKeys.length > 0 && (
+        <div className="space-y-4 mt-6">
+          {manualGroupKeys.map((srfKey) => {
+            const items = groupedManualBySrf[srfKey] || [];
+            const first = items[0];
+            const srfStateKey = `MANUAL__${srfKey}`;
+            const isSrfExpanded = expandedSrfGroups[srfStateKey] ?? false;
+            return (
+              <div key={`manual-${srfKey}`} className="border border-gray-200 rounded-xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSrfGroup(srfStateKey)}
+                  className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left hover:bg-gray-100"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isSrfExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                    )}
+                    <div className="font-medium text-slate-600">SRF: {srfKey}</div>
+                    {(first?.customer_dc_no || first?.customer_dc_date) && (
+                      <>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold">
+                          DC No: {first?.customer_dc_no || "—"}
+                        </span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold">
+                          DC Date: {formatDcDate(first?.customer_dc_date)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+                    {items.length} deviation{items.length > 1 ? "s" : ""}
+                  </span>
+                </button>
+                {isSrfExpanded && <div className="p-3 space-y-3">
+                  {Object.entries(
+                    items.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
+                      const neplKey = item.nepl_id?.trim() || "Without NEPL ID";
+                      if (!acc[neplKey]) acc[neplKey] = [];
+                      acc[neplKey].push(item);
+                      return acc;
+                    }, {})
+                  )
+                    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+                    .map(([neplKey, neplItems]) => {
+                      const expandedKey = `MANUAL__${srfKey}__${neplKey}`;
+                      const isExpanded = expandedNeplGroups[expandedKey] ?? false;
+                      const statusSet = Array.from(
+                        new Set(neplItems.map((item) => (item.status || "OPEN").toUpperCase()))
+                      );
+                      const neplStatus = statusSet.length === 1 ? statusSet[0] : "MIXED";
+                      return (
+                        <div key={expandedKey} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleNeplGroup(expandedKey)}
+                            className="w-full px-3 py-2 bg-white hover:bg-gray-50 border-b border-gray-100 flex items-center justify-between text-left"
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-gray-500" />
+                              )}
+                              <span className="font-medium text-gray-800">NEPL ID: {neplKey}</span>
+                              <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-medium text-xs">
+                                {neplStatus}
+                              </span>
+                            </div>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+                              {neplItems.length} record{neplItems.length > 1 ? "s" : ""}
+                            </span>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead className="bg-slate-50 border-b border-slate-200">
+                                  <tr className="text-left text-slate-600">
+                                    <th className="px-3 py-2 min-w-[220px]">Equipment</th>
+                                    <th className="px-3 py-2">Step %</th>
+                                    <th className="px-3 py-2">Deviation %</th>
+                                    <th className="px-3 py-2 min-w-[220px]">Engineer remarks</th>
+                                    <th className="px-3 py-2 min-w-[240px]">Your decision</th>
+                                    <th className="px-3 py-2 w-[120px]">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {neplItems.map((item) => (
+                                    <tr key={`manual-${item.deviation_id ?? item.repeatability_id}`} className="border-t border-slate-100 align-top">
+                                      <td className="px-3 py-3">
+                                        <div className="font-semibold text-slate-900">{item.nepl_id || "Equipment"}</div>
+                                        <div className="text-xs text-slate-600 mt-0.5">
+                                          {[item.make, item.model, item.serial_no].filter(Boolean).join(" · ") || "—"}
+                                        </div>
+                                        <div className="mt-1 text-xs">
+                                          {item.job_id != null ? <span className="text-slate-500">Job #{item.job_id}</span> : <span className="text-slate-400">Job —</span>}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-3 text-slate-700">{item.step_percent ?? "-"}</td>
+                                      <td className="px-3 py-3 font-medium text-red-700">{item.deviation_percent ?? "-"}</td>
+                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.engineer_remarks || undefined}>
+                                        {truncate(item.engineer_remarks, 80)}
+                                      </td>
+                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.customer_decision || undefined}>
+                                        {truncate(item.customer_decision, 60)}
+                                      </td>
+                                      <td className="px-3 py-3">
+                                        {item.deviation_id != null ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => navigate(`/engineer/deviations/${item.deviation_id}`)}
+                                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                                          >
+                                            <Eye className="h-4 w-4" />
+                                            Open
+                                          </button>
+                                        ) : (
+                                          "—"
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DeviationDetailPage = () => {
+  const navigate = useNavigate();
+  const { deviationId } = useParams<{ deviationId: string }>();
+  const [loading, setLoading] = useState(true);
+  const [savingRemarks, setSavingRemarks] = useState(false);
+  const [closingDeviation, setClosingDeviation] = useState(false);
+  const [terminatingDeviationJob, setTerminatingDeviationJob] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<DeviationDetailResponse | null>(null);
+  const [engineerRemarksInput, setEngineerRemarksInput] = useState("");
+
+  const formatDcDate = (value?: string | null) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  useEffect(() => {
+    const loadDetail = async () => {
+      if (!deviationId) {
+        setError("Deviation ID is missing.");
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.get<DeviationDetailResponse>(ENDPOINTS.STAFF_DEVIATIONS.DETAIL(Number(deviationId)));
+        setDetail(res.data);
+        setEngineerRemarksInput(res.data.engineer_remarks || "");
+      } catch (e: unknown) {
+        const msg =
+          e && typeof e === "object" && "response" in e
+            ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+            : null;
+        setError(msg || "Failed to load deviation record.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadDetail();
+  }, [deviationId]);
+
+  const saveEngineerRemarks = async () => {
+    if (!detail) return;
+    setSavingRemarks(true);
+    setError(null);
+    try {
+      const res = await api.patch<DeviationDetailResponse>(
+        ENDPOINTS.STAFF_DEVIATIONS.UPDATE_ENGINEER_REMARKS(detail.deviation_id),
+        { engineer_remarks: engineerRemarksInput }
+      );
+      setDetail(res.data);
+      setEngineerRemarksInput(res.data.engineer_remarks || "");
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      setError(msg || "Failed to save engineer remarks.");
+    } finally {
+      setSavingRemarks(false);
+    }
+  };
+
+  const closeDeviationRecord = async () => {
+    if (!detail) return;
+    setClosingDeviation(true);
+    setError(null);
+    try {
+      const res = await api.patch<DeviationDetailResponse>(
+        ENDPOINTS.STAFF_DEVIATIONS.CLOSE(detail.deviation_id)
+      );
+      setDetail(res.data);
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      setError(msg || "Failed to close deviation.");
+    } finally {
+      setClosingDeviation(false);
+    }
+  };
+
+  const terminateDeviationJob = async () => {
+    if (!detail) return;
+    setTerminatingDeviationJob(true);
+    setError(null);
+    try {
+      const res = await api.patch<DeviationDetailResponse>(
+        ENDPOINTS.STAFF_DEVIATIONS.TERMINATE_JOB(detail.deviation_id)
+      );
+      setDetail(res.data);
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      setError(msg || "Failed to terminate linked job.");
+    } finally {
+      setTerminatingDeviationJob(false);
+    }
+  };
+
+  return (
+    <div className="p-8 bg-white rounded-2xl shadow-lg">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-gray-900">Deviation Record</h2>
+        <button
+          type="button"
+          onClick={() => navigate("/engineer/deviations")}
+          className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm"
+        >
+          <ChevronLeft size={16} />
+          <span>Back to Deviations</span>
+        </button>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-gray-600 text-sm py-8">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading deviation record...
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700">{error}</div>
+      )}
+
+      {!loading && !error && detail && (
+        <div className="space-y-5 text-sm">
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              disabled={closingDeviation || (detail.status || "").toUpperCase() === "CLOSED"}
+              onClick={closeDeviationRecord}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-black disabled:opacity-60"
+            >
+              {closingDeviation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {(detail.status || "").toUpperCase() === "CLOSED" ? "Closed" : "Close Deviation"}
+            </button>
+            <button
+              type="button"
+              disabled={terminatingDeviationJob}
+              onClick={terminateDeviationJob}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+            >
+              {terminatingDeviationJob ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Terminate Job
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Deviation ID</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">#{detail.deviation_id}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Status</p>
+              <span className={`inline-flex mt-2 text-xs px-2.5 py-1 rounded-full font-semibold border ${
+                (detail.status || "").toUpperCase() === "CLOSED"
+                  ? "bg-green-100 text-green-800 border-green-200"
+                  : (detail.status || "").toUpperCase() === "IN_PROGRESS"
+                    ? "bg-blue-100 text-blue-800 border-blue-200"
+                    : "bg-amber-100 text-amber-900 border-amber-200"
+              }`}>
+                {detail.status || "OPEN"}
+              </span>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Calibration status</p>
+              <span className={`inline-flex mt-2 text-xs px-2.5 py-1 rounded-full font-semibold border ${
+                (detail.calibration_status || "").toLowerCase() === "calibrated"
+                  ? "bg-green-100 text-green-800 border-green-200"
+                  : "bg-gray-100 text-gray-700 border-gray-200"
+              }`}>
+                {detail.calibration_status || "not calibrated"}
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div><span className="text-gray-500">SRF</span> <span className="font-medium text-gray-900 ml-2">{detail.srf_no || "—"}</span></div>
+              <div><span className="text-gray-500">NEPL ID</span> <span className="font-medium text-gray-900 ml-2">{detail.nepl_id || "—"}</span></div>
+              <div><span className="text-gray-500">Job</span> <span className="font-medium text-gray-900 ml-2">{detail.job_id != null ? `#${detail.job_id}` : "—"}</span></div>
+              <div><span className="text-gray-500">Step %</span> <span className="font-medium text-gray-900 ml-2">{detail.step_percent ?? "—"}</span></div>
+              <div><span className="text-gray-500">Deviation %</span> <span className="font-semibold text-red-700 ml-2">{detail.deviation_percent ?? "—"}</span></div>
+              <div><span className="text-gray-500">Report date</span> <span className="font-medium text-gray-900 ml-2">{detail.report || "—"}</span></div>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold">
+                DC No: {detail.customer_dc_no || "—"}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold">
+                DC Date: {formatDcDate(detail.customer_dc_date)}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-gray-500 font-medium mb-1">Customer</p>
+              <p className="text-gray-800">{detail.customer_details || "—"}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="text-gray-500 font-medium mb-1">Equipment</p>
+              <p className="text-gray-800">{[detail.make, detail.model, detail.serial_no].filter(Boolean).join(" · ") || "—"}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <p className="text-gray-500 font-medium mb-1">Engineer remarks</p>
+            <textarea
+              className="w-full border border-gray-300 rounded-lg p-3 text-sm min-h-[110px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Add engineer remarks for this deviation..."
+              value={engineerRemarksInput}
+              onChange={(e) => setEngineerRemarksInput(e.target.value)}
+            />
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                disabled={savingRemarks}
+                onClick={saveEngineerRemarks}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+              >
+                {savingRemarks ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save remarks
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <p className="text-gray-500 font-medium mb-1">Customer decision</p>
+            <p className="text-gray-800 whitespace-pre-wrap bg-white/60 border border-amber-100 rounded-lg p-3 min-h-[48px]">
+              {detail.customer_decision || "—"}
+            </p>
+          </div>
+          {detail.attachments?.length > 0 && (
+            <div>
+              <p className="text-gray-500 font-medium mb-2">Attachments</p>
+              <ul className="space-y-1">
+                {detail.attachments.map((a) => (
+                  <li key={a.id} className="text-blue-600">
+                    <a href={a.file_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      {a.file_name}
+                    </a>
+                    {a.file_type && <span className="text-gray-400 text-xs ml-2">({a.file_type})</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -500,6 +1244,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           <Route path="uncertainty-budget/:inwardId/:equipmentId" element={<UncertaintyBudgetPage />} />
           <Route path="certificates" element={<CertificatesPage />} />
           <Route path="deviations" element={<DeviationPage />} />
+          <Route path="deviations/:deviationId" element={<DeviationDetailPage />} />
         </Routes>
       </main>
       <Footer />
