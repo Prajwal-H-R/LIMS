@@ -1,25 +1,55 @@
-# backend/routes/htw_pressure_gauge_res_router.py
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
-from datetime import datetime
-import logging
 
-from ...db import get_db
-from ... import models
-from ...schemas.htw.htw_pressure_gauge_resolution import (
+from backend.db import get_db
+from backend.schemas.htw.htw_pressure_gauge_resolution import (
     HTWPressureGaugeResolutionResponse,
-    HTWPressureGaugeResolutionCreate  # Ensure this schema is imported
+    HTWPressureGaugeResolutionCreate,
 )
-
-logger = logging.getLogger(__name__)
+from backend.services.htw.htw_pressure_gauge_res_service import (
+    build_template_file,
+    create_resolution,
+    delete_resolution,
+    get_resolution_by_id,
+    get_resolutions,
+    get_unique_units,
+    import_resolutions_from_upload,
+    update_resolution,
+    update_resolution_status,
+)
 
 router = APIRouter(
     prefix="/htw-pressure-gauge-resolutions",
-    tags=["HTW Pressure Gauge Resolution"]
+    tags=["HTW Pressure Gauge Resolution"],
 )
+
+
+# =====================================================================
+# TEMPLATE / IMPORT
+# =====================================================================
+@router.get("/template")
+def download_template(file_format: str = Query("xlsx", pattern="^(xlsx|csv)$")):
+    content, media_type, filename = build_template_file(file_format=file_format)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    if file_format == "csv":
+        return Response(content=content, media_type=media_type, headers=headers)
+
+    return StreamingResponse(
+        iter([content]),
+        media_type=media_type,
+        headers=headers,
+    )
+
+
+@router.post("/import")
+async def import_pressure_gauge_resolutions(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    return await import_resolutions_from_upload(db=db, file=file)
 
 
 # =====================================================================
@@ -28,47 +58,15 @@ router = APIRouter(
 @router.get("/", response_model=List[HTWPressureGaugeResolutionResponse])
 def get_pressure_gauge_resolutions(
     db: Session = Depends(get_db),
-    unit: Optional[str] = Query(None, description="Filter by unit")
+    unit: Optional[str] = Query(None, description="Filter by unit"),
 ):
     """
-    Retrieves all active HTW Pressure Gauge Resolutions.
-    Returns pressure and unit values.
+    Retrieves all pressure gauge resolutions.
     Optionally filters by unit if provided.
     """
     try:
-        query = (
-            db.query(models.HTWPressureGaugeResolution)
-            # You might want to remove this filter if you want to see inactive items in the list to toggle them back
-            # .filter(models.HTWPressureGaugeResolution.is_active == True) 
-        )
-        
-        if unit:
-            query = query.filter(
-                models.HTWPressureGaugeResolution.unit.isnot(None),
-                models.HTWPressureGaugeResolution.unit == unit.strip()
-            )
-        
-        resolutions = query.order_by(models.HTWPressureGaugeResolution.pressure.asc()).all()
-        
-        # Convert to response format
-        result = []
-        for res in resolutions:
-            pressure_value = float(res.pressure) if res.pressure is not None else None
-            result.append(HTWPressureGaugeResolutionResponse(
-                id=res.id,
-                pressure=pressure_value,
-                unit=res.unit,
-                valid_upto=res.valid_upto,
-                is_active=res.is_active
-            ))
-        
-        return result
-
-    except SQLAlchemyError as e:
-        logger.error(f"Database error in get_pressure_gauge_resolutions: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        return get_resolutions(db=db, unit=unit)
     except Exception as e:
-        logger.error(f"Error in get_pressure_gauge_resolutions: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
 
 
@@ -76,50 +74,38 @@ def get_pressure_gauge_resolutions(
 # GET: Unique Units
 # =====================================================================
 @router.get("/units", response_model=List[str])
-def get_unique_units(
-    db: Session = Depends(get_db)
-):
+def get_unique_units_route(db: Session = Depends(get_db)):
     try:
-        units = (
-            db.query(models.HTWPressureGaugeResolution.unit)
-            .filter(models.HTWPressureGaugeResolution.is_active == True)
-            .distinct()
-            .order_by(models.HTWPressureGaugeResolution.unit.asc())
-            .all()
-        )
-        return [unit[0] for unit in units if unit[0]]
+        return get_unique_units(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 # =====================================================================
+# GET: Single Pressure Gauge Resolution
+# =====================================================================
+@router.get("/{resolution_id}", response_model=HTWPressureGaugeResolutionResponse)
+def get_pressure_gauge_resolution(
+    resolution_id: int,
+    db: Session = Depends(get_db),
+):
+    record = get_resolution_by_id(db, resolution_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Resolution not found")
+    return record
+
+
+# =====================================================================
 # POST: Create Pressure Gauge Resolution
 # =====================================================================
-@router.post("/", response_model=HTWPressureGaugeResolutionResponse, status_code=201)
+@router.post("/", response_model=HTWPressureGaugeResolutionResponse, status_code=status.HTTP_201_CREATED)
 def create_pressure_gauge_resolution(
     resolution_data: HTWPressureGaugeResolutionCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
-        # Check if 'updated_at' exists in your model definition before uncommenting it
-        new_resolution = models.HTWPressureGaugeResolution(
-            pressure=resolution_data.pressure,
-            unit=resolution_data.unit,
-            valid_upto=resolution_data.valid_upto,
-            is_active=resolution_data.is_active,
-            created_at=datetime.now(),
-            # updated_at=datetime.now() # Uncomment only if column exists in DB model
-        )
-
-        db.add(new_resolution)
-        db.commit()
-        db.refresh(new_resolution)
-        
-        return new_resolution
-
-    except SQLAlchemyError as e:
-        db.rollback()
-        logger.error(f"Database error creating resolution: {str(e)}", exc_info=True)
+        return create_resolution(db=db, data=resolution_data)
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -130,31 +116,16 @@ def create_pressure_gauge_resolution(
 def update_pressure_gauge_resolution(
     resolution_id: int,
     resolution_data: HTWPressureGaugeResolutionCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
-        resolution = db.query(models.HTWPressureGaugeResolution).filter(
-            models.HTWPressureGaugeResolution.id == resolution_id
-        ).first()
-
-        if not resolution:
+        record = update_resolution(db=db, resolution_id=resolution_id, data=resolution_data)
+        if not record:
             raise HTTPException(status_code=404, detail="Resolution not found")
-
-        resolution.pressure = resolution_data.pressure
-        resolution.unit = resolution_data.unit
-        resolution.valid_upto = resolution_data.valid_upto
-        resolution.is_active = resolution_data.is_active
-        
-        # Check if model has updated_at
-        if hasattr(resolution, 'updated_at'):
-            resolution.updated_at = datetime.now()
-
-        db.commit()
-        db.refresh(resolution)
-        return resolution
-
-    except SQLAlchemyError as e:
-        db.rollback()
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -162,53 +133,36 @@ def update_pressure_gauge_resolution(
 # PATCH: Update Status (Active/Inactive)
 # =====================================================================
 @router.patch("/{resolution_id}/status", response_model=HTWPressureGaugeResolutionResponse)
-def update_resolution_status(
+def update_resolution_status_route(
     resolution_id: int,
     is_active: bool = Query(..., description="New active status"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
-        resolution = db.query(models.HTWPressureGaugeResolution).filter(
-            models.HTWPressureGaugeResolution.id == resolution_id
-        ).first()
-
-        if not resolution:
+        record = update_resolution_status(db=db, resolution_id=resolution_id, is_active=is_active)
+        if not record:
             raise HTTPException(status_code=404, detail="Resolution not found")
-
-        resolution.is_active = is_active
-        
-        if hasattr(resolution, 'updated_at'):
-            resolution.updated_at = datetime.now()
-
-        db.commit()
-        db.refresh(resolution)
-        return resolution
-
-    except SQLAlchemyError as e:
-        db.rollback()
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 # =====================================================================
 # DELETE: Delete Pressure Gauge Resolution
 # =====================================================================
-@router.delete("/{resolution_id}", status_code=204)
+@router.delete("/{resolution_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_pressure_gauge_resolution(
     resolution_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     try:
-        resolution = db.query(models.HTWPressureGaugeResolution).filter(
-            models.HTWPressureGaugeResolution.id == resolution_id
-        ).first()
-
-        if not resolution:
+        success = delete_resolution(db=db, resolution_id=resolution_id)
+        if not success:
             raise HTTPException(status_code=404, detail="Resolution not found")
-
-        db.delete(resolution)
-        db.commit()
-        return None
-
-    except SQLAlchemyError as e:
-        db.rollback()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
