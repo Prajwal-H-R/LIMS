@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
+import React, { useState, useEffect, useCallback, FormEvent, useRef } from 'react';
 import { createPortal } from 'react-dom'; 
 import { 
   Loader2, Plus, ArrowLeft, CheckCircle, 
   PowerOff, Edit, AlertCircle, Save, Scale,
-  Trash2, X, 
+  Trash2, X, Download, Upload,
 } from 'lucide-react';
 import { api } from '../../api/config';
 
@@ -77,6 +77,11 @@ export const HTWCMCReferenceManager: React.FC<HTWCMCReferenceManagerProps> = ({ 
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+
+  // --- STATE: Import / Template ---
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   // Handle Scroll Locking
   useEffect(() => {
@@ -166,6 +171,73 @@ export const HTWCMCReferenceManager: React.FC<HTWCMCReferenceManagerProps> = ({ 
     }
   };
 
+  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
+    try {
+      const response = await api.get('/htw/cmc/template', {
+        params: { file_format: fileFormat },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type:
+          fileFormat === 'csv'
+            ? 'text/csv;charset=utf-8;'
+            : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download =
+        fileFormat === 'csv'
+          ? 'htw_cmc_template.csv'
+          : 'htw_cmc_template.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to download template');
+    }
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportError(null);
+    setImporting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      await api.post('/htw/cmc/import', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      await fetchData();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setImportError(detail);
+      } else if (Array.isArray(detail)) {
+        setImportError(detail.map((d: any) => d.msg || String(d)).join('\n'));
+      } else {
+        setImportError('Failed to import file');
+      }
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
   // --- RENDER ---
   if (viewMode === 'add') {
     return (
@@ -193,15 +265,45 @@ export const HTWCMCReferenceManager: React.FC<HTWCMCReferenceManagerProps> = ({ 
              <p className="text-sm text-gray-500">Hydraulic CMC Backup Data Limits</p>
           </div>
         </div>
-        <button 
-          onClick={handleAddNewClick} 
-          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
-        >
-            <Plus size={16} className="mr-2" /> Add New Scope
-        </button>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => downloadTemplate('xlsx')}
+            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
+          >
+            <Download size={16} className="mr-2" /> Download Template
+          </button>
+
+          <button
+            type="button"
+            onClick={handleImportClick}
+            disabled={importing}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-70"
+          >
+            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
+            Import Excel/CSV
+          </button>
+
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.csv"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+
+          <button 
+            onClick={handleAddNewClick} 
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
+          >
+              <Plus size={16} className="mr-2" /> Add New Scope
+          </button>
+        </div>
       </div>
 
       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
 
       {/* Table */}
       {loading ? (
@@ -364,7 +466,7 @@ const AddCMCPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting }) =>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
+
             {/* Range */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Lower Range<span className="text-red-500">*</span></label>
@@ -496,7 +598,7 @@ const EditCMCModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, submit
     // Z-INDEX set high, though portal moves it to body level
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl animate-fadeIn overflow-hidden">
-        
+
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -516,7 +618,7 @@ const EditCMCModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, submit
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Lower Range<span className="text-red-500">*</span></label>
               <input

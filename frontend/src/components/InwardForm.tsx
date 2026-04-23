@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { 
   Plus, Trash2, Eye, Save, FileText, Loader2, X, ArrowLeft, 
   Camera, Clock, Send, Wrench, AlertCircle, CheckCircle2, 
-  Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, Lock, Settings
+  Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, Lock
 } from 'lucide-react';
 import { InwardForm as InwardFormType, EquipmentDetail as BaseEquipmentDetail, InwardDetail } from '../types/inward';
 // import { EquipmentDetailsModal } from './EquipmentDetailsModal';
@@ -11,7 +11,6 @@ import { api, ENDPOINTS, BACKEND_ROOT_URL } from '../api/config';
 import { useAuth } from '../auth/AuthProvider';
 import { generateStandardInwardPDF } from '../utils/InwardPDFHelper'; 
 import { useRecordLock } from '../hooks/useRecordLock'; 
-import { HTWManufacturerSpecsManager } from './AdminComponents/HTWManufacturerSpecsManager';
 
 // --- TYPE DEFINITIONS ---
 
@@ -156,10 +155,8 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
-  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false); 
-  const [showSpecsManager, setShowSpecsManager] = useState(false); // <-- NEW: State for internal routing
   
-  // State for Row Deletion Modal
+  // NEW: State for Row Deletion Modal
   const [rowToDelete, setRowToDelete] = useState<number | null>(null);
    
   const [materialOptions, setMaterialOptions] = useState<string[]>(INITIAL_MATERIAL_DESCRIPTIONS);
@@ -567,7 +564,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     }
   };
 
-  // Sync Customer Email Effect 
+  // --- [FIX] Sync Customer Email Effect ---
   useEffect(() => {
     if (selectedCustomerId && customers.length > 0) {
       const customer = customers.find(c => c.customer_id === selectedCustomerId);
@@ -579,14 +576,18 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     }
   }, [selectedCustomerId, customers]);
 
-  // INITIALIZATION EFFECT 
+  // --- INITIALIZATION EFFECT ---
+  // Updated to include Ref check for StrictMode double-fetch prevention
   useEffect(() => {
+    // 1. Determine the key for the current operation
     const currentKey = isEditMode && editId ? editId : (initialDraftId ?? 'new');
 
+    // 2. If we already initialized this specific form ID/type, skip
     if (lastLoadedIdRef.current === currentKey) {
         return;
     }
     
+    // 3. Mark as loaded
     lastLoadedIdRef.current = currentKey;
 
     const init = async () => {
@@ -637,7 +638,9 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     }
   };
 
+  // [FIX] Updated Back Logic
   const handleBackToPortal = () => {
+    
     if (hasFormData && !isEditMode && JSON.stringify({ formData, equipmentList }) !== lastSavedDataRef.current && !isLocked) {
       if(!window.confirm('You have unsaved changes. Are you sure you want to go back?')) {
         return;
@@ -653,18 +656,6 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       }
       navigate('/engineer/create-inward') ; 
     }
-  };
-
-  // --- NEW: Handle Navigation to Specs (Local View) ---
-  const handleNavigateToSpecs = () => {
-    setShowSettingsDropdown(false);
-
-    // Save draft just in case before navigating away
-    if (!isEditMode && hasFormData && !isLocked) {
-      triggerAutoSave();
-    }
-
-    setShowSpecsManager(true);
   };
 
   const triggerAutoSave = async () => {
@@ -824,6 +815,11 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
 
   const handleEquipmentChange = async (index: number, field: keyof EquipmentDetail, value: string | number) => {
     if (isLocked) return; 
+
+    // Get the current material description to determine behavior
+    const currentMaterial = equipmentList[index]?.material_desc;
+    const isHydraulic = currentMaterial === "Hydraulic Torque Wrench";
+
     // Immediate state update
     setEquipmentList(currentList => {
       const updatedList = [...currentList];
@@ -840,14 +836,18 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
             delete (equipmentToUpdate as any).out_dc;
           }
       } else if (field === 'make') {
-          // If Make changes: Update Make, Clear Model & Range
           equipmentToUpdate.make = String(value);
-          equipmentToUpdate.model = '';
-          equipmentToUpdate.range = '';
+          // Only clear model/range if we are in Dropdown mode (Hydraulic)
+          if (isHydraulic) {
+            equipmentToUpdate.model = '';
+            equipmentToUpdate.range = '';
+          }
       } else if (field === 'model') {
-          // If Model changes: Update Model, temporarily clear range until fetch
           equipmentToUpdate.model = String(value);
-          equipmentToUpdate.range = 'Loading...';
+          // Only set "Loading" for range if we are in Dropdown mode
+          if (isHydraulic) {
+            equipmentToUpdate.range = 'Loading...';
+          }
       } else {
         (equipmentToUpdate as any)[field] = value;
       }
@@ -855,29 +855,29 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       return updatedList;
     });
 
-    // Side effects (API calls) for cascading dropdowns
-    if (field === 'make') {
-      const newMake = String(value);
-      if (newMake) {
-        await fetchModelsForMake(newMake);
-      }
-    } else if (field === 'model') {
-      // Fetch Range dynamically
-      const currentItem = equipmentList[index];
-      const currentMake = currentItem.make;
-      const newModel = String(value);
+    // Side effects (API calls) - ONLY if Hydraulic Torque Wrench
+    if (isHydraulic) {
+      if (field === 'make') {
+        const newMake = String(value);
+        if (newMake) {
+          await fetchModelsForMake(newMake);
+        }
+      } else if (field === 'model') {
+        const currentItem = equipmentList[index];
+        const currentMake = currentItem.make;
+        const newModel = String(value);
 
-      if (currentMake && newModel) {
-        const fetchedRange = await fetchRangeForMakeModel(currentMake, newModel);
-        
-        // Update state again with the fetched range
-        setEquipmentList(curr => {
-          const up = [...curr];
-          if (up[index]) {
-            up[index] = { ...up[index], range: fetchedRange };
-          }
-          return up;
-        });
+        if (currentMake && newModel) {
+          const fetchedRange = await fetchRangeForMakeModel(currentMake, newModel);
+          
+          setEquipmentList(curr => {
+            const up = [...curr];
+            if (up[index]) {
+              up[index] = { ...up[index], range: fetchedRange };
+            }
+            return up;
+          });
+        }
       }
     }
   };
@@ -905,6 +905,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     });
   };
 
+  // --- NEW: REPLACED OLD DELETE LOGIC WITH MODAL HANDLERS ---
   const confirmDeleteRow = () => {
     if (rowToDelete === null) return;
     const indexToRemove = rowToDelete;
@@ -966,9 +967,11 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
 
   const viewEquipmentDetails = (index: number) => setSelectedEquipment(equipmentList[index]);
 
+  // --- NEW: HANDLER FOR STANDARD PDF DOWNLOAD ---
   const handleStandardDownload = async (e: React.MouseEvent) => {
     e.preventDefault();
     
+    // [FIX] If SRF is TBD, fetch the next number just for PDF generation (do not save to state)
     let displaySrf = formData.srf_no;
     if (displaySrf === 'TBD' || displaySrf === 'Loading...') {
        displaySrf = await fetchNextSrfNo();
@@ -979,14 +982,16 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       return;
     }
     
+    // Create a temporary list with correct NEPL IDs just for the PDF using the fetched SRF
     const formattedList = equipmentList.map((eq, index) => ({
       ...eq,
       nepl_id: `${displaySrf}-${index + 1}`
     }));
 
+    // Include full customer details from selectedCustomerData for PDF
     const pdfFormData = {
       ...formData,
-      srf_no: displaySrf, 
+      srf_no: displaySrf, // Use the proper SRF No here
       contact_person: selectedCustomerData?.contact_person || '',
       phone: selectedCustomerData?.phone || '',
       email: selectedCustomerData?.email || '',
@@ -1003,6 +1008,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     }
   };
 
+  // --- SUBMIT HANDLERS ---
   const handlePreviewClick = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLocked) return; 
@@ -1015,6 +1021,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         return;
     }
 
+    // [NEW] If not editing, fetch the next available SRF number for the preview
     if (!isEditMode && formData.srf_no === "TBD") {
       const nextSrf = await fetchNextSrfNo();
       setFormData(prev => ({ ...prev, srf_no: nextSrf }));
@@ -1023,6 +1030,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     setShowPreviewModal(true);
   };
 
+  // Fixed: Removed unused 'source' parameter from payload generation logic inside here
   const handleFinalSubmit = async () => {
     if (isLocked) return; 
     setShowPreviewModal(false);
@@ -1070,8 +1078,15 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         };
       };
 
+      // Map visible items
       const visiblePayload = equipmentList.map((eq, idx) => formatItemForPayload(eq, idx));
+      
+      // Map hidden items (from hiddenEquipmentsRef)
       const hiddenPayload = hiddenEquipmentsRef.current.map((eq, idx) => {
+          // Adjust index for hidden items to continue sequence or handle as needed
+          // For simplicity in this fix, reusing the formatter, though index might clash if not careful.
+          // In real app, you might want to preserve their original NEPL IDs or append.
+          // Assuming strict append logic for now:
           return formatItemForPayload(eq, equipmentList.length + idx);
       });
       
@@ -1141,8 +1156,13 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     }
   };
 
-  const addEmailField = () => setReportEmails(prev => [...prev, '']);
-  const removeEmailField = (index: number) => setReportEmails(prev => prev.filter((_, i) => i !== index));
+  const addEmailField = () => {
+    setReportEmails(prev => [...prev, '']);
+  };
+
+  const removeEmailField = (index: number) => {
+    setReportEmails(prev => prev.filter((_, i) => i !== index));
+  };
 
   const handleSendFir = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1153,6 +1173,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         emails: validEmails, send_later: false 
       });
       showMessage('success', `FIR sent successfully!`);
+      // [FIX] Changed navigation to Dashboard/Portal
       navigate('/engineer'); 
     } catch (error: any) {
       showMessage('error', 'Failed to send FIR.');
@@ -1164,6 +1185,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     try {
       await api.post(`${ENDPOINTS.STAFF.INWARDS}/${lastSavedInwardId}/send-report`, { send_later: true });
       showMessage('success', `FIR Scheduled.`);
+      // [FIX] Changed navigation to Dashboard/Portal
       navigate('/engineer');
     } catch (error: any) {
       showMessage('error', 'Failed to schedule FIR.');
@@ -1175,9 +1197,13 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   const renderAddCustomerModal = () => { if (!showAddCustomerModal) return null; return ( <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4"> <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto relative"> <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl"> <div className="flex items-center gap-3"> <UserPlus className="text-blue-600" size={24} /> <h2 className="text-xl font-bold text-gray-800">Register New Company</h2> </div> <button onClick={() => setShowAddCustomerModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"> <X size={24} /> </button> </div> <form onSubmit={handleCreateCustomer} className="p-6 space-y-5"> <div className="space-y-4"> <div> <label className="block text-sm font-semibold text-gray-700 mb-1">Company Name *</label> <input name="company_name" required value={newCustomerData.company_name} onChange={handleNewCustomerChange} placeholder="e.g., ACME Industries Pvt Ltd" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> </div> <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"> <div><label className="block text-sm font-semibold text-gray-700 mb-1">Contact Person *</label><input name="contact_person" required value={newCustomerData.contact_person} onChange={handleNewCustomerChange} placeholder="Full Name" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /></div> <div><label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label><input name="phone" required value={newCustomerData.phone} onChange={handleNewCustomerChange} placeholder="Mobile/Landline" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /></div> </div> <div> <label className="block text-sm font-semibold text-gray-700 mb-1">Email (for Invitation) *</label> <input type="email" name="email" required value={newCustomerData.email} onChange={handleNewCustomerChange} placeholder="admin@company.com" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> <p className="text-xs text-gray-500 mt-1">An invitation to access the portal will be sent here.</p> </div> <div className="pt-2 border-t"> <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><MapPin size={16} className="text-gray-500"/> Ship To Address *</label> <textarea name="ship_to_address" required value={newCustomerData.ship_to_address} onChange={handleNewCustomerChange} rows={2} placeholder="Shipping location..." className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none resize-none" /> </div> <div> <div className="flex items-center justify-between mb-1"> <label className="block text-sm font-semibold text-gray-700">Bill To Address *</label> <label className="flex items-center space-x-2 text-sm text-blue-600 cursor-pointer"> <input type="checkbox" name="same_as_ship" checked={newCustomerData.same_as_ship} onChange={handleNewCustomerChange} className="rounded text-blue-600 focus:ring-blue-500" /> <span>Same as Ship To</span> </label> </div> <textarea name="bill_to_address" required value={newCustomerData.bill_to_address} onChange={handleNewCustomerChange} disabled={newCustomerData.same_as_ship} rows={2} placeholder="Billing location..." className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none resize-none ${newCustomerData.same_as_ship ? 'bg-gray-100 text-gray-500' : ''}`} /> </div> </div> <div className="flex gap-3 pt-2"> <button type="button" onClick={() => setShowAddCustomerModal(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-gray-700">Cancel</button> <button type="submit" disabled={isCreatingCustomer} className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-blue-400 flex justify-center items-center gap-2"> {isCreatingCustomer ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />} <span>Register & Invite</span> </button> </div> </form> </div> </div> ); };
   const renderPreviewModal = () => { 
     if (!showPreviewModal) return null; 
+    
+    // Logic to close modal and reset SRF to TBD if not editing
     const handleClosePreview = () => {
         setShowPreviewModal(false);
-        if (!isEditMode) setFormData(prev => ({ ...prev, srf_no: 'TBD' }));
+        if (!isEditMode) {
+            setFormData(prev => ({ ...prev, srf_no: 'TBD' }));
+        }
     };
 
     return ( 
@@ -1188,6 +1214,8 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
               <FileText className="text-blue-600" size={28} /> 
               <h2 className="text-2xl font-bold text-gray-800">Inward Receipt Preview</h2> 
             </div> 
+            
+            {/* UPDATED: Added logic to reset to TBD on close */}
             <button onClick={handleClosePreview} className="text-gray-400 hover:text-red-500"> 
               <X size={28} /> 
             </button> 
@@ -1257,7 +1285,10 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
             </div> 
           </div> 
           <div className="p-6 border-t bg-gray-50 flex justify-end gap-4 rounded-b-lg"> 
+            
+            {/* UPDATED: Using the helper function here too */}
             <button onClick={handleClosePreview} className="px-6 py-3 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 font-medium">Cancel / Edit</button> 
+            
             <button onClick={handleFinalSubmit} className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold shadow-md"> 
               <Download size={20} /> <span>{isEditMode ? 'Update' : 'Submit & Download PDF'}</span> 
             </button> 
@@ -1267,6 +1298,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     ); 
   };
   
+  // Updated Render Email Modal to call handleScheduleFir on close (which now navigates to portal)
   const renderEmailModal = () => !showEmailModal ? null : ( 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70"> 
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl m-4 p-8 relative"> 
@@ -1304,11 +1336,13 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
 
   const getModalEquipment = (): BaseEquipmentDetail | null => { if (!selectedEquipment) return null; const { inspe_status, inspe_remarks, accessories_included, ...rest } = selectedEquipment; const modalEquipment: BaseEquipmentDetail = { ...rest, calibration_by: selectedEquipment.calibration_by === 'On-Site' ? 'Out Lab' : selectedEquipment.calibration_by, inspe_notes: inspe_status === 'OK' ? 'OK' : (inspe_status === 'Not OK' ? 'Not OK' : inspe_remarks), }; return modalEquipment; }
 
+  // --- [NEW] Style for Locked State ---
   const formOpacity = isLocked ? "opacity-70 pointer-events-none select-none" : "opacity-100";
 
   if (isLoadingData) {
     return (
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-gray-100 relative overflow-hidden animate-in fade-in duration-300">
+        {/* Header Skeleton */}
         <div className="flex flex-wrap items-center justify-between border-b pb-4 mb-6 gap-4">
           <div className="flex items-center space-x-4">
             <div className="h-8 w-8 bg-gray-200 rounded animate-pulse" />
@@ -1319,15 +1353,18 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
           <div className="h-10 w-24 bg-gray-200 rounded-lg animate-pulse" />
         </div>
 
+        {/* Basic Info Grid Skeleton */}
         <div className="mb-8">
           <div className="h-6 w-40 bg-gray-200 rounded mb-4 animate-pulse" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6 bg-gray-50 rounded-lg border border-gray-100">
+             {/* Simulate 6 input fields */}
              {[...Array(6)].map((_, i) => (
                <div key={i}>
                   <div className="h-4 w-32 bg-gray-200 rounded mb-2 animate-pulse" />
                   <div className="h-10 w-full bg-white border border-gray-200 rounded-lg animate-pulse" />
                </div>
              ))}
+             {/* Simulate Textarea */}
              <div className="md:col-span-2 lg:col-span-3 mt-2">
                 <div className="h-4 w-48 bg-gray-200 rounded mb-2 animate-pulse" />
                 <div className="h-20 w-full bg-white border border-gray-200 rounded-lg animate-pulse" />
@@ -1335,30 +1372,35 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
           </div>
         </div>
 
+        {/* Equipment Table Skeleton */}
         <div className="mb-6">
            <div className="flex justify-between items-center mb-4">
              <div className="h-6 w-48 bg-gray-200 rounded animate-pulse" />
            </div>
            <div className="overflow-hidden border rounded-lg bg-white shadow-sm">
+              {/* Table Header */}
               <div className="bg-slate-100 p-3 flex gap-4 border-b border-slate-200">
                  {[...Array(6)].map((_, i) => (
                     <div key={i} className="h-4 bg-slate-300 rounded animate-pulse flex-1" />
                  ))}
               </div>
+              {/* Table Rows (Simulate 3 rows) */}
               {[...Array(3)].map((_, rowIdx) => (
                 <div key={rowIdx} className="p-3 flex gap-4 border-b border-slate-100 items-center h-16">
-                   <div className="h-4 w-8 bg-gray-100 rounded animate-pulse" /> 
-                   <div className="h-8 flex-1 bg-gray-100 rounded animate-pulse" /> 
-                   <div className="h-8 flex-1 bg-gray-100 rounded animate-pulse" /> 
-                   <div className="h-8 flex-1 bg-gray-100 rounded animate-pulse" /> 
-                   <div className="h-8 w-24 bg-gray-100 rounded animate-pulse" /> 
-                   <div className="h-8 w-16 bg-gray-100 rounded animate-pulse" /> 
+                   <div className="h-4 w-8 bg-gray-100 rounded animate-pulse" /> {/* Index */}
+                   <div className="h-8 flex-1 bg-gray-100 rounded animate-pulse" /> {/* Input */}
+                   <div className="h-8 flex-1 bg-gray-100 rounded animate-pulse" /> {/* Input */}
+                   <div className="h-8 flex-1 bg-gray-100 rounded animate-pulse" /> {/* Input */}
+                   <div className="h-8 w-24 bg-gray-100 rounded animate-pulse" /> {/* Qty */}
+                   <div className="h-8 w-16 bg-gray-100 rounded animate-pulse" /> {/* Actions */}
                 </div>
               ))}
            </div>
+           {/* Add Button Skeleton */}
            <div className="mt-4 h-12 w-full bg-gray-50 border-2 border-dashed border-gray-200 rounded-lg animate-pulse" />
         </div>
 
+        {/* Footer Actions Skeleton */}
         <div className="flex justify-end pt-6 border-t mt-8 gap-4">
            <div className="h-12 w-40 bg-gray-200 rounded-lg animate-pulse" />
            <div className="h-12 w-40 bg-gray-300 rounded-lg animate-pulse" />
@@ -1367,23 +1409,10 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     );
   }
 
-  // --- NEW: Render Specs Manager if active ---
-  if (showSpecsManager) {
-    return (
-      <div className="animate-in fade-in duration-300">
-        <HTWManufacturerSpecsManager onBack={() => {
-            // When returning, re-fetch makes to include any new items!
-            fetchMakes();
-            setShowSpecsManager(false);
-        }} />
-      </div>
-    );
-  }
-
   return (
     <div className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-gray-100 relative overflow-hidden">
       
-      {/* LOCKED BANNER */}
+      {/* --- [NEW] LOCKED BANNER --- */}
       {isLocked && (
         <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-3 relative z-10 mb-4 rounded-lg">
             <div className="p-1.5 bg-amber-100 rounded-full text-amber-600">
@@ -1404,16 +1433,12 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
           <FileText className="h-8 w-8 text-blue-600" />
           <div><h1 className="text-3xl font-bold text-gray-900">{isEditMode ? 'Edit Inward Form' : 'New Inward Form'}</h1></div>
         </div>
-        
         <div className="flex items-center space-x-2 sm:space-x-4">
            {!isEditMode && (
             <div className="flex items-center space-x-2 text-sm text-gray-600 bg-gray-100 px-4 py-2 rounded-lg border border-gray-200">
               {getDraftStatusIcon()} <span className="font-medium">{getDraftStatusText()}</span>
             </div>
            )}
-
-          
-
           <button 
             type="button" 
             onClick={handleBackToPortal} 
@@ -1442,14 +1467,18 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         </div>
       )}
 
+      {/* Main Form - Applied Opacity Class */}
+      {/* [FIX] Added onKeyDown to prevent Enter key submission */}
       <form 
         onSubmit={handlePreviewClick} 
         className={formOpacity}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.target as any).type !== 'textarea') e.preventDefault(); }}
       >
+        {/* ... [Basic Info Block - Same as before] ... */}
         <div className="mb-8">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">Basic Information</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6 bg-gray-50 rounded-lg border">
+             {/* SRF No Display */}
              <div className="md:col-span-1">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">SRF No </label>
                 <div className="flex items-center px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 font-bold">
@@ -1457,6 +1486,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                 </div>
              </div>
              
+             {/* Other Fields */}
              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Material Inward Date *</label><input type="date" name="material_inward_date" value={formData.material_inward_date} onChange={handleFormChange} required className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Customer DC No. *</label><input type="text" name="customer_dc_no" value={formData.customer_dc_no} onChange={handleFormChange} required placeholder="Enter Customer DC Number" className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Customer DC Date</label><input type="date" name="customer_dc_date" value={formData.customer_dc_date} onChange={handleFormChange} className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
@@ -1498,35 +1528,6 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         <div className="mb-6">
            <div className="flex justify-between items-center mb-4">
              <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2"><Wrench size={24} className="text-blue-600" />Equipment Details</h2>
-             {/* NEW: Settings Dropdown */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
-              className="p-2 text-gray-600 bg-gray-100 border border-gray-200 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Settings & Configurations"
-            >
-              <Settings size={20} />
-            </button>
-            
-            {showSettingsDropdown && (
-              <>
-                <div className="fixed inset-0 z-[90]" onClick={() => setShowSettingsDropdown(false)}></div>
-                <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-xl z-[100] py-1">
-                  <div className="p-1">
-                    <button
-                      type="button"
-                      onClick={handleNavigateToSpecs}
-                      className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-md flex items-center gap-2 font-medium transition-colors"
-                    >
-                      <Wrench size={16} className="text-blue-500" />
-                      <span>Add/Update Manufacturer Specs</span>
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
            </div>
            <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
               <table className="w-full text-sm border-collapse min-w-[2500px]">
@@ -1565,7 +1566,11 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                     </tr>
                 </thead>
                 <tbody>
-                  {equipmentList.map((equipment, index) => (
+                  {equipmentList.map((equipment, index) => {
+                    // Check if current row is Hydraulic Torque Wrench
+                    const isHydraulic = equipment.material_desc === "Hydraulic Torque Wrench";
+
+                    return (
                     <React.Fragment key={index}>
                       <tr className={`hover:bg-slate-50 group ${equipment.inspe_status === 'Not OK' ? 'bg-orange-50' : ''}`}>
                         <td className="sticky left-0 z-10 p-3 text-center font-semibold text-slate-500 bg-white group-hover:bg-slate-50">{index + 1}</td>
@@ -1597,42 +1602,72 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                                 <option value="ADD_NEW_CUSTOM" className="font-bold text-blue-600 bg-blue-50">+ Add New Item</option>
                             </select>
                         </td>
+
                         <td className="p-2">
-                          <select 
-                            value={equipment.make} 
-                            onChange={e => handleEquipmentChange(index, 'make', e.target.value)} 
-                            required 
-                            className="w-full px-2 py-1.5 border rounded-md bg-white"
-                            disabled={isLocked}
-                          >
-                            <option value="">Select Make</option>
-                            {makeOptions.map(make => (
-                              <option key={make} value={make}>{make}</option>
-                            ))}
-                          </select>
+                          {isHydraulic ? (
+                            <select 
+                              value={equipment.make} 
+                              onChange={e => handleEquipmentChange(index, 'make', e.target.value)} 
+                              required 
+                              className="w-full px-2 py-1.5 border rounded-md bg-white"
+                              disabled={isLocked}
+                            >
+                              <option value="">Select Make</option>
+                              {makeOptions.map(make => (
+                                <option key={make} value={make}>{make}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input 
+                              type="text"
+                              value={equipment.make}
+                              onChange={e => handleEquipmentChange(index, 'make', e.target.value)}
+                              required
+                              placeholder="Enter Make"
+                              className="w-full px-2 py-1.5 border rounded-md bg-white"
+                              disabled={isLocked}
+                            />
+                          )}
                         </td>
+
                         <td className="p-2">
-                          <select 
-                            value={equipment.model} 
-                            onChange={e => handleEquipmentChange(index, 'model', e.target.value)} 
-                            required 
-                            disabled={!equipment.make || isLocked}
-                            className="w-full px-2 py-1.5 border rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
-                          >
-                            <option value="">{equipment.make ? 'Select Model' : 'Select Make first'}</option>
-                            {equipment.make && modelCache[equipment.make]?.map(model => (
-                              <option key={model} value={model}>{model}</option>
-                            ))}
-                          </select>
+                          {isHydraulic ? (
+                            <select 
+                              value={equipment.model} 
+                              onChange={e => handleEquipmentChange(index, 'model', e.target.value)} 
+                              required 
+                              disabled={!equipment.make || isLocked}
+                              className="w-full px-2 py-1.5 border rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            >
+                              <option value="">{equipment.make ? 'Select Model' : 'Select Make first'}</option>
+                              {equipment.make && modelCache[equipment.make]?.map(model => (
+                                <option key={model} value={model}>{model}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input 
+                              type="text"
+                              value={equipment.model}
+                              onChange={e => handleEquipmentChange(index, 'model', e.target.value)}
+                              required
+                              placeholder="Enter Model"
+                              className="w-full px-2 py-1.5 border rounded-md bg-white"
+                              disabled={isLocked}
+                            />
+                          )}
                         </td>
+
                         <td className="p-2">
                           <input 
                             value={equipment.range} 
-                            readOnly 
-                            className="w-full px-2 py-1.5 border rounded-md bg-gray-50 cursor-not-allowed" 
-                            placeholder={equipment.model ? 'Auto-filled from spec' : 'Select Model first'}
+                            readOnly={isHydraulic} 
+                            onChange={e => !isHydraulic && handleEquipmentChange(index, 'range', e.target.value)}
+                            className={`w-full px-2 py-1.5 border rounded-md ${isHydraulic ? 'bg-gray-50 cursor-not-allowed' : 'bg-white'}`}
+                            placeholder={isHydraulic ? (equipment.model ? 'Auto-filled from spec' : 'Select Model first') : 'Enter Range'}
+                            disabled={isLocked}
                           />
                         </td>
+
                         <td className="p-2"><input value={equipment.serial_no} onChange={e=>handleEquipmentChange(index,'serial_no',e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked} /></td>
                         <td className="p-2"><input type="number" value={equipment.qty} min={1} onChange={e=>handleEquipmentChange(index,'qty',e.target.value)} required className="w-full px-2 py-1.5 border rounded-md text-center" disabled={isLocked} /></td>
                         <td className="p-2">
@@ -1703,6 +1738,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                              <label htmlFor={`photo-${index}`} className={`cursor-pointer bg-gray-200 px-2 py-1 rounded text-xs flex items-center gap-1 ${isLocked ? 'pointer-events-none opacity-50' : ''}`}><Camera size={12}/> Attach</label>
                              <input id={`photo-${index}`} type="file" multiple accept="image/*" className="hidden" onChange={e=>handlePhotoChange(index,e)} disabled={isLocked} />
                            </div>
+                           {/* Preview Images */}
                            <div className="flex flex-wrap gap-1 mt-1">
                              {equipment.existingPhotoUrls?.map((url, i) => (
                                  <a key={`ex-${i}`} href={resolvePhotoUrl(url)} target="_blank" rel="noreferrer" className="w-8 h-8 border pointer-events-auto"><img src={resolvePhotoUrl(url)} className="w-full h-full object-cover"/></a>
@@ -1719,6 +1755,8 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                         <td className="sticky right-0 z-10 p-2 text-center bg-white group-hover:bg-slate-50">
                            <div className="flex justify-center gap-2">
                              <button type="button" onClick={() => viewEquipmentDetails(index)} className="text-blue-600 hover:bg-blue-100 p-1 rounded pointer-events-auto"><Eye size={16}/></button>
+                             
+                             {/* UPDATED: Only show Trash icon if not edit/locked, and now opens Modal */}
                              {!isEditMode && !isLocked && (
                                 <button type="button" onClick={() => setRowToDelete(index)} className="text-red-600 hover:bg-red-100 p-1 rounded">
                                     <Trash2 size={16}/>
@@ -1728,11 +1766,12 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                         </td>
                       </tr>
                     </React.Fragment>
-                  ))}
+                  )})}
                 </tbody>
               </table>
            </div>
            
+           {/* Add Equipment Button Below Table - Only show if creating new (not edit mode) */}
            {!isEditMode && !isLocked && (
              <button 
                 type="button" 
@@ -1769,6 +1808,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       </form>
 
       {/* Modals */}
+      {/* {selectedEquipment && <EquipmentDetailsModal equipment={getModalEquipment()!} onClose={() => setSelectedEquipment(null)} />} */}
       {renderPreviewModal()}
       {renderEmailModal()}
       {renderAddCustomerModal()}

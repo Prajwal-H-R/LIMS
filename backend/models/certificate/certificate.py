@@ -10,7 +10,7 @@ from backend.db import Base
 
 
 class HTWCertificate(Base):
-    __tablename__ = "htw_certificate"
+    __tablename__ = "certificate"
 
     certificate_id = Column(Integer, primary_key=True, autoincrement=True)
     job_id = Column(Integer, ForeignKey("htw_job.job_id", ondelete="CASCADE"), nullable=False)
