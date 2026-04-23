@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
-import { createPortal } from 'react-dom'; // 1. Import createPortal
-import { 
-  ArrowLeft, Plus, Edit, Trash2, X, Save, 
-  Loader2, AlertCircle, LineChart, Eye
+import React, { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  ArrowLeft, Plus, Edit, Trash2, X, Save,
+  Loader2, AlertCircle, LineChart, Eye,
+  Download, Upload
 } from 'lucide-react';
-import { api } from '../../api/config'; // Adjust your import path if needed
+import { api } from '../../api/config';
 
 // --- TYPES ---
 export interface HTWTDistribution {
@@ -70,10 +71,15 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Import
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
   // --- STATE: Edit Modal & View Modal ---
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<HTWTDistribution | null>(null);
-  
+
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewingItem, setViewingItem] = useState<HTWTDistribution | null>(null);
 
@@ -87,14 +93,12 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
 
   // Handle Scroll Locking
   useEffect(() => {
-    // Check if any of the three modals are open
     if (isEditModalOpen || isViewModalOpen || isDeleteModalOpen) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
 
-    // Cleanup
     return () => {
       document.body.style.overflow = 'unset';
     };
@@ -104,10 +108,9 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      // Ensure your backend endpoint matches. Using active_only=false to see all for admin.
       const response = await api.get('/admin/t-distribution', { params: { active_only: false } });
-      
-      const sorted = (response.data || []).sort((a: HTWTDistribution, b: HTWTDistribution) => 
+
+      const sorted = (response.data || []).sort((a: HTWTDistribution, b: HTWTDistribution) =>
         a.degrees_of_freedom - b.degrees_of_freedom
       );
       setData(sorted);
@@ -116,7 +119,6 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
       console.error(err);
       setError(err.response?.data?.detail || 'Failed to load T-Distribution table');
     } finally {
-      // Artificial delay for smoother skeleton transition
       setTimeout(() => setLoading(false), 300);
     }
   }, []);
@@ -125,7 +127,6 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
     fetchData();
   }, [fetchData]);
 
-  // --- HANDLERS ---
   const handleAddNewClick = () => {
     setViewMode('add');
   };
@@ -171,19 +172,76 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
         await api.post('/admin/t-distribution', payload);
         setViewMode('list');
       }
-      fetchData(); // Refresh list
+      fetchData();
     } catch (err: any) {
-      throw err; // Let form handle error display
+      throw err;
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Helper
+  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
+    try {
+      const response = await api.get('/admin/t-distribution/template', {
+        params: { file_format: fileFormat },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type:
+          fileFormat === 'xlsx'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : 'text/csv;charset=utf-8;',
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileFormat === 'xlsx'
+        ? 'htw_t_distribution_template.xlsx'
+        : 'htw_t_distribution_template.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Failed to download template');
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportError(null);
+    setImporting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      await api.post('/admin/t-distribution/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      await fetchData();
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.response?.data?.message || 'Failed to import file';
+      setImportError(detail);
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
   const renderDF = (val: number) => {
     return val >= 1000000 ? <span className="text-xl">∞</span> : val;
   };
-  
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-GB', {
@@ -191,10 +249,9 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
     });
   };
 
-  // --- RENDER ---
   if (viewMode === 'add') {
     return (
-      <AddTDistPage 
+      <AddTDistPage
         onCancel={() => setViewMode('list')}
         onSave={(payload) => handleSave(payload, false)}
         submitting={submitting}
@@ -212,28 +269,56 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
           </button>
           <div>
              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-               <LineChart className="text-blue-500" size={24}/> 
+               <LineChart className="text-blue-500" size={24}/>
                Student T Distribution
              </h3>
              <p className="text-sm text-gray-500">Manage critical T-values for uncertainty calculations</p>
           </div>
         </div>
-        <button 
-          onClick={handleAddNewClick} 
-          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
-        >
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => downloadTemplate('xlsx')}
+            className="flex items-center px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 shadow-sm transition-colors"
+          >
+            <Download size={16} className="mr-2" />
+            Download Template
+          </button>
+
+          <button
+            onClick={handleImportClick}
+            disabled={importing}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-50"
+          >
+            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
+            {importing ? 'Importing...' : 'Import Excel/CSV'}
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.csv"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+
+          <button
+            onClick={handleAddNewClick}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
+          >
             <Plus size={16} className="mr-2" /> Add Entry
-        </button>
+          </button>
+        </div>
       </div>
 
       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
 
       {/* Data Table */}
       {loading ? (
         <HTWTDistributionSkeleton />
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
-          {/* Added mb-20 for safe spacing with footer */}
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -265,23 +350,23 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
                       </td>
                       <td className="px-6 py-4 text-right">
                          <div className="flex items-center justify-end gap-2">
-                            <button 
-                              onClick={() => handleViewClick(item)} 
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                            <button
+                              onClick={() => handleViewClick(item)}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="View Details"
                             >
                               <Eye size={16} />
                             </button>
-                            <button 
-                              onClick={() => handleEditClick(item)} 
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                            <button
+                              onClick={() => handleEditClick(item)}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="Edit"
                             >
                               <Edit size={16} />
                             </button>
-                            <button 
-                              onClick={() => handleDeleteClick(item)} 
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" 
+                            <button
+                              onClick={() => handleDeleteClick(item)}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                               title="Delete"
                             >
                                 <Trash2 size={16} />
@@ -297,7 +382,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
         </div>
       )}
 
-      {/* 2. USED PORTAL FOR VIEW MODAL */}
+      {/* View Modal */}
       {isViewModalOpen && viewingItem && createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm animate-fadeIn overflow-hidden">
@@ -310,7 +395,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 bg-gray-50 rounded-lg">
@@ -346,7 +431,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
             </div>
 
             <div className="p-4 bg-gray-50 flex justify-end">
-              <button 
+              <button
                 onClick={() => setIsViewModalOpen(false)}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100"
               >
@@ -358,9 +443,9 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
         document.body
       )}
 
-      {/* 3. USED PORTAL FOR EDIT MODAL */}
+      {/* Edit Modal */}
       {isEditModalOpen && editingItem && createPortal(
-        <EditTDistModal 
+        <EditTDistModal
           item={editingItem}
           onCancel={() => setIsEditModalOpen(false)}
           onSave={(payload) => handleSave(payload, true)}
@@ -369,7 +454,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
         document.body
       )}
 
-      {/* 4. USED PORTAL FOR DELETE MODAL */}
+      {/* Delete Modal */}
       {isDeleteModalOpen && itemToDelete && createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] animate-fadeIn">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
@@ -384,7 +469,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
                 </div>
               </div>
               <p className="text-sm text-gray-700 mb-6">
-                Are you sure you want to delete the record for <strong>DF: {renderDF(itemToDelete.degrees_of_freedom)}</strong>? 
+                Are you sure you want to delete the record for <strong>DF: {renderDF(itemToDelete.degrees_of_freedom)}</strong>?
                 This will remove it from the T-Distribution table.
               </p>
               <div className="flex justify-end gap-3">
@@ -456,7 +541,6 @@ const AddTDistPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting }) 
     e.preventDefault();
     setError(null);
 
-    // Validation
     const payload = {
       degrees_of_freedom: parseInt(formData.degrees_of_freedom),
       confidence_level: parseFloat(formData.confidence_level),
@@ -480,8 +564,8 @@ const AddTDistPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting }) 
   return (
     <div className="max-w-xl mx-auto animate-fadeIn mb-20">
       <div className="mb-6">
-        <button 
-          onClick={onCancel} 
+        <button
+          onClick={onCancel}
           className="flex items-center text-gray-500 hover:text-blue-600 transition-colors font-medium text-sm"
         >
           <ArrowLeft size={16} className="mr-2" /> Back to List
@@ -563,12 +647,12 @@ const AddTDistPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting }) 
           <div className="p-4 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-between mt-2">
              <span className="text-sm font-medium text-gray-700">Record Status<span className="text-red-500">*</span></span>
              <label className="relative inline-flex items-center cursor-pointer">
-               <input 
-                  type="checkbox" 
+               <input
+                  type="checkbox"
                   name="is_active"
-                  checked={formData.is_active} 
-                  onChange={handleChange} 
-                  className="sr-only peer" 
+                  checked={formData.is_active}
+                  onChange={handleChange}
+                  className="sr-only peer"
                 />
                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                <span className="ml-3 text-sm font-medium text-gray-600 w-16">{formData.is_active ? 'Active' : 'Inactive'}</span>
@@ -651,11 +735,8 @@ const EditTDistModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, subm
   };
 
   return (
-    // UPDATED Z-INDEX: z-[9999]
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md animate-fadeIn overflow-hidden">
-        
-        {/* Modal Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <LineChart className="text-blue-500" size={20} />
@@ -728,12 +809,12 @@ const EditTDistModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, subm
 
           <div className="flex items-center h-full pt-2">
             <label className="relative inline-flex items-center cursor-pointer">
-              <input 
-                type="checkbox" 
-                name="is_active" 
-                checked={formData.is_active} 
-                onChange={handleChange} 
-                className="sr-only peer" 
+              <input
+                type="checkbox"
+                name="is_active"
+                checked={formData.is_active}
+                onChange={handleChange}
+                className="sr-only peer"
               />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>

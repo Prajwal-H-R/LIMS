@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
+import React, { useState, useEffect, useCallback, FormEvent, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../../api/config'; // Adjust path
-import { 
-  ArrowLeft, Plus, Edit, Trash2, X, Save, 
-  Loader2, AlertCircle, CheckCircle, PowerOff, 
-  Calendar, Activity, ArrowRightLeft, Info 
+import {
+  ArrowLeft, Plus, Edit, Trash2, X, Save,
+  Loader2, AlertCircle, CheckCircle, PowerOff,
+  Calendar, Activity, ArrowRightLeft, Info, Download, Upload
 } from 'lucide-react';
 
 // ============================================================================
@@ -82,7 +82,7 @@ const HTWStandardUncertaintySkeleton = () => {
 
 export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManagerProps> = ({ onBack }) => {
   const [currentView, setCurrentView] = useState<'list' | 'add'>('list');
-  
+
   // State for Edit Modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<HTWStandardUncertainty | null>(null);
@@ -133,9 +133,9 @@ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManag
   // 1. Render Add Page
   if (currentView === 'add') {
     return (
-      <AddUncertaintyPage 
-        onCancel={() => setCurrentView('list')} 
-        onSuccess={handleSaveSuccess} 
+      <AddUncertaintyPage
+        onCancel={() => setCurrentView('list')}
+        onSuccess={handleSaveSuccess}
       />
     );
   }
@@ -143,9 +143,9 @@ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManag
   // 2. Render List (Default) + Edit Modal
   return (
     <div className="animate-fadeIn">
-      <HTWStandardUncertaintyList 
-        onBack={onBack} 
-        onAddNew={handleAddNew} 
+      <HTWStandardUncertaintyList
+        onBack={onBack}
+        onAddNew={handleAddNew}
         onEdit={handleEdit}
         // Pass the controlled key. It only changes on save, not on modal open.
         refreshTrigger={refreshKey}
@@ -153,10 +153,10 @@ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManag
 
       {/* 2. USED PORTAL FOR EDIT MODAL */}
       {isEditModalOpen && editingItem && createPortal(
-        <EditUncertaintyModal 
-          item={editingItem} 
-          onCancel={closeEditModal} 
-          onSuccess={handleEditSuccess} 
+        <EditUncertaintyModal
+          item={editingItem}
+          onCancel={closeEditModal}
+          onSuccess={handleEditSuccess}
         />,
         document.body
       )}
@@ -182,12 +182,16 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
   const fetchData = useCallback(async () => {
     try {
       // Only set loading true if we don't have data yet (initial load)
-      // or if you prefer a hard reload every time, keep it as is. 
+      // or if you prefer a hard reload every time, keep it as is.
       // If you want "silent refresh", remove setLoading(true).
-      setLoading(true); 
+      setLoading(true);
       setError(null);
       const response = await api.get('/htw-standard-uncertainty/');
       setData(response.data || []);
@@ -239,6 +243,71 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
     return new Date(dateString).toLocaleDateString('en-GB');
   };
 
+  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
+    try {
+      const response = await api.get('/htw-standard-uncertainty/template', {
+        params: { file_format: fileFormat },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: fileFormat === 'csv'
+          ? 'text/csv;charset=utf-8;'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileFormat === 'csv'
+        ? 'htw_standard_uncertainty_template.csv'
+        : 'htw_standard_uncertainty_template.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to download template');
+    }
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportError(null);
+    setImporting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      await api.post('/htw-standard-uncertainty/import', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      await fetchData();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setImportError(detail);
+      } else if (Array.isArray(detail)) {
+        setImportError(detail.map((d: any) => d.msg || String(d)).join('\n'));
+      } else {
+        setImportError('Failed to import file');
+      }
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
   return (
     <div className="animate-fadeIn">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
@@ -248,18 +317,48 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
           </button>
           <div>
             <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Activity className="text-blue-600" size={24} />
-                Interpolation Ranges
+              <Activity className="text-blue-600" size={24} />
+              Interpolation Ranges
             </h3>
             <p className="text-sm text-gray-500">Manage interpolation uncertainty data points</p>
           </div>
         </div>
-        <button onClick={onAddNew} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors">
-          <Plus size={16} className="mr-2" /> Add New Record
-        </button>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => downloadTemplate('xlsx')}
+            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
+          >
+            <Download size={16} className="mr-2" /> Download Template
+          </button>
+
+          <button
+            type="button"
+            onClick={handleImportClick}
+            disabled={importing}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-70"
+          >
+            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
+            Import Excel/CSV
+          </button>
+
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.csv"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+
+          <button onClick={onAddNew} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors">
+            <Plus size={16} className="mr-2" /> Add New Record
+          </button>
+        </div>
       </div>
 
       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
 
       {loading ? (
         <HTWStandardUncertaintySkeleton />
@@ -313,12 +412,12 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => onEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
-                                <Edit size={16} />
-                            </button>
-                            <button onClick={() => handleDelete(item.id!)} disabled={deletingId === item.id} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50" title="Delete">
-                                {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                            </button>
+                          <button onClick={() => onEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+                            <Edit size={16} />
+                          </button>
+                          <button onClick={() => handleDelete(item.id!)} disabled={deletingId === item.id} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50" title="Delete">
+                            {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -382,7 +481,7 @@ const AddUncertaintyPage: React.FC<AddUncertaintyPageProps> = ({ onCancel, onSuc
       await api.post('/htw-standard-uncertainty/', payload);
       onSuccess();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to save record.");
+      setError(err.response?.data?.detail || 'Failed to save record.');
     } finally {
       setLoading(false);
     }
@@ -391,8 +490,8 @@ const AddUncertaintyPage: React.FC<AddUncertaintyPageProps> = ({ onCancel, onSuc
   return (
     <div className="animate-fadeIn max-w-4xl mx-auto mb-20">
       <div className="mb-6">
-        <button 
-          onClick={onCancel} 
+        <button
+          onClick={onCancel}
           className="flex items-center text-gray-500 hover:text-blue-600 transition-colors font-medium text-sm"
         >
           <ArrowLeft size={16} className="mr-2" /> Back to List
@@ -512,9 +611,9 @@ const AddUncertaintyPage: React.FC<AddUncertaintyPageProps> = ({ onCancel, onSuc
 
           <div className="flex items-center pt-2">
             <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
+              <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
             </label>
           </div>
 
@@ -583,18 +682,15 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
       await api.put(`/htw-standard-uncertainty/${item.id}`, payload);
       onSuccess();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to update record.");
+      setError(err.response?.data?.detail || 'Failed to update record.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    // Z-INDEX set to 99999, though Portal moves it to body level
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl animate-fadeIn overflow-hidden">
-        
-        {/* Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <ArrowRightLeft className="text-blue-600" size={20} />
@@ -612,7 +708,6 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
         )}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Valid From <span className="text-red-500">*</span></label>
@@ -653,9 +748,9 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
 
           <div className="flex items-center pt-2">
             <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
+              <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
             </label>
           </div>
 

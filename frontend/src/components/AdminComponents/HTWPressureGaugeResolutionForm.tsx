@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
-import { createPortal } from 'react-dom'; // 1. Import createPortal
-import { api } from '../../api/config'; // Adjust path as needed
+import React, { useState, useEffect, useCallback, FormEvent, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { api } from '../../api/config';
 import {
   ArrowLeft, Plus, Edit, Trash2, X, Save,
   Loader2, AlertCircle, Activity, ArrowRightLeft,
-  CheckCircle, PowerOff, Ruler, Gauge, Calendar, Eye
+  CheckCircle, PowerOff, Ruler, Gauge, Calendar, Eye,
+  Download, Upload
 } from 'lucide-react';
 
 // ============================================================================
@@ -66,40 +67,34 @@ const HTWPressureGaugeResolutionSkeleton = () => {
 // ============================================================================
 
 export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolutionManagerProps> = ({ onBack }) => {
-  // --- STATE: Data ---
   const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
   const [data, setData] = useState<HTWPressureGaugeResolution[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- STATE: Modals ---
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<HTWPressureGaugeResolution | null>(null);
-  
-  // View Details Modal State
   const [viewingItem, setViewingItem] = useState<HTWPressureGaugeResolution | null>(null);
 
-  // --- STATE: Actions ---
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
-  // Handle Scroll Locking
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
   useEffect(() => {
-    // Check if either Edit Modal OR View Modal is open
     if (isEditModalOpen || viewingItem) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
-
     return () => {
       document.body.style.overflow = 'unset';
     };
   }, [isEditModalOpen, viewingItem]);
 
-
-  // --- API FETCH ---
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -110,7 +105,6 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
       console.error(err);
       setError(err.response?.data?.detail || 'Failed to load resolutions');
     } finally {
-      // Artificial delay for smoother skeleton transition
       setTimeout(() => setLoading(false), 300);
     }
   }, []);
@@ -119,10 +113,7 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
     fetchData();
   }, [fetchData]);
 
-  // --- HANDLERS ---
-  const handleAddNewClick = () => {
-    setViewMode('add');
-  };
+  const handleAddNewClick = () => setViewMode('add');
 
   const handleEditClick = (item: HTWPressureGaugeResolution) => {
     setEditingItem(item);
@@ -134,25 +125,25 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
     try {
       setTogglingId(item.id);
       const newStatus = !item.is_active;
-      await api.patch(`/htw-pressure-gauge-resolutions/${item.id}`, null, { 
-        params: { is_active: newStatus } 
+      await api.patch(`/htw-pressure-gauge-resolutions/${item.id}/status`, null, {
+        params: { is_active: newStatus }
       });
       setData(prev => prev.map(r => r.id === item.id ? { ...r, is_active: newStatus } : r));
     } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed to update status");
+      alert(err.response?.data?.detail || 'Failed to update status');
     } finally {
       setTogglingId(null);
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("Are you sure you want to delete this resolution?")) return;
+    if (!window.confirm('Are you sure you want to delete this resolution?')) return;
     try {
       setDeletingId(id);
       await api.delete(`/htw-pressure-gauge-resolutions/${id}`);
       setData(prev => prev.filter(r => r.id !== id));
     } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed to delete");
+      alert(err.response?.data?.detail || 'Failed to delete');
     } finally {
       setDeletingId(null);
     }
@@ -182,7 +173,69 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
     return new Date(dateString).toLocaleDateString('en-GB');
   };
 
-  // --- RENDER ---
+  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
+    try {
+      const response = await api.get('/htw-pressure-gauge-resolutions/template', {
+        params: { file_format: fileFormat },
+        responseType: 'blob',
+      });
+
+      const blob = new Blob([response.data], {
+        type: fileFormat === 'csv'
+          ? 'text/csv;charset=utf-8;'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileFormat === 'csv'
+        ? 'htw_pressure_gauge_resolution_template.csv'
+        : 'htw_pressure_gauge_resolution_template.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to download template');
+    }
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportError(null);
+    setImporting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      await api.post('/htw-pressure-gauge-resolutions/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      await fetchData();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setImportError(detail);
+      } else if (Array.isArray(detail)) {
+        setImportError(detail.map((d: any) => d?.msg || String(d)).join('\n'));
+      } else {
+        setImportError('Failed to import file');
+      }
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
   if (viewMode === 'add') {
     return (
       <AddResolutionPage
@@ -195,36 +248,63 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
 
   return (
     <div className="animate-fadeIn">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div className="flex items-center">
           <button onClick={onBack} className="mr-4 p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 shadow-sm transition-colors">
             <ArrowLeft size={20} />
           </button>
           <div>
-             <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-               <Activity className="text-blue-600" size={24} />
-               Pressure Gauge Resolutions
-             </h3>
-             <p className="text-sm text-gray-500">Standard resolution values for calibration</p>
+            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <Activity className="text-blue-600" size={24} />
+              Pressure Gauge Resolutions
+            </h3>
+            <p className="text-sm text-gray-500">Standard resolution values for calibration</p>
           </div>
         </div>
-        <button 
-          onClick={handleAddNewClick} 
-          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors"
-        >
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => downloadTemplate('xlsx')}
+            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
+          >
+            <Download size={16} className="mr-2" /> Download Template
+          </button>
+
+          <button
+            type="button"
+            onClick={handleImportClick}
+            disabled={importing}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-70"
+          >
+            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
+            Import Excel/CSV
+          </button>
+
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.csv"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+
+          <button
+            onClick={handleAddNewClick}
+            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors"
+          >
             <Plus size={16} className="mr-2" /> Add Resolution
-        </button>
+          </button>
+        </div>
       </div>
 
       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
 
-      {/* Table */}
       {loading ? (
         <HTWPressureGaugeResolutionSkeleton />
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
-          {/* Added mb-20 for safe spacing */}
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -251,31 +331,37 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
                           disabled={togglingId === item.id}
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
                         >
-                          {togglingId === item.id ? <Loader2 size={12} className="animate-spin mr-1"/> : (item.is_active ? <CheckCircle size={12} className="mr-1"/> : <PowerOff size={12} className="mr-1"/>)}
+                          {togglingId === item.id ? (
+                            <Loader2 size={12} className="animate-spin mr-1" />
+                          ) : item.is_active ? (
+                            <CheckCircle size={12} className="mr-1" />
+                          ) : (
+                            <PowerOff size={12} className="mr-1" />
+                          )}
                           {item.is_active ? 'Active' : 'Inactive'}
                         </button>
                       </td>
                       <td className="px-6 py-4 text-right">
-                         <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => setViewingItem(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="View">
-                              <Eye size={16} />
-                            </button>
-                            <button 
-                              onClick={() => handleEditClick(item)} 
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
-                              title="Edit"
-                            >
-                              <Edit size={16} />
-                            </button>
-                            <button 
-                              onClick={() => handleDelete(item.id!)} 
-                              disabled={deletingId === item.id} 
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50" 
-                              title="Delete"
-                            >
-                                {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                            </button>
-                         </div>
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => setViewingItem(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="View">
+                            <Eye size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleEditClick(item)}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Edit"
+                          >
+                            <Edit size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(item.id!)}
+                            disabled={deletingId === item.id}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                            title="Delete"
+                          >
+                            {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -286,29 +372,27 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
         </div>
       )}
 
-      {/* 2. USED PORTAL FOR VIEW MODAL */}
       {viewingItem && createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full animate-fadeIn p-6">
-             <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-lg flex items-center gap-2"><Ruler size={18} /> Details</h3>
-                <button onClick={() => setViewingItem(null)}><X size={18} className="text-gray-400" /></button>
-             </div>
-             <div className="text-center bg-blue-50 p-4 rounded-lg mb-4">
-               <span className="text-2xl font-bold">{viewingItem.pressure}</span> <span className="text-gray-500">{viewingItem.unit}</span>
-             </div>
-             <div className="text-sm space-y-2">
-                <p><span className="font-medium">Valid Upto:</span> {formatDate(viewingItem.valid_upto)}</p>
-                <p><span className="font-medium">Status:</span> {viewingItem.is_active ? 'Active' : 'Inactive'}</p>
-             </div>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-lg flex items-center gap-2"><Ruler size={18} /> Details</h3>
+              <button onClick={() => setViewingItem(null)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="text-center bg-blue-50 p-4 rounded-lg mb-4">
+              <span className="text-2xl font-bold">{viewingItem.pressure}</span> <span className="text-gray-500">{viewingItem.unit}</span>
+            </div>
+            <div className="text-sm space-y-2">
+              <p><span className="font-medium">Valid Upto:</span> {formatDate(viewingItem.valid_upto)}</p>
+              <p><span className="font-medium">Status:</span> {viewingItem.is_active ? 'Active' : 'Inactive'}</p>
+            </div>
           </div>
         </div>,
         document.body
       )}
 
-      {/* 3. USED PORTAL FOR EDIT MODAL */}
       {isEditModalOpen && editingItem && createPortal(
-        <EditResolutionModal 
+        <EditResolutionModal
           item={editingItem}
           onCancel={() => setIsEditModalOpen(false)}
           onSave={(payload) => handleSave(payload, true)}
@@ -323,6 +407,7 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
 // ============================================================================
 // COMPONENT 1: ADD PAGE (Full Page View)
 // ============================================================================
+
 interface AddPageProps {
   onCancel: () => void;
   onSave: (payload: HTWPressureGaugeResolution) => Promise<void>;
@@ -352,7 +437,7 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
     setError(null);
 
     if (!formData.pressure || parseFloat(formData.pressure) < 0) {
-      setError("Please enter a valid pressure value.");
+      setError('Please enter a valid pressure value.');
       return;
     }
 
@@ -364,15 +449,15 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
         is_active: formData.is_active
       });
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to save resolution.");
+      setError(err.response?.data?.detail || 'Failed to save resolution.');
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto animate-fadeIn mb-20">
       <div className="mb-6">
-        <button 
-          onClick={onCancel} 
+        <button
+          onClick={onCancel}
           className="flex items-center text-gray-500 hover:text-blue-600 transition-colors font-medium text-sm"
         >
           <ArrowLeft size={16} className="mr-2" /> Back to List
@@ -395,44 +480,51 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Pressure */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Pressure Value <span className="text-red-500">*</span></label>
               <div className="relative">
-                <input 
-                  type="number" name="pressure" value={formData.pressure} onChange={handleChange} 
-                  required step="0.0001" placeholder="0.0000" 
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono" 
+                <input
+                  type="number"
+                  name="pressure"
+                  value={formData.pressure}
+                  onChange={handleChange}
+                  required
+                  step="0.0001"
+                  placeholder="0.0000"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
                 />
                 <Gauge className="absolute left-3 top-2.5 text-gray-400" size={18} />
               </div>
             </div>
 
-            {/* Unit */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Unit <span className="text-red-500">*</span></label>
-              <input 
-                type="text" name="unit" value={formData.unit} onChange={handleChange} 
-                required placeholder="e.g. bar" 
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
+              <input
+                type="text"
+                name="unit"
+                value={formData.unit}
+                onChange={handleChange}
+                required
+                placeholder="e.g. bar"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
             </div>
 
-            {/* Valid Upto */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto  <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto <span className="text-red-500">*</span></label>
               <div className="relative">
-                <input 
-                  type="date" name="valid_upto" value={formData.valid_upto} onChange={handleChange} required
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
+                <input
+                  type="date"
+                  name="valid_upto"
+                  value={formData.valid_upto}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
                 <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
               </div>
               <p className="text-xs text-gray-400 mt-1">Leave blank if valid indefinitely</p>
             </div>
 
-            {/* Is Active Toggle */}
             <div className="flex items-center h-full pt-6">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
@@ -460,6 +552,7 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
 // ============================================================================
 // COMPONENT 2: EDIT MODAL (Popup Overlay)
 // ============================================================================
+
 interface EditModalProps {
   item: HTWPressureGaugeResolution;
   onCancel: () => void;
@@ -490,7 +583,7 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
     setError(null);
 
     if (!formData.pressure || parseFloat(formData.pressure) < 0) {
-      setError("Please enter a valid pressure value.");
+      setError('Please enter a valid pressure value.');
       return;
     }
 
@@ -502,16 +595,13 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
         is_active: formData.is_active
       });
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to update resolution.");
+      setError(err.response?.data?.detail || 'Failed to update resolution.');
     }
   };
 
   return (
-    // Z-INDEX high, but Portal moves it to root
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl animate-fadeIn overflow-hidden">
-        
-        {/* Modal Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <ArrowRightLeft className="text-blue-500" size={20} />
@@ -530,44 +620,49 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Pressure */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Pressure Value <span className="text-red-500">*</span></label>
               <div className="relative">
-                <input 
-                  type="number" name="pressure" value={formData.pressure} onChange={handleChange} 
-                  required step="0.0001" 
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono" 
+                <input
+                  type="number"
+                  name="pressure"
+                  value={formData.pressure}
+                  onChange={handleChange}
+                  required
+                  step="0.0001"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
                 />
                 <Gauge className="absolute left-3 top-2.5 text-gray-400" size={18} />
               </div>
             </div>
 
-            {/* Unit */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Unit <span className="text-red-500">*</span></label>
-              <input 
-                type="text" name="unit" value={formData.unit} onChange={handleChange} 
-                required placeholder="e.g. bar" 
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
+              <input
+                type="text"
+                name="unit"
+                value={formData.unit}
+                onChange={handleChange}
+                required
+                placeholder="e.g. bar"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
             </div>
 
-            {/* Valid Upto */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto <span className="text-red-500">*</span></label>
               <div className="relative">
-                <input 
-                  type="date" name="valid_upto" value={formData.valid_upto} onChange={handleChange} 
-                  required
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
+                <input
+                  type="date"
+                  name="valid_upto"
+                  value={formData.valid_upto}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
                 <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
               </div>
             </div>
 
-            {/* Is Active Toggle */}
             <div className="flex items-center h-full pt-6">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />

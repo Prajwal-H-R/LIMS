@@ -1,0 +1,5016 @@
+From 93c63b4bd399036c39100b3f506f07a9ac0ac5a2 Mon Sep 17 00:00:00 2001
+From: tejasvi-shette1 <tvshetter@gmail.com>
+Date: Thu, 2 Apr 2026 15:49:45 +0530
+Subject: [PATCH] Excel Import feature
+
+---
+ .../routes/htw/htw_cmc_reference_router.py    |  59 +-
+ .../htw/htw_manufacturer_spec_router.py       | 516 ++----------------
+ .../htw/htw_pressure_gauge_res_router.py      | 226 +++-----
+ ...w_standard_uncertanity_reference_router.py | 126 +++--
+ .../routes/htw/htw_t_distribution_router.py   | 116 ++--
+ .../services/htw/htw_cmc_reference_service.py | 314 +++++++++--
+ .../htw/htw_manufacturer_spec_service.py      | 441 +++++++++++++++
+ .../htw/htw_pressure_gauge_res_service.py     | 402 ++++++++++++++
+ ..._standard_uncertainty_reference_service.py | 487 +++++++++++++++--
+ .../htw/htw_t_distribution_service.py         | 323 +++++++++--
+ .../HTWCMCReferenceManager.tsx                | 126 ++++-
+ .../HTWPressureGaugeResolutionForm.tsx        | 329 +++++++----
+ .../HTWStandardUncertaintyForm.tsx            | 183 +++++--
+ .../HTWTDistributionManager.tsx               | 203 ++++---
+ 14 files changed, 2770 insertions(+), 1081 deletions(-)
+ create mode 100644 backend/services/htw/htw_manufacturer_spec_service.py
+ create mode 100644 backend/services/htw/htw_pressure_gauge_res_service.py
+
+diff --git a/backend/routes/htw/htw_cmc_reference_router.py b/backend/routes/htw/htw_cmc_reference_router.py
+index 92761df4..026ab745 100644
+--- a/backend/routes/htw/htw_cmc_reference_router.py
++++ b/backend/routes/htw/htw_cmc_reference_router.py
+@@ -1,59 +1,82 @@
+-from fastapi import APIRouter, Depends, HTTPException
++from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
++from fastapi.responses import Response, StreamingResponse
+ from sqlalchemy.orm import Session
+- 
++
+ from backend.db import get_db
+ from backend.schemas.htw.htw_cmc_reference_schema import (
+     HTWCMCReferenceCreate,
++    HTWCMCReferenceResponse,
+     HTWCMCReferenceUpdate,
+-    HTWCMCReferenceResponse
+ )
+ from backend.services.htw.htw_cmc_reference_service import (
++    build_template_file,
+     create_cmc_reference,
++    deactivate_cmc_reference,
+     get_all_cmc_references,
+     get_cmc_reference_by_id,
++    import_cmc_references_from_upload,
+     update_cmc_reference,
+-    deactivate_cmc_reference
+ )
+- 
++
+ router = APIRouter(
+     prefix="/htw/cmc",
+-    tags=["HTW Scope – Hydraulic CMC Backup Data"]
++    tags=["HTW Scope – Hydraulic CMC Backup Data"],
+ )
+- 
+- 
++
++
++@router.get("/template")
++def download_template(file_format: str = Query("xlsx", pattern="^(xlsx|csv)$")):
++    content, media_type, filename = build_template_file(file_format)
++    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
++
++    if media_type == "text/csv":
++        return Response(content=content, media_type=media_type, headers=headers)
++
++    return StreamingResponse(
++        iter([content]),
++        media_type=media_type,
++        headers=headers,
++    )
++
++
++@router.post("/import")
++async def import_template(file: UploadFile = File(...), db: Session = Depends(get_db)):
++    return import_cmc_references_from_upload(db, file)
++
++
+ @router.post("", response_model=HTWCMCReferenceResponse)
+ def create(payload: HTWCMCReferenceCreate, db: Session = Depends(get_db)):
+     return create_cmc_reference(db, payload)
+- 
+- 
++
++
+ @router.get("", response_model=list[HTWCMCReferenceResponse])
+ def list_all(db: Session = Depends(get_db)):
+     return get_all_cmc_references(db)
+- 
+- 
++
++
+ @router.get("/{record_id}", response_model=HTWCMCReferenceResponse)
+ def get_by_id(record_id: int, db: Session = Depends(get_db)):
+     obj = get_cmc_reference_by_id(db, record_id)
+     if not obj:
+         raise HTTPException(status_code=404, detail="CMC reference not found")
+     return obj
+- 
+- 
++
++
+ @router.put("/{record_id}", response_model=HTWCMCReferenceResponse)
+ def update(
+     record_id: int,
+     payload: HTWCMCReferenceUpdate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     obj = update_cmc_reference(db, record_id, payload)
+     if not obj:
+         raise HTTPException(status_code=404, detail="CMC reference not found")
+     return obj
+- 
+- 
++
++
+ @router.delete("/{record_id}")
+ def deactivate(record_id: int, db: Session = Depends(get_db)):
+     success = deactivate_cmc_reference(db, record_id)
+     if not success:
+         raise HTTPException(status_code=404, detail="CMC reference not found")
+-    return {"status": "deactivated"}
+\ No newline at end of file
++    return {"status": "deactivated"}
+diff --git a/backend/routes/htw/htw_manufacturer_spec_router.py b/backend/routes/htw/htw_manufacturer_spec_router.py
+index 8296eb02..45129082 100644
+--- a/backend/routes/htw/htw_manufacturer_spec_router.py
++++ b/backend/routes/htw/htw_manufacturer_spec_router.py
+@@ -1,546 +1,106 @@
+-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+-from fastapi.responses import StreamingResponse, Response
++from typing import List, Optional
++
++from fastapi import APIRouter, Depends, File, Query, UploadFile
+ from sqlalchemy.orm import Session
+-from sqlalchemy.exc import SQLAlchemyError
+-from typing import List, Optional, Any, Dict, Tuple
+-from datetime import datetime
+-from decimal import Decimal, InvalidOperation
+-from io import BytesIO, StringIO
+-import csv
+ 
++from backend.auth import get_current_user
++from backend.db import get_db
+ from backend.schemas.htw.htw_manufacturer_spec_schemas import (
+     HTWManufacturerSpecCreate,
+-    HTWManufacturerSpecUpdate,
+     HTWManufacturerSpecResponse,
++    HTWManufacturerSpecUpdate,
+ )
+-from backend import models
+-from backend.db import get_db
+-from backend.auth import get_current_user
+ from backend.schemas.user_schemas import UserResponse
+-
+-try:
+-    from openpyxl import Workbook, load_workbook
+-except ImportError:  # pragma: no cover
+-    Workbook = None
+-    load_workbook = None
+-
++from backend.services.htw.htw_manufacturer_spec_service import (
++    create_htw_manufacturer_spec as create_spec_service,
++    delete_htw_manufacturer_spec as delete_spec_service,
++    download_htw_manufacturer_spec_template as download_template_service,
++    get_htw_manufacturer_spec as get_spec_service,
++    get_htw_manufacturer_specs as list_specs_service,
++    import_htw_manufacturer_specs as import_specs_service,
++    update_htw_manufacturer_spec as update_spec_service,
++    update_htw_manufacturer_spec_status as update_status_service,
++)
+ 
+ router = APIRouter(
+     prefix="/htw-manufacturer-specs",
+-    tags=["HTW Manufacturer Specifications"]
++    tags=["HTW Manufacturer Specifications"],
+ )
+ 
+ 
+-# =====================================================================
+-# GET: All HTW Manufacturer Specs (List View)
+-# =====================================================================
+ @router.get("/", response_model=List[HTWManufacturerSpecResponse])
+ def get_htw_manufacturer_specs(
+     db: Session = Depends(get_db),
+     skip: int = Query(0, ge=0),
+-    limit: Optional[int] = Query(None, ge=1),  # no upper bound
+-    is_active: Optional[bool] = Query(None)
++    limit: Optional[int] = Query(None, ge=1),
++    is_active: Optional[bool] = Query(None),
+ ):
+-    """
+-    Retrieves a list of HTW Manufacturer Specifications.
+-    Only returns specs for Hydraulic Torque Wrench equipment type.
+-    """
+-    try:
+-        query = db.query(models.HTWManufacturerSpec)
+-
+-        # Filter by active status if provided
+-        if is_active is not None:
+-            query = query.filter(models.HTWManufacturerSpec.is_active == is_active)
+-
+-        # Order by created_at descending (newest first)
+-        query = query.order_by(models.HTWManufacturerSpec.created_at.desc())
+-
+-        # Apply pagination
+-        specs = query.offset(skip).limit(limit).all()
+-
+-        return specs
+-    except SQLAlchemyError as e:
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+-    except Exception as e:
+-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+-
+-
+-# =====================================================================
+-# IMPORT HELPERS
+-# =====================================================================
+-EXPECTED_COLUMNS = [
+-    "make",
+-    "model",
+-    "range_min",
+-    "range_max",
+-    "torque_20",
+-    "torque_40",
+-    "torque_60",
+-    "torque_80",
+-    "torque_100",
+-    "torque_unit",
+-    "pressure_20",
+-    "pressure_40",
+-    "pressure_60",
+-    "pressure_80",
+-    "pressure_100",
+-    "pressure_unit",
+-    "is_active",
+-]
+-
+-
+-def _is_blank(value: Any) -> bool:
+-    return value is None or str(value).strip() == ""
+-
+-
+-def _clean_text(value: Any) -> Optional[str]:
+-    if _is_blank(value):
+-        return None
+-    return str(value).strip()
+-
+-
+-def _normalize_header(value: Any) -> str:
+-    return str(value).strip().lower() if value is not None else ""
+-
+-
+-def _parse_decimal(
+-    value: Any,
+-    field_name: str,
+-    row_num: int,
+-    errors: List[str],
+-    required: bool,
+-) -> Optional[Decimal]:
+-    if _is_blank(value):
+-        if required:
+-            errors.append(f"Row {row_num}: {field_name} is required")
+-        return None
+-
+-    try:
+-        return Decimal(str(value).strip())
+-    except (InvalidOperation, ValueError, TypeError):
+-        errors.append(f"Row {row_num}: {field_name} must be numeric")
+-        return None
+-
+-
+-def _parse_bool(value: Any, row_num: int, errors: List[str]) -> bool:
+-    if _is_blank(value):
+-        return True
+-
+-    raw = str(value).strip().lower()
+-    if raw in {"true", "1", "yes", "y", "active"}:
+-        return True
+-    if raw in {"false", "0", "no", "n", "inactive"}:
+-        return False
+-
+-    errors.append(f"Row {row_num}: is_active must be TRUE/FALSE, YES/NO, 1/0")
+-    return True
+-
+-
+-def _validate_headers(headers: List[Any]) -> None:
+-    normalized_headers = [_normalize_header(h) for h in headers]
+-    if normalized_headers != EXPECTED_COLUMNS:
+-        raise HTTPException(
+-            status_code=400,
+-            detail=(
+-                "Invalid file template. "
+-                "Headers must match exactly: "
+-                + ", ".join(EXPECTED_COLUMNS)
+-            ),
+-        )
+-
+-
+-def _existing_make_model_pairs(db: Session) -> set[Tuple[str, str]]:
+-    existing_rows = db.query(
+-        models.HTWManufacturerSpec.make,
+-        models.HTWManufacturerSpec.model,
+-    ).all()
+-
+-    pairs: set[Tuple[str, str]] = set()
+-    for make, model in existing_rows:
+-        if make is None or model is None:
+-            continue
+-        pairs.add((str(make).strip().lower(), str(model).strip().lower()))
+-    return pairs
+-
+-
+-def _read_xlsx_rows(file_bytes: bytes) -> List[Tuple[int, Dict[str, Any]]]:
+-    if load_workbook is None:
+-        raise HTTPException(
+-            status_code=500,
+-            detail="openpyxl is not installed on the server",
+-        )
+-
+-    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
+-    sheet = workbook.active
+-
+-    header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+-    if not header_row:
+-        raise HTTPException(status_code=400, detail="The uploaded Excel file is empty")
+-
+-    _validate_headers(list(header_row))
+-
+-    rows: List[Tuple[int, Dict[str, Any]]] = []
+-    for row_num, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+-        if row is None or all(_is_blank(cell) for cell in row):
+-            continue
+-
+-        row_map = {
+-            EXPECTED_COLUMNS[i]: (row[i] if i < len(row) else None)
+-            for i in range(len(EXPECTED_COLUMNS))
+-        }
+-        rows.append((row_num, row_map))
+-
+-    return rows
+-
++    return list_specs_service(db=db, skip=skip, limit=limit, is_active=is_active)
+ 
+-def _read_csv_rows(file_bytes: bytes) -> List[Tuple[int, Dict[str, Any]]]:
+-    text = file_bytes.decode("utf-8-sig")
+-    reader = csv.DictReader(StringIO(text))
+ 
+-    if not reader.fieldnames:
+-        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
+-
+-    _validate_headers(reader.fieldnames)
+-
+-    rows: List[Tuple[int, Dict[str, Any]]] = []
+-    for row_num, row in enumerate(reader, start=2):
+-        if row is None or all(_is_blank(cell) for cell in row.values()):
+-            continue
+-
+-        row_map = {k: v for k, v in row.items()}
+-        rows.append((row_num, row_map))
+-
+-    return rows
+-
+-
+-# =====================================================================
+-# NEW: Download fixed template for bulk import
+-# =====================================================================
+ @router.get("/template")
+ def download_htw_manufacturer_spec_template(
+     file_format: str = Query("xlsx", pattern="^(xlsx|csv)$"),
+-    current_user: UserResponse = Depends(get_current_user)
++    current_user: UserResponse = Depends(get_current_user),
+ ):
+-    """
+-    Downloads a fixed manufacturer specification template in XLSX or CSV format.
+-    """
+-    if file_format == "csv":
+-        output = StringIO()
+-        writer = csv.writer(output)
+-        writer.writerow(EXPECTED_COLUMNS)
+-
+-        csv_data = output.getvalue().encode("utf-8-sig")
+-        headers = {
+-            "Content-Disposition": 'attachment; filename="htw_manufacturer_spec_template.csv"'
+-        }
+-        return Response(content=csv_data, media_type="text/csv", headers=headers)
+-
+-    if Workbook is None:
+-        raise HTTPException(
+-            status_code=500,
+-            detail="openpyxl is not installed on the server",
+-        )
+-
+-    workbook = Workbook()
+-    sheet = workbook.active
+-    sheet.title = "Manufacturer Specs"
+-    sheet.append(EXPECTED_COLUMNS)
+-
+-    output = BytesIO()
+-    workbook.save(output)
+-    output.seek(0)
+-
+-    headers = {
+-        "Content-Disposition": 'attachment; filename="htw_manufacturer_spec_template.xlsx"'
+-    }
+-    return StreamingResponse(
+-        output,
+-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+-        headers=headers,
+-    )
++    return download_template_service(file_format=file_format)
+ 
+ 
+-# =====================================================================
+-# NEW: Bulk import manufacturer specs from XLSX / CSV
+-# =====================================================================
+ @router.post("/import")
+ async def import_htw_manufacturer_specs(
+     file: UploadFile = File(...),
+     db: Session = Depends(get_db),
+-    current_user: UserResponse = Depends(get_current_user)
++    current_user: UserResponse = Depends(get_current_user),
+ ):
+-    """
+-    Bulk imports HTW manufacturer specs from a fixed template.
+-    This is all-or-nothing: if any row has an error, the import is rejected.
+-    """
+-    filename = (file.filename or "").lower()
+-    if not filename.endswith(".xlsx") and not filename.endswith(".csv"):
+-        raise HTTPException(status_code=400, detail="Only .xlsx and .csv files are allowed")
+-
+     file_bytes = await file.read()
+-    if not file_bytes:
+-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+-
+-    if filename.endswith(".xlsx"):
+-        rows = _read_xlsx_rows(file_bytes)
+-    else:
+-        rows = _read_csv_rows(file_bytes)
+-
+-    if not rows:
+-        raise HTTPException(status_code=400, detail="No data rows found in the uploaded file")
+-
+-    errors: List[str] = []
+-    existing_pairs = _existing_make_model_pairs(db)
+-    seen_in_file: set[Tuple[str, str]] = set()
+-    objects_to_insert = []
+-
+-    for row_num, row in rows:
+-        make = _clean_text(row.get("make"))
+-        model = _clean_text(row.get("model"))
+-        torque_unit = _clean_text(row.get("torque_unit"))
+-        pressure_unit = _clean_text(row.get("pressure_unit"))
+-
+-        if not make:
+-            errors.append(f"Row {row_num}: make is required")
+-        if not model:
+-            errors.append(f"Row {row_num}: model is required")
+-        if not torque_unit:
+-            errors.append(f"Row {row_num}: torque_unit is required")
+-        if not pressure_unit:
+-            errors.append(f"Row {row_num}: pressure_unit is required")
+-
+-        key = ((make or "").strip().lower(), (model or "").strip().lower())
+-        if make and model:
+-            if key in seen_in_file:
+-                errors.append(f"Row {row_num}: duplicate make + model inside the uploaded file")
+-            if key in existing_pairs:
+-                errors.append(f"Row {row_num}: make + model already exists in the database")
+-            seen_in_file.add(key)
+-
+-        parsed_data = {
+-            "make": make,
+-            "model": model,
+-            "range_min": _parse_decimal(row.get("range_min"), "range_min", row_num, errors, True),
+-            "range_max": _parse_decimal(row.get("range_max"), "range_max", row_num, errors, True),
+-            "torque_20": _parse_decimal(row.get("torque_20"), "torque_20", row_num, errors, True),
+-            "torque_40": _parse_decimal(row.get("torque_40"), "torque_40", row_num, errors, False),
+-            "torque_60": _parse_decimal(row.get("torque_60"), "torque_60", row_num, errors, True),
+-            "torque_80": _parse_decimal(row.get("torque_80"), "torque_80", row_num, errors, False),
+-            "torque_100": _parse_decimal(row.get("torque_100"), "torque_100", row_num, errors, True),
+-            "torque_unit": torque_unit,
+-            "pressure_20": _parse_decimal(row.get("pressure_20"), "pressure_20", row_num, errors, True),
+-            "pressure_40": _parse_decimal(row.get("pressure_40"), "pressure_40", row_num, errors, False),
+-            "pressure_60": _parse_decimal(row.get("pressure_60"), "pressure_60", row_num, errors, True),
+-            "pressure_80": _parse_decimal(row.get("pressure_80"), "pressure_80", row_num, errors, False),
+-            "pressure_100": _parse_decimal(row.get("pressure_100"), "pressure_100", row_num, errors, True),
+-            "pressure_unit": pressure_unit,
+-            "is_active": _parse_bool(row.get("is_active"), row_num, errors),
+-        }
+-
+-        # Enforce range ordering if both values are valid.
+-        range_min = parsed_data["range_min"]
+-        range_max = parsed_data["range_max"]
+-        if range_min is not None and range_max is not None and range_max < range_min:
+-            errors.append(f"Row {row_num}: range_max must be greater than or equal to range_min")
+-
+-        objects_to_insert.append(models.HTWManufacturerSpec(**parsed_data))
+-
+-    if errors:
+-        raise HTTPException(
+-            status_code=400,
+-            detail="Import failed:\n" + "\n".join(errors[:100]),
+-        )
++    return await import_specs_service(
++        db=db,
++        filename=file.filename or "",
++        file_bytes=file_bytes,
++    )
+ 
+-    try:
+-        db.add_all(objects_to_insert)
+-        db.commit()
+-        return {
+-            "message": "Import successful",
+-            "inserted_rows": len(objects_to_insert),
+-        }
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+-    except Exception as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+ 
+-# =====================================================================
+-# GET: Single HTW Manufacturer Spec (Detail View)
+-# =====================================================================
+ @router.get("/{spec_id}", response_model=HTWManufacturerSpecResponse)
+ def get_htw_manufacturer_spec(
+     spec_id: int,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+-    """
+-    Retrieves a single HTW Manufacturer Spec by ID.
+-    """
+-    spec = db.query(models.HTWManufacturerSpec).filter(
+-        models.HTWManufacturerSpec.id == spec_id
+-    ).first()
++    return get_spec_service(db=db, spec_id=spec_id)
+ 
+-    if not spec:
+-        raise HTTPException(
+-            status_code=404,
+-            detail=f"HTW Manufacturer Spec with ID {spec_id} not found"
+-        )
+ 
+-    return spec
+-
+-
+-# =====================================================================
+-# POST: Create HTW Manufacturer Spec
+-# =====================================================================
+ @router.post("/", response_model=HTWManufacturerSpecResponse, status_code=201)
+ def create_htw_manufacturer_spec(
+     spec_data: HTWManufacturerSpecCreate,
+     db: Session = Depends(get_db),
+-    current_user: UserResponse = Depends(get_current_user)
++    current_user: UserResponse = Depends(get_current_user),
+ ):
+-    """
+-    Creates a new HTW Manufacturer Spec.
+-    Only works for Hydraulic Torque Wrench equipment type.
+-    """
+-    try:
+-        # Create new spec instance
+-        new_spec = models.HTWManufacturerSpec(**spec_data.model_dump())
+-
+-        db.add(new_spec)
+-        db.commit()
+-        db.refresh(new_spec)
++    return create_spec_service(db=db, spec_data=spec_data)
+ 
+-        return new_spec
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+-    except Exception as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+ 
+-
+-# =====================================================================
+-# PUT: Update HTW Manufacturer Spec
+-# =====================================================================
+ @router.put("/{spec_id}", response_model=HTWManufacturerSpecResponse)
+ def update_htw_manufacturer_spec(
+     spec_id: int,
+     spec_data: HTWManufacturerSpecUpdate,
+     db: Session = Depends(get_db),
+-    current_user: UserResponse = Depends(get_current_user)
++    current_user: UserResponse = Depends(get_current_user),
+ ):
+-    """
+-    Updates an existing HTW Manufacturer Spec.
+-    """
+-    try:
+-        # Find the spec
+-        spec = db.query(models.HTWManufacturerSpec).filter(
+-            models.HTWManufacturerSpec.id == spec_id
+-        ).first()
+-
+-        if not spec:
+-            raise HTTPException(
+-                status_code=404,
+-                detail=f"HTW Manufacturer Spec with ID {spec_id} not found"
+-            )
+-
+-        # Update fields
+-        update_data = spec_data.model_dump(exclude_unset=True)
+-        for field, value in update_data.items():
+-            setattr(spec, field, value)
+-
+-        # Update the updated_at timestamp
+-        spec.updated_at = datetime.now()
+-
+-        db.commit()
+-        db.refresh(spec)
++    return update_spec_service(db=db, spec_id=spec_id, spec_data=spec_data)
+ 
+-        return spec
+-    except HTTPException:
+-        raise
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+-    except Exception as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+ 
+-
+-# =====================================================================
+-# PATCH: Update HTW Manufacturer Spec Status
+-# =====================================================================
+ @router.patch("/{spec_id}/status", response_model=HTWManufacturerSpecResponse)
+ def update_htw_manufacturer_spec_status(
+     spec_id: int,
+     is_active: bool = Query(...),
+     db: Session = Depends(get_db),
+-    current_user: UserResponse = Depends(get_current_user)
++    current_user: UserResponse = Depends(get_current_user),
+ ):
+-    """
+-    Updates the active status of an HTW Manufacturer Spec.
+-    """
+-    try:
+-        spec = db.query(models.HTWManufacturerSpec).filter(
+-            models.HTWManufacturerSpec.id == spec_id
+-        ).first()
+-
+-        if not spec:
+-            raise HTTPException(
+-                status_code=404,
+-                detail=f"HTW Manufacturer Spec with ID {spec_id} not found"
+-            )
+-
+-        spec.is_active = is_active
+-        spec.updated_at = datetime.now()
+-
+-        db.commit()
+-        db.refresh(spec)
+-
+-        return spec
+-    except HTTPException:
+-        raise
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+-    except Exception as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
++    return update_status_service(db=db, spec_id=spec_id, is_active=is_active)
+ 
+ 
+-# =====================================================================
+-# DELETE: Delete HTW Manufacturer Spec
+-# =====================================================================
+ @router.delete("/{spec_id}", status_code=204)
+ def delete_htw_manufacturer_spec(
+     spec_id: int,
+     db: Session = Depends(get_db),
+-    current_user: UserResponse = Depends(get_current_user)
++    current_user: UserResponse = Depends(get_current_user),
+ ):
+-    """
+-    Deletes an HTW Manufacturer Spec.
+-    """
+-    try:
+-        spec = db.query(models.HTWManufacturerSpec).filter(
+-            models.HTWManufacturerSpec.id == spec_id
+-        ).first()
+-
+-        if not spec:
+-            raise HTTPException(
+-                status_code=404,
+-                detail=f"HTW Manufacturer Spec with ID {spec_id} not found"
+-            )
+-
+-        db.delete(spec)
+-        db.commit()
+-
+-        return None
+-    except HTTPException:
+-        raise
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+-    except Exception as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+-
+-
++    return delete_spec_service(db=db, spec_id=spec_id)
+\ No newline at end of file
+diff --git a/backend/routes/htw/htw_pressure_gauge_res_router.py b/backend/routes/htw/htw_pressure_gauge_res_router.py
+index 7141c138..f20c9404 100644
+--- a/backend/routes/htw/htw_pressure_gauge_res_router.py
++++ b/backend/routes/htw/htw_pressure_gauge_res_router.py
+@@ -1,74 +1,72 @@
+-# backend/routes/htw_pressure_gauge_res_router.py
+-
+-from fastapi import APIRouter, Depends, HTTPException, Query
++from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Response, status
++from fastapi.responses import StreamingResponse
+ from sqlalchemy.orm import Session
+-from sqlalchemy.exc import SQLAlchemyError
+ from typing import List, Optional
+-from datetime import datetime
+-import logging
+ 
+-from ...db import get_db
+-from ... import models
+-from ...schemas.htw.htw_pressure_gauge_resolution import (
++from backend.db import get_db
++from backend.schemas.htw.htw_pressure_gauge_resolution import (
+     HTWPressureGaugeResolutionResponse,
+-    HTWPressureGaugeResolutionCreate  # Ensure this schema is imported
++    HTWPressureGaugeResolutionCreate,
++)
++from backend.services.htw.htw_pressure_gauge_res_service import (
++    build_template_file,
++    create_resolution,
++    delete_resolution,
++    get_resolution_by_id,
++    get_resolutions,
++    get_unique_units,
++    import_resolutions_from_upload,
++    update_resolution,
++    update_resolution_status,
+ )
+-
+-logger = logging.getLogger(__name__)
+ 
+ router = APIRouter(
+     prefix="/htw-pressure-gauge-resolutions",
+-    tags=["HTW Pressure Gauge Resolution"]
++    tags=["HTW Pressure Gauge Resolution"],
+ )
+ 
+ 
++# =====================================================================
++# TEMPLATE / IMPORT
++# =====================================================================
++@router.get("/template")
++def download_template(file_format: str = Query("xlsx", pattern="^(xlsx|csv)$")):
++    content, media_type, filename = build_template_file(file_format=file_format)
++    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
++
++    if file_format == "csv":
++        return Response(content=content, media_type=media_type, headers=headers)
++
++    return StreamingResponse(
++        iter([content]),
++        media_type=media_type,
++        headers=headers,
++    )
++
++
++@router.post("/import")
++async def import_pressure_gauge_resolutions(
++    file: UploadFile = File(...),
++    db: Session = Depends(get_db),
++):
++    return await import_resolutions_from_upload(db=db, file=file)
++
++
+ # =====================================================================
+ # GET: Active Pressure Gauge Resolutions
+ # =====================================================================
+ @router.get("/", response_model=List[HTWPressureGaugeResolutionResponse])
+ def get_pressure_gauge_resolutions(
+     db: Session = Depends(get_db),
+-    unit: Optional[str] = Query(None, description="Filter by unit")
++    unit: Optional[str] = Query(None, description="Filter by unit"),
+ ):
+     """
+-    Retrieves all active HTW Pressure Gauge Resolutions.
+-    Returns pressure and unit values.
++    Retrieves all pressure gauge resolutions.
+     Optionally filters by unit if provided.
+     """
+     try:
+-        query = (
+-            db.query(models.HTWPressureGaugeResolution)
+-            # You might want to remove this filter if you want to see inactive items in the list to toggle them back
+-            # .filter(models.HTWPressureGaugeResolution.is_active == True) 
+-        )
+-        
+-        if unit:
+-            query = query.filter(
+-                models.HTWPressureGaugeResolution.unit.isnot(None),
+-                models.HTWPressureGaugeResolution.unit == unit.strip()
+-            )
+-        
+-        resolutions = query.order_by(models.HTWPressureGaugeResolution.pressure.asc()).all()
+-        
+-        # Convert to response format
+-        result = []
+-        for res in resolutions:
+-            pressure_value = float(res.pressure) if res.pressure is not None else None
+-            result.append(HTWPressureGaugeResolutionResponse(
+-                id=res.id,
+-                pressure=pressure_value,
+-                unit=res.unit,
+-                valid_upto=res.valid_upto,
+-                is_active=res.is_active
+-            ))
+-        
+-        return result
+-
+-    except SQLAlchemyError as e:
+-        logger.error(f"Database error in get_pressure_gauge_resolutions: {str(e)}", exc_info=True)
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
++        return get_resolutions(db=db, unit=unit)
+     except Exception as e:
+-        logger.error(f"Error in get_pressure_gauge_resolutions: {str(e)}", exc_info=True)
+         raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+ 
+ 
+@@ -76,50 +74,38 @@ def get_pressure_gauge_resolutions(
+ # GET: Unique Units
+ # =====================================================================
+ @router.get("/units", response_model=List[str])
+-def get_unique_units(
+-    db: Session = Depends(get_db)
+-):
++def get_unique_units_route(db: Session = Depends(get_db)):
+     try:
+-        units = (
+-            db.query(models.HTWPressureGaugeResolution.unit)
+-            .filter(models.HTWPressureGaugeResolution.is_active == True)
+-            .distinct()
+-            .order_by(models.HTWPressureGaugeResolution.unit.asc())
+-            .all()
+-        )
+-        return [unit[0] for unit in units if unit[0]]
++        return get_unique_units(db)
+     except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+ 
+ 
++# =====================================================================
++# GET: Single Pressure Gauge Resolution
++# =====================================================================
++@router.get("/{resolution_id}", response_model=HTWPressureGaugeResolutionResponse)
++def get_pressure_gauge_resolution(
++    resolution_id: int,
++    db: Session = Depends(get_db),
++):
++    record = get_resolution_by_id(db, resolution_id)
++    if not record:
++        raise HTTPException(status_code=404, detail="Resolution not found")
++    return record
++
++
+ # =====================================================================
+ # POST: Create Pressure Gauge Resolution
+ # =====================================================================
+-@router.post("/", response_model=HTWPressureGaugeResolutionResponse, status_code=201)
++@router.post("/", response_model=HTWPressureGaugeResolutionResponse, status_code=status.HTTP_201_CREATED)
+ def create_pressure_gauge_resolution(
+     resolution_data: HTWPressureGaugeResolutionCreate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     try:
+-        # Check if 'updated_at' exists in your model definition before uncommenting it
+-        new_resolution = models.HTWPressureGaugeResolution(
+-            pressure=resolution_data.pressure,
+-            unit=resolution_data.unit,
+-            valid_upto=resolution_data.valid_upto,
+-            is_active=resolution_data.is_active,
+-            created_at=datetime.now(),
+-            # updated_at=datetime.now() # Uncomment only if column exists in DB model
+-        )
+-
+-        db.add(new_resolution)
+-        db.commit()
+-        db.refresh(new_resolution)
+-        
+-        return new_resolution
+-
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        logger.error(f"Database error creating resolution: {str(e)}", exc_info=True)
++        return create_resolution(db=db, data=resolution_data)
++    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+ 
+ 
+@@ -130,31 +116,16 @@ def create_pressure_gauge_resolution(
+ def update_pressure_gauge_resolution(
+     resolution_id: int,
+     resolution_data: HTWPressureGaugeResolutionCreate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     try:
+-        resolution = db.query(models.HTWPressureGaugeResolution).filter(
+-            models.HTWPressureGaugeResolution.id == resolution_id
+-        ).first()
+-
+-        if not resolution:
++        record = update_resolution(db=db, resolution_id=resolution_id, data=resolution_data)
++        if not record:
+             raise HTTPException(status_code=404, detail="Resolution not found")
+-
+-        resolution.pressure = resolution_data.pressure
+-        resolution.unit = resolution_data.unit
+-        resolution.valid_upto = resolution_data.valid_upto
+-        resolution.is_active = resolution_data.is_active
+-        
+-        # Check if model has updated_at
+-        if hasattr(resolution, 'updated_at'):
+-            resolution.updated_at = datetime.now()
+-
+-        db.commit()
+-        db.refresh(resolution)
+-        return resolution
+-
+-    except SQLAlchemyError as e:
+-        db.rollback()
++        return record
++    except HTTPException:
++        raise
++    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+ 
+ 
+@@ -162,53 +133,36 @@ def update_pressure_gauge_resolution(
+ # PATCH: Update Status (Active/Inactive)
+ # =====================================================================
+ @router.patch("/{resolution_id}/status", response_model=HTWPressureGaugeResolutionResponse)
+-def update_resolution_status(
++def update_resolution_status_route(
+     resolution_id: int,
+     is_active: bool = Query(..., description="New active status"),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     try:
+-        resolution = db.query(models.HTWPressureGaugeResolution).filter(
+-            models.HTWPressureGaugeResolution.id == resolution_id
+-        ).first()
+-
+-        if not resolution:
++        record = update_resolution_status(db=db, resolution_id=resolution_id, is_active=is_active)
++        if not record:
+             raise HTTPException(status_code=404, detail="Resolution not found")
+-
+-        resolution.is_active = is_active
+-        
+-        if hasattr(resolution, 'updated_at'):
+-            resolution.updated_at = datetime.now()
+-
+-        db.commit()
+-        db.refresh(resolution)
+-        return resolution
+-
+-    except SQLAlchemyError as e:
+-        db.rollback()
++        return record
++    except HTTPException:
++        raise
++    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+ 
+ 
+ # =====================================================================
+ # DELETE: Delete Pressure Gauge Resolution
+ # =====================================================================
+-@router.delete("/{resolution_id}", status_code=204)
++@router.delete("/{resolution_id}", status_code=status.HTTP_204_NO_CONTENT)
+ def delete_pressure_gauge_resolution(
+     resolution_id: int,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     try:
+-        resolution = db.query(models.HTWPressureGaugeResolution).filter(
+-            models.HTWPressureGaugeResolution.id == resolution_id
+-        ).first()
+-
+-        if not resolution:
++        success = delete_resolution(db=db, resolution_id=resolution_id)
++        if not success:
+             raise HTTPException(status_code=404, detail="Resolution not found")
+-
+-        db.delete(resolution)
+-        db.commit()
+-        return None
+-
+-    except SQLAlchemyError as e:
+-        db.rollback()
+-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+\ No newline at end of file
++        return Response(status_code=status.HTTP_204_NO_CONTENT)
++    except HTTPException:
++        raise
++    except Exception as e:
++        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+diff --git a/backend/routes/htw/htw_standard_uncertanity_reference_router.py b/backend/routes/htw/htw_standard_uncertanity_reference_router.py
+index 0f5daa85..f3516bae 100644
+--- a/backend/routes/htw/htw_standard_uncertanity_reference_router.py
++++ b/backend/routes/htw/htw_standard_uncertanity_reference_router.py
+@@ -1,114 +1,140 @@
+-from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
++from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
++from fastapi.responses import Response
+ from sqlalchemy.orm import Session
+ from typing import List, Optional
+- 
++
+ from backend.db import get_db
+ from backend.schemas.htw.htw_standard_uncertainty_reference_schemas import (
+     HTWStandardUncertaintyReferenceCreate,
+     HTWStandardUncertaintyReferenceResponse,
+-    HTWStandardUncertaintyReferenceUpdate
++    HTWStandardUncertaintyReferenceUpdate,
+ )
+ from backend.services.htw.htw_standard_uncertainty_reference_service import (
++    build_template_file,
+     create_reference,
+-    get_references,
++    delete_reference,
+     get_reference_by_id,
++    get_references,
++    import_references_from_upload,
+     update_reference,
+-    delete_reference
+ )
+- 
++
+ router = APIRouter(
+     prefix="/htw-standard-uncertainty",
+-    tags=["HTW Standard Uncertainty Reference"]
++    tags=["HTW Standard Uncertainty Reference"],
+ )
+- 
+- 
+-# -------------------- POST --------------------
++
++
++# ---------------------------------------------------------------------------
++# TEMPLATE DOWNLOAD
++# ---------------------------------------------------------------------------
++@router.get("/template")
++def download_template(
++    file_format: str = Query("xlsx", pattern="^(xlsx|csv)$"),
++):
++    content, media_type, filename = build_template_file(file_format)
++    return Response(
++        content=content,
++        media_type=media_type,
++        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
++    )
++
++
++# ---------------------------------------------------------------------------
++# BULK IMPORT
++# ---------------------------------------------------------------------------
++@router.post("/import")
++async def import_htw_standard_uncertainty_reference(
++    file: UploadFile = File(...),
++    db: Session = Depends(get_db),
++):
++    return await import_references_from_upload(db=db, file=file)
++
++
++# ---------------------------------------------------------------------------
++# POST
++# ---------------------------------------------------------------------------
+ @router.post(
+     "",
+     response_model=HTWStandardUncertaintyReferenceResponse,
+-    status_code=status.HTTP_201_CREATED
++    status_code=201,
+ )
+ def create_htw_standard_uncertainty_reference(
+     payload: HTWStandardUncertaintyReferenceCreate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     return create_reference(db, payload)
+- 
+- 
+-# -------------------- GET (ALL) --------------------
++
++
++# ---------------------------------------------------------------------------
++# GET (ALL)
++# ---------------------------------------------------------------------------
+ @router.get(
+     "",
+     response_model=List[HTWStandardUncertaintyReferenceResponse],
+-    status_code=status.HTTP_200_OK
++    status_code=200,
+ )
+ def get_htw_standard_uncertainty_references(
+     is_active: Optional[bool] = Query(None),
+     torque_nm: Optional[int] = Query(None),
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     return get_references(
+         db=db,
+         is_active=is_active,
+-        torque_nm=torque_nm
++        torque_nm=torque_nm,
+     )
+- 
+- 
+-# -------------------- GET (BY ID) --------------------
++
++
++# ---------------------------------------------------------------------------
++# GET (BY ID)
++# ---------------------------------------------------------------------------
+ @router.get(
+     "/{reference_id}",
+     response_model=HTWStandardUncertaintyReferenceResponse,
+-    status_code=status.HTTP_200_OK
++    status_code=200,
+ )
+ def get_htw_standard_uncertainty_reference_by_id(
+     reference_id: int,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     record = get_reference_by_id(db, reference_id)
+     if not record:
+-        raise HTTPException(
+-            status_code=status.HTTP_404_NOT_FOUND,
+-            detail="Reference not found"
+-        )
++        raise HTTPException(status_code=404, detail="Reference not found")
+     return record
+- 
+- 
+-# -------------------- UPDATE (PUT) --------------------
++
++
++# ---------------------------------------------------------------------------
++# UPDATE (PUT)
++# ---------------------------------------------------------------------------
+ @router.put(
+     "/{reference_id}",
+     response_model=HTWStandardUncertaintyReferenceResponse,
+-    status_code=status.HTTP_200_OK
++    status_code=200,
+ )
+ def update_htw_standard_uncertainty_reference(
+     reference_id: int,
+     payload: HTWStandardUncertaintyReferenceUpdate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     updated_record = update_reference(db, reference_id, payload)
+-   
+     if not updated_record:
+-        raise HTTPException(
+-            status_code=status.HTTP_404_NOT_FOUND,
+-            detail="Reference not found"
+-        )
+-   
++        raise HTTPException(status_code=404, detail="Reference not found")
+     return updated_record
+- 
+- 
+-# -------------------- DELETE --------------------
++
++
++# ---------------------------------------------------------------------------
++# DELETE
++# ---------------------------------------------------------------------------
+ @router.delete(
+     "/{reference_id}",
+-    status_code=status.HTTP_204_NO_CONTENT
++    status_code=204,
+ )
+ def delete_htw_standard_uncertainty_reference(
+     reference_id: int,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     success = delete_reference(db, reference_id)
+-   
+     if not success:
+-        raise HTTPException(
+-            status_code=status.HTTP_404_NOT_FOUND,
+-            detail="Reference not found"
+-        )
+-   
+-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+\ No newline at end of file
++        raise HTTPException(status_code=404, detail="Reference not found")
++    return Response(status_code=204)
+diff --git a/backend/routes/htw/htw_t_distribution_router.py b/backend/routes/htw/htw_t_distribution_router.py
+index e2a4510a..b5f621e4 100644
+--- a/backend/routes/htw/htw_t_distribution_router.py
++++ b/backend/routes/htw/htw_t_distribution_router.py
+@@ -1,79 +1,111 @@
+-#htw_t_distribution_router.py
+-from fastapi import APIRouter, Depends
++from fastapi import APIRouter, Depends, File, Query, UploadFile
+ from sqlalchemy.orm import Session
+-from typing import List
+- 
++from typing import List, Optional
++
+ from backend.db import get_db
++from backend.auth import get_current_user
++from backend.schemas.user_schemas import UserResponse
+ from backend.schemas.htw.htw_t_distribution_schema import (
+     HTWTDistributionCreate,
+     HTWTDistributionUpdate,
+-    HTWTDistributionResponse
++    HTWTDistributionResponse,
+ )
+ from backend.services.htw.htw_t_distribution_service import (
+     create_t_distribution,
++    download_t_distribution_template,
+     get_t_distribution_by_id,
++    import_t_distribution,
+     list_t_distributions,
++    soft_delete_t_distribution,
+     update_t_distribution,
+-    soft_delete_t_distribution
+ )
+- 
++
+ router = APIRouter(
+     prefix="/admin/t-distribution",
+-    tags=["HTW Master student T table or T Distribution"]
+-)
+- 
+- 
+-@router.post(
+-    "",
+-    response_model=HTWTDistributionResponse
++    tags=["HTW Master student T table or T Distribution"],
+ )
++
++
++# =====================================================================
++# GET: Download fixed template for bulk import
++# =====================================================================
++@router.get("/template")
++def download_t_distribution_template_route(
++    file_format: str = Query("xlsx"),
++    current_user: UserResponse = Depends(get_current_user),
++):
++    return download_t_distribution_template(file_format=file_format)
++
++
++# =====================================================================
++# POST: Bulk import records from template
++# =====================================================================
++@router.post("/import")
++async def import_t_distribution_route(
++    file: UploadFile = File(...),
++    db: Session = Depends(get_db),
++    current_user: UserResponse = Depends(get_current_user),
++):
++    file_bytes = await file.read()
++    return await import_t_distribution(
++        db=db,
++        filename=file.filename or "",
++        file_bytes=file_bytes,
++    )
++
++
++# =====================================================================
++# POST: Create HTW T Distribution
++# =====================================================================
++@router.post("", response_model=HTWTDistributionResponse)
+ def create_record(
+     payload: HTWTDistributionCreate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     return create_t_distribution(db, payload)
+- 
+- 
+-@router.get(
+-    "",
+-    response_model=List[HTWTDistributionResponse]
+-)
++
++
++# =====================================================================
++# GET: All HTW T Distribution records
++# =====================================================================
++@router.get("", response_model=List[HTWTDistributionResponse])
+ def list_records(
+     active_only: bool = True,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     return list_t_distributions(db, active_only)
+- 
+- 
+-@router.get(
+-    "/{record_id}",
+-    response_model=HTWTDistributionResponse
+-)
++
++
++# =====================================================================
++# GET: Single HTW T Distribution by ID
++# =====================================================================
++@router.get("/{record_id}", response_model=HTWTDistributionResponse)
+ def get_record(
+     record_id: int,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     return get_t_distribution_by_id(db, record_id)
+- 
+- 
+-@router.put(
+-    "/{record_id}",
+-    response_model=HTWTDistributionResponse
+-)
++
++
++# =====================================================================
++# PUT: Update HTW T Distribution
++# =====================================================================
++@router.put("/{record_id}", response_model=HTWTDistributionResponse)
+ def update_record(
+     record_id: int,
+     payload: HTWTDistributionUpdate,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     return update_t_distribution(db, record_id, payload)
+- 
+- 
++
++
++# =====================================================================
++# DELETE: Soft delete HTW T Distribution
++# =====================================================================
+ @router.delete("/{record_id}")
+ def delete_record(
+     record_id: int,
+-    db: Session = Depends(get_db)
++    db: Session = Depends(get_db),
+ ):
+     soft_delete_t_distribution(db, record_id)
+-    return {"status": "success"}
+- 
+- 
+\ No newline at end of file
++    return {"status": "success"}
+\ No newline at end of file
+diff --git a/backend/services/htw/htw_cmc_reference_service.py b/backend/services/htw/htw_cmc_reference_service.py
+index 328bafc3..dafca14f 100644
+--- a/backend/services/htw/htw_cmc_reference_service.py
++++ b/backend/services/htw/htw_cmc_reference_service.py
+@@ -1,89 +1,317 @@
++from __future__ import annotations
++
++import csv
++from datetime import datetime, timezone
++from decimal import Decimal, InvalidOperation
++from io import BytesIO, StringIO
++from typing import Any, Dict, List, Optional, Tuple
++
++from fastapi import HTTPException, UploadFile
++from openpyxl import Workbook, load_workbook
+ from sqlalchemy.orm import Session
++
+ from backend.models.htw.htw_cmc_reference import HTWCMCReference
+ from backend.schemas.htw.htw_cmc_reference_schema import (
+     HTWCMCReferenceCreate,
+-    HTWCMCReferenceUpdate
++    HTWCMCReferenceUpdate,
+ )
+- 
+- 
+-# -----------------------
+-# CREATE
+-# -----------------------
+-def create_cmc_reference(db: Session, payload: HTWCMCReferenceCreate):
+-    obj = HTWCMCReference(**payload.dict())
++
++TEMPLATE_COLUMNS: List[str] = [
++    "lower_measure_range",
++    "higher_measure_range",
++    "cmc_percent",
++]
++
++
++# =============================================================================
++# CRUD SERVICE LAYER
++# =============================================================================
++def create_cmc_reference(db: Session, payload: HTWCMCReferenceCreate) -> HTWCMCReference:
++    data = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
++    data.setdefault("is_active", True)
++
++    now = datetime.now(timezone.utc)
++    if "created_at" in HTWCMCReference.__table__.columns:
++        data.setdefault("created_at", now)
++    if "updated_at" in HTWCMCReference.__table__.columns:
++        data["updated_at"] = now
++
++    obj = HTWCMCReference(**data)
+     db.add(obj)
+     db.commit()
+     db.refresh(obj)
+     return obj
+- 
+- 
+-# -----------------------
+-# READ ALL
+-# -----------------------
+-def get_all_cmc_references(db: Session):
++
++
++def get_all_cmc_references(db: Session) -> List[HTWCMCReference]:
+     return (
+         db.query(HTWCMCReference)
+         .order_by(HTWCMCReference.lower_measure_range.asc())
+         .all()
+     )
+- 
+- 
+-# -----------------------
+-# READ BY ID
+-# -----------------------
+-def get_cmc_reference_by_id(db: Session, record_id: int):
++
++
++def get_cmc_reference_by_id(db: Session, record_id: int) -> HTWCMCReference | None:
+     return (
+         db.query(HTWCMCReference)
+         .filter(HTWCMCReference.id == record_id)
+         .first()
+     )
+- 
+- 
+-# -----------------------
+-# BUSINESS USE (IMPORTANT)
+-# Used during uncertainty / CMC calculation
+-# -----------------------
++
++
+ def get_applicable_cmc(db: Session, applied_value: float):
+     return (
+         db.query(HTWCMCReference)
+         .filter(
+             HTWCMCReference.is_active.is_(True),
+             HTWCMCReference.lower_measure_range <= applied_value,
+-            HTWCMCReference.higher_measure_range >= applied_value
++            HTWCMCReference.higher_measure_range >= applied_value,
+         )
+         .order_by(HTWCMCReference.higher_measure_range.asc())
+         .first()
+     )
+- 
+- 
+-# -----------------------
+-# UPDATE
+-# -----------------------
++
++
+ def update_cmc_reference(
+     db: Session,
+     record_id: int,
+-    payload: HTWCMCReferenceUpdate
++    payload: HTWCMCReferenceUpdate,
+ ):
+     obj = get_cmc_reference_by_id(db, record_id)
+     if not obj:
+         return None
+- 
+-    for key, value in payload.dict(exclude_unset=True).items():
++
++    update_data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
++    for key, value in update_data.items():
+         setattr(obj, key, value)
+- 
++
++    if hasattr(obj, "updated_at"):
++        obj.updated_at = datetime.now(timezone.utc)
++
+     db.commit()
+     db.refresh(obj)
+     return obj
+- 
+- 
+-# -----------------------
+-# SOFT DELETE
+-# -----------------------
++
++
+ def deactivate_cmc_reference(db: Session, record_id: int) -> bool:
+     obj = get_cmc_reference_by_id(db, record_id)
+     if not obj:
+         return False
+- 
++
+     obj.is_active = False
++    if hasattr(obj, "updated_at"):
++        obj.updated_at = datetime.now(timezone.utc)
++
+     db.commit()
+-    return True
+\ No newline at end of file
++    return True
++
++
++# =============================================================================
++# TEMPLATE / BULK IMPORT HELPERS
++# =============================================================================
++def _is_blank(value: Any) -> bool:
++    return value is None or str(value).strip() == ""
++
++
++def _normalize_header(value: Any) -> str:
++    return str(value).strip().lower() if value is not None else ""
++
++
++def _validate_template_headers(headers: List[Any]) -> None:
++    normalized = [_normalize_header(h) for h in headers]
++    if normalized != TEMPLATE_COLUMNS:
++        raise HTTPException(
++            status_code=400,
++            detail="Invalid file template. Expected columns: " + ", ".join(TEMPLATE_COLUMNS),
++        )
++
++
++def _parse_decimal(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[Decimal]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++
++    try:
++        return Decimal(str(value).strip())
++    except (InvalidOperation, ValueError, TypeError):
++        errors.append(f"Row {row_num}: {field_name} must be numeric")
++        return None
++
++
++def _build_rows_from_xlsx(content: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    wb = load_workbook(BytesIO(content), data_only=True)
++    ws = wb.active
++
++    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
++    if not header_row:
++        raise HTTPException(status_code=400, detail="The uploaded Excel file is empty")
++
++    _validate_template_headers(list(header_row))
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
++        if row is None or all(_is_blank(v) for v in row):
++            continue
++
++        row_map = {
++            TEMPLATE_COLUMNS[i]: (row[i] if i < len(row) else None)
++            for i in range(len(TEMPLATE_COLUMNS))
++        }
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def _build_rows_from_csv(content: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    text = content.decode("utf-8-sig")
++    reader = csv.DictReader(StringIO(text))
++
++    if not reader.fieldnames:
++        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
++
++    _validate_template_headers(reader.fieldnames)
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(reader, start=2):
++        if row is None or all(_is_blank(v) for v in row.values()):
++            continue
++        rows.append((row_num, row))
++    return rows
++
++
++def build_template_file(file_format: str = "xlsx") -> tuple[bytes, str, str]:
++    """
++    Build a downloadable template file for bulk import.
++    XLSX includes a small instructions sheet.
++    """
++    normalized = (file_format or "xlsx").strip().lower()
++
++    if normalized == "csv":
++        output = StringIO()
++        writer = csv.writer(output)
++        writer.writerow(TEMPLATE_COLUMNS)
++        return (
++            output.getvalue().encode("utf-8-sig"),
++            "text/csv",
++            "htw_cmc_template.csv",
++        )
++
++    wb = Workbook()
++    ws = wb.active
++    ws.title = "CMC Scope"
++    ws.append(TEMPLATE_COLUMNS)
++
++    info = wb.create_sheet(title="Instructions")
++    info["A1"] = "Template Notes"
++    info["A2"] = "All fields in the main sheet are mandatory."
++    info["A3"] = "Use numeric values for all columns."
++    info["A4"] = "Example lower_measure_range"
++    info["B4"] = "200"
++    info["A5"] = "Example higher_measure_range"
++    info["B5"] = "1500"
++    info["A6"] = "Example cmc_percent"
++    info["B6"] = "0.58"
++    info["A8"] = "Keep the main sheet header row exactly as downloaded."
++
++    output = BytesIO()
++    wb.save(output)
++    return (
++        output.getvalue(),
++        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++        "htw_cmc_template.xlsx",
++    )
++
++
++def _db_key(value: Any) -> Decimal:
++    return Decimal(str(value).strip())
++
++
++def import_cmc_references_from_upload(
++    db: Session,
++    file: UploadFile,
++) -> Dict[str, Any]:
++    """
++    Bulk import CMC references from a predefined template.
++    Rejects duplicate rows both within the file and against the database.
++    """
++    filename = (file.filename or "").lower().strip()
++    if not (filename.endswith(".xlsx") or filename.endswith(".csv")):
++        raise HTTPException(status_code=400, detail="Only .xlsx and .csv files are allowed")
++
++    content = file.file.read() if getattr(file, "file", None) else None
++    if content is None:
++        raise HTTPException(status_code=400, detail="Unable to read uploaded file")
++
++    if filename.endswith(".xlsx"):
++        rows = _build_rows_from_xlsx(content)
++    else:
++        rows = _build_rows_from_csv(content)
++
++    if not rows:
++        raise HTTPException(status_code=400, detail="No data rows found in the uploaded file")
++
++    existing_keys = {
++        (
++            _db_key(obj.lower_measure_range),
++            _db_key(obj.higher_measure_range),
++            _db_key(obj.cmc_percent),
++        )
++        for obj in db.query(HTWCMCReference).all()
++    }
++
++    errors: List[str] = []
++    seen_in_file: set[tuple[Decimal, Decimal, Decimal]] = set()
++    objects: List[HTWCMCReference] = []
++
++    for row_num, row in rows:
++        lower = _parse_decimal(row.get("lower_measure_range"), "lower_measure_range", row_num, errors)
++        higher = _parse_decimal(row.get("higher_measure_range"), "higher_measure_range", row_num, errors)
++        cmc = _parse_decimal(row.get("cmc_percent"), "cmc_percent", row_num, errors)
++
++        if lower is not None and higher is not None and lower >= higher:
++            errors.append(f"Row {row_num}: lower_measure_range must be less than higher_measure_range")
++
++        if lower is not None and higher is not None and cmc is not None:
++            row_key = (lower, higher, cmc)
++            if row_key in seen_in_file:
++                errors.append(
++                    f"Row {row_num}: duplicate row found inside the uploaded file "
++                    "(same lower_measure_range, higher_measure_range, cmc_percent)"
++                )
++            if row_key in existing_keys:
++                errors.append(
++                    f"Row {row_num}: duplicate row already exists in the database "
++                    "(same lower_measure_range, higher_measure_range, cmc_percent)"
++                )
++            seen_in_file.add(row_key)
++
++        objects.append(
++            HTWCMCReference(
++                lower_measure_range=lower,
++                higher_measure_range=higher,
++                cmc_percent=cmc,
++                is_active=True,
++            )
++        )
++
++    if errors:
++        raise HTTPException(
++            status_code=400,
++            detail="Import failed:\n" + "\n".join(errors[:100]),
++        )
++
++    try:
++        db.add_all(objects)
++        db.commit()
++        return {
++            "message": "Import successful",
++            "inserted_rows": len(objects),
++        }
++    except Exception as exc:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"Database error: {str(exc)}")
+diff --git a/backend/services/htw/htw_manufacturer_spec_service.py b/backend/services/htw/htw_manufacturer_spec_service.py
+new file mode 100644
+index 00000000..e7d96743
+--- /dev/null
++++ b/backend/services/htw/htw_manufacturer_spec_service.py
+@@ -0,0 +1,441 @@
++from __future__ import annotations
++
++import csv
++from decimal import Decimal, InvalidOperation
++from io import BytesIO, StringIO
++from typing import Any, Dict, List, Optional, Tuple
++
++from fastapi import HTTPException
++from fastapi.responses import Response, StreamingResponse
++from sqlalchemy.exc import SQLAlchemyError
++from sqlalchemy.orm import Session
++
++from backend import models
++from backend.schemas.htw.htw_manufacturer_spec_schemas import (
++    HTWManufacturerSpecCreate,
++    HTWManufacturerSpecUpdate,
++)
++
++try:
++    from openpyxl import Workbook, load_workbook
++except ImportError:  # pragma: no cover
++    Workbook = None
++    load_workbook = None
++
++
++EXPECTED_COLUMNS = [
++    "make",
++    "model",
++    "range_min",
++    "range_max",
++    "torque_20",
++    "torque_40",
++    "torque_60",
++    "torque_80",
++    "torque_100",
++    "torque_unit",
++    "pressure_20",
++    "pressure_40",
++    "pressure_60",
++    "pressure_80",
++    "pressure_100",
++    "pressure_unit",
++]
++
++
++def _is_blank(value: Any) -> bool:
++    return value is None or str(value).strip() == ""
++
++
++def _clean_text(value: Any) -> Optional[str]:
++    if _is_blank(value):
++        return None
++    return str(value).strip()
++
++
++def _normalize_header(value: Any) -> str:
++    return str(value).strip().lower() if value is not None else ""
++
++
++def _parse_decimal(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++    required: bool,
++) -> Optional[Decimal]:
++    if _is_blank(value):
++        if required:
++            errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++
++    try:
++        return Decimal(str(value).strip())
++    except (InvalidOperation, ValueError, TypeError):
++        errors.append(f"Row {row_num}: {field_name} must be numeric")
++        return None
++
++
++def _validate_headers(headers: List[Any]) -> None:
++    normalized_headers = [_normalize_header(h) for h in headers]
++    if normalized_headers != EXPECTED_COLUMNS:
++        raise HTTPException(
++            status_code=400,
++            detail=(
++                "Invalid file template. Headers must match exactly: "
++                + ", ".join(EXPECTED_COLUMNS)
++            ),
++        )
++
++
++def _existing_make_model_pairs(db: Session) -> set[Tuple[str, str]]:
++    existing_rows = db.query(
++        models.HTWManufacturerSpec.make,
++        models.HTWManufacturerSpec.model,
++    ).all()
++
++    pairs: set[Tuple[str, str]] = set()
++    for make, model in existing_rows:
++        if make is None or model is None:
++            continue
++        pairs.add((str(make).strip().lower(), str(model).strip().lower()))
++    return pairs
++
++
++def _read_xlsx_rows(file_bytes: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    if load_workbook is None:
++        raise HTTPException(
++            status_code=500,
++            detail="openpyxl is not installed on the server",
++        )
++
++    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
++    sheet = workbook.active
++
++    header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
++    if not header_row:
++        raise HTTPException(status_code=400, detail="The uploaded Excel file is empty")
++
++    _validate_headers(list(header_row))
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
++        if row is None or all(_is_blank(cell) for cell in row):
++            continue
++
++        row_map = {
++            EXPECTED_COLUMNS[i]: (row[i] if i < len(row) else None)
++            for i in range(len(EXPECTED_COLUMNS))
++        }
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def _read_csv_rows(file_bytes: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    text = file_bytes.decode("utf-8-sig")
++    reader = csv.DictReader(StringIO(text))
++
++    if not reader.fieldnames:
++        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
++
++    _validate_headers(reader.fieldnames)
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(reader, start=2):
++        if row is None or all(_is_blank(cell) for cell in row.values()):
++            continue
++
++        row_map = {k: v for k, v in row.items()}
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def get_htw_manufacturer_specs(
++    db: Session,
++    skip: int = 0,
++    limit: Optional[int] = None,
++    is_active: Optional[bool] = None,
++):
++    query = db.query(models.HTWManufacturerSpec)
++
++    if is_active is not None:
++        query = query.filter(models.HTWManufacturerSpec.is_active == is_active)
++
++    query = query.order_by(models.HTWManufacturerSpec.created_at.desc())
++    return query.offset(skip).limit(limit).all()
++
++
++def get_htw_manufacturer_spec(db: Session, spec_id: int):
++    spec = db.query(models.HTWManufacturerSpec).filter(
++        models.HTWManufacturerSpec.id == spec_id
++    ).first()
++
++    if not spec:
++        raise HTTPException(
++            status_code=404,
++            detail=f"HTW Manufacturer Spec with ID {spec_id} not found",
++        )
++
++    return spec
++
++
++def create_htw_manufacturer_spec(
++    db: Session,
++    spec_data: HTWManufacturerSpecCreate,
++):
++    try:
++        new_spec = models.HTWManufacturerSpec(**spec_data.model_dump())
++        db.add(new_spec)
++        db.commit()
++        db.refresh(new_spec)
++        return new_spec
++    except SQLAlchemyError as e:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
++    except Exception as e:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"An internal server error occurred: {str(e)}",
++        )
++
++
++def update_htw_manufacturer_spec(
++    db: Session,
++    spec_id: int,
++    spec_data: HTWManufacturerSpecUpdate,
++):
++    try:
++        spec = db.query(models.HTWManufacturerSpec).filter(
++            models.HTWManufacturerSpec.id == spec_id
++        ).first()
++
++        if not spec:
++            raise HTTPException(
++                status_code=404,
++                detail=f"HTW Manufacturer Spec with ID {spec_id} not found",
++            )
++
++        update_data = spec_data.model_dump(exclude_unset=True)
++        for field, value in update_data.items():
++            setattr(spec, field, value)
++
++        from datetime import datetime
++        spec.updated_at = datetime.now()
++
++        db.commit()
++        db.refresh(spec)
++        return spec
++    except HTTPException:
++        raise
++    except SQLAlchemyError as e:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
++    except Exception as e:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"An internal server error occurred: {str(e)}",
++        )
++
++
++def update_htw_manufacturer_spec_status(
++    db: Session,
++    spec_id: int,
++    is_active: bool,
++):
++    try:
++        spec = db.query(models.HTWManufacturerSpec).filter(
++            models.HTWManufacturerSpec.id == spec_id
++        ).first()
++
++        if not spec:
++            raise HTTPException(
++                status_code=404,
++                detail=f"HTW Manufacturer Spec with ID {spec_id} not found",
++            )
++
++        from datetime import datetime
++        spec.is_active = is_active
++        spec.updated_at = datetime.now()
++
++        db.commit()
++        db.refresh(spec)
++        return spec
++    except HTTPException:
++        raise
++    except SQLAlchemyError as e:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
++    except Exception as e:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"An internal server error occurred: {str(e)}",
++        )
++
++
++def delete_htw_manufacturer_spec(db: Session, spec_id: int):
++    try:
++        spec = db.query(models.HTWManufacturerSpec).filter(
++            models.HTWManufacturerSpec.id == spec_id
++        ).first()
++
++        if not spec:
++            raise HTTPException(
++                status_code=404,
++                detail=f"HTW Manufacturer Spec with ID {spec_id} not found",
++            )
++
++        db.delete(spec)
++        db.commit()
++        return None
++    except HTTPException:
++        raise
++    except SQLAlchemyError as e:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
++    except Exception as e:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"An internal server error occurred: {str(e)}",
++        )
++
++
++def download_htw_manufacturer_spec_template(file_format: str = "xlsx"):
++    if file_format == "csv":
++        output = StringIO()
++        writer = csv.writer(output)
++        writer.writerow(EXPECTED_COLUMNS)
++
++        csv_data = output.getvalue().encode("utf-8-sig")
++        headers = {
++            "Content-Disposition": 'attachment; filename="htw_manufacturer_spec_template.csv"'
++        }
++        return Response(content=csv_data, media_type="text/csv", headers=headers)
++
++    if Workbook is None:
++        raise HTTPException(
++            status_code=500,
++            detail="openpyxl is not installed on the server",
++        )
++
++    workbook = Workbook()
++    sheet = workbook.active
++    sheet.title = "Manufacturer Specs"
++    sheet.append(EXPECTED_COLUMNS)
++
++    output = BytesIO()
++    workbook.save(output)
++    output.seek(0)
++
++    headers = {
++        "Content-Disposition": 'attachment; filename="htw_manufacturer_spec_template.xlsx"'
++    }
++    return StreamingResponse(
++        output,
++        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++        headers=headers,
++    )
++
++
++async def import_htw_manufacturer_specs(
++    db: Session,
++    filename: str,
++    file_bytes: bytes,
++):
++    filename = (filename or "").lower()
++    if not filename.endswith(".xlsx") and not filename.endswith(".csv"):
++        raise HTTPException(status_code=400, detail="Only .xlsx and .csv files are allowed")
++
++    if not file_bytes:
++        raise HTTPException(status_code=400, detail="Uploaded file is empty")
++
++    if filename.endswith(".xlsx"):
++        rows = _read_xlsx_rows(file_bytes)
++    else:
++        rows = _read_csv_rows(file_bytes)
++
++    if not rows:
++        raise HTTPException(status_code=400, detail="No data rows found in the uploaded file")
++
++    errors: List[str] = []
++    existing_pairs = _existing_make_model_pairs(db)
++    seen_in_file: set[Tuple[str, str]] = set()
++    objects_to_insert = []
++
++    for row_num, row in rows:
++        make = _clean_text(row.get("make"))
++        model = _clean_text(row.get("model"))
++        torque_unit = _clean_text(row.get("torque_unit"))
++        pressure_unit = _clean_text(row.get("pressure_unit"))
++
++        if not make:
++            errors.append(f"Row {row_num}: make is required")
++        if not model:
++            errors.append(f"Row {row_num}: model is required")
++        if not torque_unit:
++            errors.append(f"Row {row_num}: torque_unit is required")
++        if not pressure_unit:
++            errors.append(f"Row {row_num}: pressure_unit is required")
++
++        key = ((make or "").strip().lower(), (model or "").strip().lower())
++        if make and model:
++            if key in seen_in_file:
++                errors.append(f"Row {row_num}: duplicate make + model inside the uploaded file")
++            if key in existing_pairs:
++                errors.append(f"Row {row_num}: make + model already exists in the database")
++            seen_in_file.add(key)
++
++        parsed_data = {
++            "make": make,
++            "model": model,
++            "range_min": _parse_decimal(row.get("range_min"), "range_min", row_num, errors, True),
++            "range_max": _parse_decimal(row.get("range_max"), "range_max", row_num, errors, True),
++            "torque_20": _parse_decimal(row.get("torque_20"), "torque_20", row_num, errors, True),
++            "torque_40": _parse_decimal(row.get("torque_40"), "torque_40", row_num, errors, False),
++            "torque_60": _parse_decimal(row.get("torque_60"), "torque_60", row_num, errors, True),
++            "torque_80": _parse_decimal(row.get("torque_80"), "torque_80", row_num, errors, False),
++            "torque_100": _parse_decimal(row.get("torque_100"), "torque_100", row_num, errors, True),
++            "torque_unit": torque_unit,
++            "pressure_20": _parse_decimal(row.get("pressure_20"), "pressure_20", row_num, errors, True),
++            "pressure_40": _parse_decimal(row.get("pressure_40"), "pressure_40", row_num, errors, False),
++            "pressure_60": _parse_decimal(row.get("pressure_60"), "pressure_60", row_num, errors, True),
++            "pressure_80": _parse_decimal(row.get("pressure_80"), "pressure_80", row_num, errors, False),
++            "pressure_100": _parse_decimal(row.get("pressure_100"), "pressure_100", row_num, errors, True),
++            "pressure_unit": pressure_unit,
++            "is_active": True,
++        }
++
++        range_min = parsed_data["range_min"]
++        range_max = parsed_data["range_max"]
++        if range_min is not None and range_max is not None and range_max < range_min:
++            errors.append(f"Row {row_num}: range_max must be greater than or equal to range_min")
++
++        objects_to_insert.append(models.HTWManufacturerSpec(**parsed_data))
++
++    if errors:
++        raise HTTPException(
++            status_code=400,
++            detail="Import failed:\n" + "\n".join(errors[:100]),
++        )
++
++    try:
++        db.add_all(objects_to_insert)
++        db.commit()
++        return {
++            "message": "Import successful",
++            "inserted_rows": len(objects_to_insert),
++        }
++    except SQLAlchemyError as e:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
++    except Exception as e:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"An internal server error occurred: {str(e)}",
++        )
+\ No newline at end of file
+diff --git a/backend/services/htw/htw_pressure_gauge_res_service.py b/backend/services/htw/htw_pressure_gauge_res_service.py
+new file mode 100644
+index 00000000..d0175d82
+--- /dev/null
++++ b/backend/services/htw/htw_pressure_gauge_res_service.py
+@@ -0,0 +1,402 @@
++from __future__ import annotations
++
++from datetime import date, datetime, timezone
++from decimal import Decimal, InvalidOperation
++from io import BytesIO, StringIO
++from typing import Any, Dict, List, Optional, Tuple
++import csv
++
++from fastapi import HTTPException, UploadFile
++from openpyxl import Workbook, load_workbook
++from sqlalchemy.orm import Session
++
++from backend import models
++from backend.schemas.htw.htw_pressure_gauge_resolution import (
++    HTWPressureGaugeResolutionCreate,
++)
++
++# ✅ Removed "is_active" from template columns
++TEMPLATE_COLUMNS: List[str] = [
++    "pressure",
++    "unit",
++    "valid_upto",
++]
++
++TEMPLATE_DATE_FORMAT = "YYYY-MM-DD"
++
++
++# =============================================================================
++# CRUD SERVICE LAYER
++# =============================================================================
++def create_resolution(
++    db: Session,
++    data: HTWPressureGaugeResolutionCreate,
++) -> models.HTWPressureGaugeResolution:
++    payload = data.model_dump()
++    now = datetime.now(timezone.utc)
++
++    if payload.get("created_at") is None:
++        payload["created_at"] = now
++
++    # ✅ Only add updated_at if the model actually defines it
++    if hasattr(models.HTWPressureGaugeResolution, "updated_at"):
++        payload["updated_at"] = now
++
++    # ✅ Ensure is_active is always True
++    payload["is_active"] = True
++
++    record = models.HTWPressureGaugeResolution(**payload)
++    db.add(record)
++    db.commit()
++    db.refresh(record)
++    return record
++
++
++def get_resolutions(
++    db: Session,
++    unit: Optional[str] = None,
++) -> List[models.HTWPressureGaugeResolution]:
++    query = db.query(models.HTWPressureGaugeResolution)
++
++    if unit:
++        query = query.filter(
++            models.HTWPressureGaugeResolution.unit.isnot(None),
++            models.HTWPressureGaugeResolution.unit == unit.strip(),
++        )
++
++    return query.order_by(models.HTWPressureGaugeResolution.pressure.asc()).all()
++
++
++def get_unique_units(db: Session) -> List[str]:
++    units = (
++        db.query(models.HTWPressureGaugeResolution.unit)
++        .filter(models.HTWPressureGaugeResolution.unit.isnot(None))
++        .distinct()
++        .order_by(models.HTWPressureGaugeResolution.unit.asc())
++        .all()
++    )
++    return [unit[0] for unit in units if unit and unit[0]]
++
++
++def get_resolution_by_id(
++    db: Session,
++    resolution_id: int,
++) -> models.HTWPressureGaugeResolution | None:
++    return (
++        db.query(models.HTWPressureGaugeResolution)
++        .filter(models.HTWPressureGaugeResolution.id == resolution_id)
++        .first()
++    )
++
++
++def update_resolution(
++    db: Session,
++    resolution_id: int,
++    data: HTWPressureGaugeResolutionCreate,
++) -> models.HTWPressureGaugeResolution | None:
++    record = get_resolution_by_id(db, resolution_id)
++    if not record:
++        return None
++
++    update_data = data.model_dump(exclude_unset=True)
++
++    for key, value in update_data.items():
++        setattr(record, key, value)
++
++    if hasattr(record, "updated_at"):
++        record.updated_at = datetime.now(timezone.utc)
++
++    db.commit()
++    db.refresh(record)
++    return record
++
++
++def update_resolution_status(
++    db: Session,
++    resolution_id: int,
++    is_active: bool,
++) -> models.HTWPressureGaugeResolution | None:
++    record = get_resolution_by_id(db, resolution_id)
++    if not record:
++        return None
++
++    record.is_active = is_active
++    if hasattr(record, "updated_at"):
++        record.updated_at = datetime.now(timezone.utc)
++
++    db.commit()
++    db.refresh(record)
++    return record
++
++
++def delete_resolution(
++    db: Session,
++    resolution_id: int,
++) -> bool:
++    record = get_resolution_by_id(db, resolution_id)
++    if not record:
++        return False
++
++    db.delete(record)
++    db.commit()
++    return True
++
++
++# =============================================================================
++# TEMPLATE / BULK IMPORT HELPERS
++# =============================================================================
++def _is_blank(value: Any) -> bool:
++    return value is None or str(value).strip() == ""
++
++
++def _normalize_header(value: Any) -> str:
++    return str(value).strip().lower() if value is not None else ""
++
++
++def _validate_template_headers(headers: List[Any]) -> None:
++    normalized = [_normalize_header(h) for h in headers]
++    if normalized == TEMPLATE_COLUMNS:
++        return
++    raise HTTPException(
++        status_code=400,
++        detail=(
++            "Invalid file template. Expected columns: "
++            + ", ".join(TEMPLATE_COLUMNS)
++        ),
++    )
++
++
++def _parse_decimal(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[Decimal]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++
++    try:
++        return Decimal(str(value).strip())
++    except (InvalidOperation, ValueError, TypeError):
++        errors.append(f"Row {row_num}: {field_name} must be numeric")
++        return None
++
++
++def _parse_date(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[date]:
++    if _is_blank(value):
++        return None
++
++    if isinstance(value, datetime):
++        return value.date()
++
++    if isinstance(value, date):
++        return value
++
++    text = str(value).strip()
++
++    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
++        try:
++            return datetime.strptime(text, fmt).date()
++        except ValueError:
++            continue
++
++    errors.append(
++        f"Row {row_num}: {field_name} must be a valid date in YYYY-MM-DD format"
++    )
++    return None
++
++
++def _build_rows_from_xlsx(content: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    wb = load_workbook(BytesIO(content), data_only=True)
++    ws = wb.active
++
++    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
++    if not header_row:
++        raise HTTPException(status_code=400, detail="The uploaded Excel file is empty")
++
++    _validate_template_headers(list(header_row))
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
++        if row is None or all(_is_blank(v) for v in row):
++            continue
++
++        row_map = {
++            TEMPLATE_COLUMNS[i]: (row[i] if i < len(row) else None)
++            for i in range(len(TEMPLATE_COLUMNS))
++        }
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def _build_rows_from_csv(content: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    text = content.decode("utf-8-sig")
++    reader = csv.DictReader(StringIO(text))
++
++    if not reader.fieldnames:
++        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
++
++    _validate_template_headers(reader.fieldnames)
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(reader, start=2):
++        if row is None or all(_is_blank(v) for v in row.values()):
++            continue
++        rows.append((row_num, row))
++    return rows
++
++
++def build_template_file(file_format: str = "xlsx") -> tuple[bytes, str, str]:
++    normalized = (file_format or "xlsx").strip().lower()
++
++    if normalized == "csv":
++        output = StringIO()
++        writer = csv.writer(output)
++        writer.writerow(TEMPLATE_COLUMNS)
++
++        content = output.getvalue().encode("utf-8-sig")
++        return (
++            content,
++            "text/csv",
++            "htw_pressure_gauge_resolution_template.csv",
++        )
++
++    wb = Workbook()
++    ws = wb.active
++    ws.title = "Pressure Gauge Resolutions"
++    ws.append(TEMPLATE_COLUMNS)
++
++    info = wb.create_sheet(title="Instructions")
++    info["A1"] = "Template Notes"
++    info["A2"] = "Date format for valid_upto"
++    info["B2"] = TEMPLATE_DATE_FORMAT
++    info["A3"] = "Example"
++    info["B3"] = "2026-03-31"
++    info["A4"] = "Accepted alternate date formats on import"
++    info["B4"] = "DD-MM-YYYY, DD/MM/YYYY"
++    info["A5"] = "valid_upto can be left blank for indefinite validity"
++    info["A6"] = "Keep the main sheet header row exactly as downloaded."
++
++    output = BytesIO()
++    wb.save(output)
++    content = output.getvalue()
++
++    return (
++        content,
++        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++        "htw_pressure_gauge_resolution_template.xlsx",
++    )
++
++
++def _existing_import_keys(db: Session) -> set[tuple[Decimal, str, Optional[date]]]:
++    rows = db.query(
++        models.HTWPressureGaugeResolution.pressure,
++        models.HTWPressureGaugeResolution.unit,
++        models.HTWPressureGaugeResolution.valid_upto,
++    ).all()
++
++    keys: set[tuple[Decimal, str, Optional[date]]] = set()
++    for pressure, unit, valid_upto in rows:
++        if pressure is None or unit is None:
++            continue
++        pressure_key = Decimal(str(pressure))
++        unit_key = str(unit).strip().lower()
++        valid_upto_key = valid_upto
++        if isinstance(valid_upto_key, datetime):
++            valid_upto_key = valid_upto_key.date()
++        keys.add((pressure_key, unit_key, valid_upto_key))
++    return keys
++
++
++async def import_resolutions_from_upload(
++    db: Session,
++    file: UploadFile,
++) -> Dict[str, Any]:
++    filename = (file.filename or "").lower().strip()
++    if not (filename.endswith(".xlsx") or filename.endswith(".csv")):
++        raise HTTPException(
++            status_code=400,
++            detail="Only .xlsx and .csv files are allowed",
++        )
++
++    content = await file.read()
++
++    if filename.endswith(".xlsx"):
++        rows = _build_rows_from_xlsx(content)
++    else:
++        rows = _build_rows_from_csv(content)
++
++    if not rows:
++        raise HTTPException(
++            status_code=400,
++            detail="No data rows found in the uploaded file",
++        )
++
++    existing_keys = _existing_import_keys(db)
++    seen_in_file: set[tuple[Decimal, str, Optional[date]]] = set()
++    parsed_rows: List[Dict[str, Any]] = []
++    errors: List[str] = []
++    now = datetime.now(timezone.utc)
++
++    for row_num, row in rows:
++        pressure = _parse_decimal(row.get("pressure"), "pressure", row_num, errors)
++        unit = row.get("unit")
++        valid_upto = _parse_date(row.get("valid_upto"), "valid_upto", row_num, errors)
++        
++        if _is_blank(unit):
++            errors.append(f"Row {row_num}: unit is required")
++            unit = None
++
++        if pressure is not None and unit is not None:
++            key = (pressure, str(unit).strip().lower(), valid_upto)
++            if key in seen_in_file:
++                errors.append(
++                    f"Row {row_num}: duplicate row inside the uploaded file "
++                    f"(pressure, unit, valid_upto already repeated)"
++                )
++            if key in existing_keys:
++                errors.append(
++                    f"Row {row_num}: duplicate row already exists in the database "
++                    f"(pressure, unit, valid_upto)"
++                )
++            seen_in_file.add(key)
++
++        # ✅ Build row dict without updated_at to match model definition
++        row_data = {
++            "pressure": pressure,
++            "unit": str(unit).strip() if unit is not None else None,
++            "valid_upto": valid_upto,
++            "is_active": True,
++            "created_at": now,
++        }
++        if hasattr(models.HTWPressureGaugeResolution, "updated_at"):
++            row_data["updated_at"] = now
++            
++        parsed_rows.append(row_data)
++
++    if errors:
++        raise HTTPException(
++            status_code=400,
++            detail="Import failed:\n" + "\n".join(errors[:100]),
++        )
++
++    try:
++        db.add_all([models.HTWPressureGaugeResolution(**item) for item in parsed_rows])
++        db.commit()
++        return {
++            "message": "Import successful",
++            "inserted_rows": len(parsed_rows),
++        }
++    except Exception as exc:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"Database error: {str(exc)}",
++        )
+\ No newline at end of file
+diff --git a/backend/services/htw/htw_standard_uncertainty_reference_service.py b/backend/services/htw/htw_standard_uncertainty_reference_service.py
+index 9fb852f8..43e525dc 100644
+--- a/backend/services/htw/htw_standard_uncertainty_reference_service.py
++++ b/backend/services/htw/htw_standard_uncertainty_reference_service.py
+@@ -1,88 +1,499 @@
++from __future__ import annotations
++
++from datetime import date, datetime, timezone
++from decimal import Decimal, InvalidOperation
++from io import BytesIO, StringIO
++from typing import Any, Dict, List, Optional, Tuple
++import csv
++
++from fastapi import HTTPException, UploadFile
++from openpyxl import Workbook, load_workbook
+ from sqlalchemy.orm import Session
+-from typing import List, Optional
+- 
++
+ from backend.models.htw.htw_standard_uncertainty_reference import (
+-    HTWStandardUncertaintyReference
++    HTWStandardUncertaintyReference,
+ )
+ from backend.schemas.htw.htw_standard_uncertainty_reference_schemas import (
+     HTWStandardUncertaintyReferenceCreate,
+-    HTWStandardUncertaintyReferenceUpdate
++    HTWStandardUncertaintyReferenceUpdate,
+ )
+- 
+- 
++
++TEMPLATE_COLUMNS: List[str] = [
++    "valid_from",
++    "valid_upto",
++    "torque_nm",
++    "applied_torque",
++    "indicated_torque",
++    "error_value",
++    "uncertainty_percent",
++]
++
++TEMPLATE_DATE_FORMAT = "YYYY-MM-DD"
++
++
++# =============================================================================
++# CRUD SERVICE LAYER
++# =============================================================================
+ def create_reference(
+     db: Session,
+-    data: HTWStandardUncertaintyReferenceCreate
++    data: HTWStandardUncertaintyReferenceCreate,
+ ) -> HTWStandardUncertaintyReference:
+-    record = HTWStandardUncertaintyReference(**data.model_dump())
++    payload = data.model_dump()
++    now = datetime.now(timezone.utc)
++
++    if payload.get("created_at") is None:
++        payload["created_at"] = now
++    payload["updated_at"] = now
++
++    record = HTWStandardUncertaintyReference(**payload)
+     db.add(record)
+     db.commit()
+     db.refresh(record)
+     return record
+- 
+- 
++
++
+ def get_references(
+     db: Session,
+     is_active: Optional[bool] = None,
+-    torque_nm: Optional[int] = None
++    torque_nm: Optional[int] = None,
+ ) -> List[HTWStandardUncertaintyReference]:
+     query = db.query(HTWStandardUncertaintyReference)
+- 
++
+     if is_active is not None:
+-        query = query.filter(
+-            HTWStandardUncertaintyReference.is_active == is_active
+-        )
+- 
++        query = query.filter(HTWStandardUncertaintyReference.is_active == is_active)
++
+     if torque_nm is not None:
+-        query = query.filter(
+-            HTWStandardUncertaintyReference.torque_nm == torque_nm
+-        )
+- 
+-    return query.order_by(
+-        HTWStandardUncertaintyReference.created_at.desc()
+-    ).all()
+- 
+- 
++        query = query.filter(HTWStandardUncertaintyReference.torque_nm == torque_nm)
++
++    return query.order_by(HTWStandardUncertaintyReference.created_at.desc()).all()
++
++
+ def get_reference_by_id(
+     db: Session,
+-    reference_id: int
++    reference_id: int,
+ ) -> HTWStandardUncertaintyReference | None:
+     return (
+         db.query(HTWStandardUncertaintyReference)
+         .filter(HTWStandardUncertaintyReference.id == reference_id)
+         .first()
+     )
+- 
+- 
++
++
+ def update_reference(
+     db: Session,
+     reference_id: int,
+-    data: HTWStandardUncertaintyReferenceUpdate
++    data: HTWStandardUncertaintyReferenceUpdate,
+ ) -> HTWStandardUncertaintyReference | None:
+     record = get_reference_by_id(db, reference_id)
+     if not record:
+         return None
+- 
+-    # exclude_unset=True ensures we only update fields that were actually sent
++
+     update_data = data.model_dump(exclude_unset=True)
+- 
++
+     for key, value in update_data.items():
+         setattr(record, key, value)
+- 
++
++    record.updated_at = datetime.now(timezone.utc)
+     db.commit()
+     db.refresh(record)
+     return record
+- 
+- 
++
++
+ def delete_reference(
+     db: Session,
+-    reference_id: int
++    reference_id: int,
+ ) -> bool:
+     record = get_reference_by_id(db, reference_id)
+     if not record:
+         return False
+- 
++
+     db.delete(record)
+     db.commit()
+     return True
+- 
+\ No newline at end of file
++
++
++# =============================================================================
++# TEMPLATE / BULK IMPORT HELPERS
++# =============================================================================
++def _is_blank(value: Any) -> bool:
++    return value is None or str(value).strip() == ""
++
++
++def _normalize_header(value: Any) -> str:
++    return str(value).strip().lower() if value is not None else ""
++
++
++def _validate_template_headers(headers: List[Any]) -> None:
++    normalized = [_normalize_header(h) for h in headers]
++    if normalized != TEMPLATE_COLUMNS:
++        raise HTTPException(
++            status_code=400,
++            detail=(
++                "Invalid file template. Expected columns: "
++                + ", ".join(TEMPLATE_COLUMNS)
++            ),
++        )
++
++
++def _parse_int(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[int]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++
++    try:
++        return int(str(value).strip())
++    except (ValueError, TypeError):
++        errors.append(f"Row {row_num}: {field_name} must be an integer")
++        return None
++
++
++def _parse_decimal(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[Decimal]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++
++    try:
++        return Decimal(str(value).strip())
++    except (InvalidOperation, ValueError, TypeError):
++        errors.append(f"Row {row_num}: {field_name} must be numeric")
++        return None
++
++
++def _parse_date(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[date]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++
++    if isinstance(value, datetime):
++        return value.date()
++
++    if isinstance(value, date):
++        return value
++
++    text = str(value).strip()
++
++    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
++        try:
++            return datetime.strptime(text, fmt).date()
++        except ValueError:
++            continue
++
++    errors.append(
++        f"Row {row_num}: {field_name} must be a valid date in YYYY-MM-DD format"
++    )
++    return None
++
++
++def _parse_bool(value: Any, default: bool = True) -> bool:
++    if _is_blank(value):
++        return default
++
++    raw = str(value).strip().lower()
++    if raw in {"true", "1", "yes", "y", "active"}:
++        return True
++    if raw in {"false", "0", "no", "n", "inactive"}:
++        return False
++    return default
++
++
++def _normalize_decimal_for_key(value: Any) -> Decimal:
++    """
++    Normalize imported and DB decimal values for exact equality checks.
++    """
++    if isinstance(value, Decimal):
++        return value
++    return Decimal(str(value))
++
++
++def _build_exact_key(
++    valid_from: date,
++    valid_upto: date,
++    torque_nm: int,
++    applied_torque: Any,
++    indicated_torque: Any,
++    error_value: Any,
++    uncertainty_percent: Any,
++) -> Tuple[Any, ...]:
++    return (
++        valid_from,
++        valid_upto,
++        int(torque_nm),
++        _normalize_decimal_for_key(applied_torque),
++        _normalize_decimal_for_key(indicated_torque),
++        _normalize_decimal_for_key(error_value),
++        _normalize_decimal_for_key(uncertainty_percent),
++    )
++
++
++def _fetch_existing_exact_keys(db: Session) -> set[Tuple[Any, ...]]:
++    """
++    Fetch all currently stored rows and build exact comparison keys based on
++    the import/template columns only. This blocks re-importing the same row even
++    if the record already exists in the database with a different is_active flag.
++    """
++    rows = (
++        db.query(
++            HTWStandardUncertaintyReference.valid_from,
++            HTWStandardUncertaintyReference.valid_upto,
++            HTWStandardUncertaintyReference.torque_nm,
++            HTWStandardUncertaintyReference.applied_torque,
++            HTWStandardUncertaintyReference.indicated_torque,
++            HTWStandardUncertaintyReference.error_value,
++            HTWStandardUncertaintyReference.uncertainty_percent,
++        )
++        .all()
++    )
++
++    existing_keys: set[Tuple[Any, ...]] = set()
++    for row in rows:
++        existing_keys.add(
++            _build_exact_key(
++                row.valid_from,
++                row.valid_upto,
++                row.torque_nm,
++                row.applied_torque,
++                row.indicated_torque,
++                row.error_value,
++                row.uncertainty_percent,
++            )
++        )
++    return existing_keys
++
++
++def _build_rows_from_xlsx(content: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    wb = load_workbook(BytesIO(content), data_only=True)
++    ws = wb.active
++
++    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
++    if not header_row:
++        raise HTTPException(status_code=400, detail="The uploaded Excel file is empty")
++
++    _validate_template_headers(list(header_row))
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
++        if row is None or all(_is_blank(v) for v in row):
++            continue
++
++        row_map = {
++            TEMPLATE_COLUMNS[i]: (row[i] if i < len(row) else None)
++            for i in range(len(TEMPLATE_COLUMNS))
++        }
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def _build_rows_from_csv(content: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    text = content.decode("utf-8-sig")
++    reader = csv.DictReader(StringIO(text))
++
++    if not reader.fieldnames:
++        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
++
++    _validate_template_headers(reader.fieldnames)
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(reader, start=2):
++        if row is None or all(_is_blank(v) for v in row.values()):
++            continue
++        rows.append((row_num, row))
++    return rows
++
++
++def build_template_file(file_format: str = "xlsx") -> tuple[bytes, str, str]:
++    """
++    Build a downloadable template file for bulk import.
++    - Main sheet contains only the mandatory fields.
++    - XLSX includes an instructions sheet with date-format guidance.
++    """
++    normalized = (file_format or "xlsx").strip().lower()
++
++    if normalized == "csv":
++        output = StringIO()
++        writer = csv.writer(output)
++        writer.writerow(TEMPLATE_COLUMNS)
++
++        content = output.getvalue().encode("utf-8-sig")
++        return (
++            content,
++            "text/csv",
++            "htw_standard_uncertainty_template.csv",
++        )
++
++    wb = Workbook()
++    ws = wb.active
++    ws.title = "HTW Standard Uncertainty"
++    ws.append(TEMPLATE_COLUMNS)
++
++    for cell in ws[1]:
++        cell.font = cell.font.copy(bold=True)
++
++    info = wb.create_sheet(title="Instructions")
++    info["A1"] = "Template Notes"
++    info["A2"] = "Date format for valid_from and valid_upto"
++    info["B2"] = TEMPLATE_DATE_FORMAT
++    info["A3"] = "Example"
++    info["B3"] = "2026-03-31"
++    info["A4"] = "Accepted alternate date formats on import"
++    info["B4"] = "DD-MM-YYYY, DD/MM/YYYY"
++    info["A6"] = "Keep the main sheet header row exactly as downloaded."
++    info["A7"] = "All fields on the main sheet are mandatory."
++
++    output = BytesIO()
++    wb.save(output)
++    content = output.getvalue()
++
++    return (
++        content,
++        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++        "htw_standard_uncertainty_template.xlsx",
++    )
++
++
++async def import_references_from_upload(
++    db: Session,
++    file: UploadFile,
++) -> Dict[str, Any]:
++    """
++    Bulk import standard uncertainty references from a predefined template.
++
++    Validation rules:
++    - all fields are required
++    - dates must be valid
++    - torque_nm must be an integer
++    - decimal fields must be numeric
++    - valid_upto must be >= valid_from
++    - exact duplicate rows are blocked:
++        * duplicate inside the same uploaded file
++        * duplicate already existing in the database
++    """
++    filename = (file.filename or "").lower().strip()
++    if not (filename.endswith(".xlsx") or filename.endswith(".csv")):
++        raise HTTPException(
++            status_code=400,
++            detail="Only .xlsx and .csv files are allowed",
++        )
++
++    content = await file.read()
++
++    if filename.endswith(".xlsx"):
++        rows = _build_rows_from_xlsx(content)
++    else:
++        rows = _build_rows_from_csv(content)
++
++    if not rows:
++        raise HTTPException(
++            status_code=400,
++            detail="No data rows found in the uploaded file",
++        )
++
++    errors: List[str] = []
++    objects: List[HTWStandardUncertaintyReference] = []
++    seen_keys: set[Tuple[Any, ...]] = set()
++    existing_keys = _fetch_existing_exact_keys(db)
++    now = datetime.now(timezone.utc)
++
++    for row_num, row in rows:
++        valid_from = _parse_date(row.get("valid_from"), "valid_from", row_num, errors)
++        valid_upto = _parse_date(row.get("valid_upto"), "valid_upto", row_num, errors)
++        torque_nm = _parse_int(row.get("torque_nm"), "torque_nm", row_num, errors)
++        applied_torque = _parse_decimal(
++            row.get("applied_torque"), "applied_torque", row_num, errors
++        )
++        indicated_torque = _parse_decimal(
++            row.get("indicated_torque"), "indicated_torque", row_num, errors
++        )
++        error_value = _parse_decimal(
++            row.get("error_value"), "error_value", row_num, errors
++        )
++        uncertainty_percent = _parse_decimal(
++            row.get("uncertainty_percent"), "uncertainty_percent", row_num, errors
++        )
++
++        if valid_from and valid_upto and valid_upto < valid_from:
++            errors.append(
++                f"Row {row_num}: valid_upto must be greater than or equal to valid_from"
++            )
++
++        # Only build the duplicate-check key when all required values are valid.
++        row_key = None
++        if (
++            valid_from is not None
++            and valid_upto is not None
++            and torque_nm is not None
++            and applied_torque is not None
++            and indicated_torque is not None
++            and error_value is not None
++            and uncertainty_percent is not None
++        ):
++            row_key = _build_exact_key(
++                valid_from,
++                valid_upto,
++                torque_nm,
++                applied_torque,
++                indicated_torque,
++                error_value,
++                uncertainty_percent,
++            )
++
++            if row_key in seen_keys:
++                errors.append(
++                    f"Row {row_num}: duplicate row found inside the uploaded file"
++                )
++            elif row_key in existing_keys:
++                errors.append(
++                    f"Row {row_num}: duplicate row already exists in the database"
++                )
++            else:
++                seen_keys.add(row_key)
++
++        objects.append(
++            HTWStandardUncertaintyReference(
++                valid_from=valid_from,
++                valid_upto=valid_upto,
++                torque_nm=torque_nm,
++                applied_torque=applied_torque,
++                indicated_torque=indicated_torque,
++                error_value=error_value,
++                uncertainty_percent=uncertainty_percent,
++                is_active=True,
++                created_at=now,
++                updated_at=now,
++            )
++        )
++
++    if errors:
++        raise HTTPException(
++            status_code=400,
++            detail="Import failed:\n" + "\n".join(errors[:100]),
++        )
++
++    try:
++        db.add_all(objects)
++        db.commit()
++        return {
++            "message": "Import successful",
++            "inserted_rows": len(objects),
++        }
++    except Exception as exc:
++        db.rollback()
++        raise HTTPException(
++            status_code=500,
++            detail=f"Database error: {str(exc)}",
++        )
+diff --git a/backend/services/htw/htw_t_distribution_service.py b/backend/services/htw/htw_t_distribution_service.py
+index 0f34b56f..8967aab4 100644
+--- a/backend/services/htw/htw_t_distribution_service.py
++++ b/backend/services/htw/htw_t_distribution_service.py
+@@ -1,94 +1,333 @@
+-#htw_t_distribution_service.py
+-from sqlalchemy.orm import Session
+-from sqlalchemy.exc import IntegrityError
++from __future__ import annotations
++
++import csv
++from decimal import Decimal, InvalidOperation
++from io import BytesIO, StringIO
++from typing import Any, Dict, List, Optional, Tuple
++
+ from fastapi import HTTPException, status
+- 
+-from backend.models.htw.htw_t_distribution import HTWTDistribution
++from fastapi.responses import Response, StreamingResponse
++from sqlalchemy.exc import IntegrityError
++from sqlalchemy.orm import Session
++
++from backend import models
+ from backend.schemas.htw.htw_t_distribution_schema import (
+     HTWTDistributionCreate,
+-    HTWTDistributionUpdate
++    HTWTDistributionUpdate,
+ )
+- 
+- 
++
++try:
++    from openpyxl import Workbook, load_workbook
++except ImportError:  # pragma: no cover
++    Workbook = None
++    load_workbook = None
++
++
++EXPECTED_COLUMNS = [
++    "degrees_of_freedom",
++    "confidence_level",
++    "alpha",
++    "t_value",
++]
++
++
++def _is_blank(value: Any) -> bool:
++    return value is None or str(value).strip() == ""
++
++
++def _normalize_header(value: Any) -> str:
++    return str(value).strip().lower() if value is not None else ""
++
++
++def _validate_headers(headers: List[Any]) -> None:
++    normalized = [_normalize_header(h) for h in headers]
++    if normalized != EXPECTED_COLUMNS:
++        raise HTTPException(
++            status_code=400,
++            detail="Invalid file template. Headers must match exactly: " + ", ".join(EXPECTED_COLUMNS),
++        )
++
++
++def _parse_int(value: Any, field_name: str, row_num: int, errors: List[str]) -> Optional[int]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++    try:
++        return int(str(value).strip())
++    except (TypeError, ValueError):
++        errors.append(f"Row {row_num}: {field_name} must be an integer")
++        return None
++
++
++def _parse_decimal(
++    value: Any,
++    field_name: str,
++    row_num: int,
++    errors: List[str],
++) -> Optional[Decimal]:
++    if _is_blank(value):
++        errors.append(f"Row {row_num}: {field_name} is required")
++        return None
++    try:
++        return Decimal(str(value).strip())
++    except (TypeError, ValueError, InvalidOperation):
++        errors.append(f"Row {row_num}: {field_name} must be numeric")
++        return None
++
++
++def _read_xlsx_rows(file_bytes: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    if load_workbook is None:
++        raise HTTPException(status_code=500, detail="openpyxl is not installed on the server")
++
++    workbook = load_workbook(BytesIO(file_bytes), data_only=True)
++    sheet = workbook.active
++
++    header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
++    if not header_row:
++        raise HTTPException(status_code=400, detail="The uploaded Excel file is empty")
++
++    _validate_headers(list(header_row))
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
++        if row is None or all(_is_blank(cell) for cell in row):
++            continue
++
++        row_map = {
++            EXPECTED_COLUMNS[i]: (row[i] if i < len(row) else None)
++            for i in range(len(EXPECTED_COLUMNS))
++        }
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def _read_csv_rows(file_bytes: bytes) -> List[Tuple[int, Dict[str, Any]]]:
++    text = file_bytes.decode("utf-8-sig")
++    reader = csv.DictReader(StringIO(text))
++
++    if not reader.fieldnames:
++        raise HTTPException(status_code=400, detail="The uploaded CSV file is empty")
++
++    _validate_headers(reader.fieldnames)
++
++    rows: List[Tuple[int, Dict[str, Any]]] = []
++    for row_num, row in enumerate(reader, start=2):
++        if row is None or all(_is_blank(cell) for cell in row.values()):
++            continue
++
++        row_map = {k: v for k, v in row.items()}
++        rows.append((row_num, row_map))
++
++    return rows
++
++
++def _existing_pairs(db: Session) -> set[Tuple[int, Decimal]]:
++    rows = db.query(
++        models.HTWTDistribution.degrees_of_freedom,
++        models.HTWTDistribution.confidence_level,
++    ).all()
++
++    pairs: set[Tuple[int, Decimal]] = set()
++    for degrees_of_freedom, confidence_level in rows:
++        if degrees_of_freedom is None or confidence_level is None:
++            continue
++        try:
++            pairs.add((int(degrees_of_freedom), Decimal(str(confidence_level))))
++        except Exception:
++            continue
++    return pairs
++
++
++def download_t_distribution_template(file_format: str = "xlsx"):
++    file_format = (file_format or "xlsx").lower().strip()
++    if file_format not in {"xlsx", "csv"}:
++        raise HTTPException(status_code=400, detail="file_format must be either xlsx or csv")
++
++    if file_format == "csv":
++        output = StringIO()
++        writer = csv.writer(output)
++        writer.writerow(EXPECTED_COLUMNS)
++
++        csv_data = output.getvalue().encode("utf-8-sig")
++        return Response(
++            content=csv_data,
++            media_type="text/csv",
++            headers={"Content-Disposition": 'attachment; filename="htw_t_distribution_template.csv"'},
++        )
++
++    if Workbook is None:
++        raise HTTPException(status_code=500, detail="openpyxl is not installed on the server")
++
++    workbook = Workbook()
++    sheet = workbook.active
++    sheet.title = "T Distribution"
++    sheet.append(EXPECTED_COLUMNS)
++
++    output = BytesIO()
++    workbook.save(output)
++    output.seek(0)
++
++    return StreamingResponse(
++        output,
++        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++        headers={"Content-Disposition": 'attachment; filename="htw_t_distribution_template.xlsx"'},
++    )
++
++
++async def import_t_distribution(
++    db: Session,
++    filename: str,
++    file_bytes: bytes,
++):
++    filename = (filename or "").lower()
++    if not (filename.endswith(".xlsx") or filename.endswith(".csv")):
++        raise HTTPException(status_code=400, detail="Only .xlsx and .csv files are allowed")
++
++    if not file_bytes:
++        raise HTTPException(status_code=400, detail="Uploaded file is empty")
++
++    if filename.endswith(".xlsx"):
++        rows = _read_xlsx_rows(file_bytes)
++    else:
++        rows = _read_csv_rows(file_bytes)
++
++    if not rows:
++        raise HTTPException(status_code=400, detail="No data rows found in the uploaded file")
++
++    errors: List[str] = []
++    existing_pairs = _existing_pairs(db)
++    seen_in_file: set[Tuple[int, Decimal]] = set()
++    objects_to_insert = []
++
++    for row_num, row in rows:
++        degrees_of_freedom = _parse_int(row.get("degrees_of_freedom"), "degrees_of_freedom", row_num, errors)
++        confidence_level = _parse_decimal(row.get("confidence_level"), "confidence_level", row_num, errors)
++        alpha = _parse_decimal(row.get("alpha"), "alpha", row_num, errors)
++        t_value = _parse_decimal(row.get("t_value"), "t_value", row_num, errors)
++
++        if degrees_of_freedom is not None and degrees_of_freedom <= 0:
++            errors.append(f"Row {row_num}: degrees_of_freedom must be greater than 0")
++
++        if confidence_level is not None and (confidence_level < 0 or confidence_level > 100):
++            errors.append(f"Row {row_num}: confidence_level must be between 0 and 100")
++
++        if alpha is not None and alpha < 0:
++            errors.append(f"Row {row_num}: alpha must be greater than or equal to 0")
++
++        if t_value is not None and t_value < 0:
++            errors.append(f"Row {row_num}: t_value must be greater than or equal to 0")
++
++        if degrees_of_freedom is not None and confidence_level is not None:
++            key = (degrees_of_freedom, confidence_level)
++            if key in seen_in_file:
++                errors.append(f"Row {row_num}: duplicate degrees_of_freedom + confidence_level inside the uploaded file")
++            if key in existing_pairs:
++                errors.append(f"Row {row_num}: degrees_of_freedom + confidence_level already exists in the database")
++            seen_in_file.add(key)
++
++        if None in (degrees_of_freedom, confidence_level, alpha, t_value):
++            continue
++
++        objects_to_insert.append(
++            models.HTWTDistribution(
++                degrees_of_freedom=degrees_of_freedom,
++                confidence_level=confidence_level,
++                alpha=alpha,
++                t_value=t_value,
++                is_active=True,
++            )
++        )
++
++    if errors:
++        raise HTTPException(status_code=400, detail="Import failed:\n" + "\n".join(errors[:100]))
++
++    try:
++        db.add_all(objects_to_insert)
++        db.commit()
++        return {"message": "Import successful", "inserted_rows": len(objects_to_insert)}
++    except Exception as e:
++        db.rollback()
++        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
++
++
+ def create_t_distribution(
+     db: Session,
+-    payload: HTWTDistributionCreate
+-) -> HTWTDistribution:
++    payload: HTWTDistributionCreate,
++):
+     try:
+-        record = HTWTDistribution(**payload.dict())
++        record = models.HTWTDistribution(**payload.dict())
+         db.add(record)
+         db.commit()
+         db.refresh(record)
+         return record
+- 
+     except IntegrityError:
+         db.rollback()
+         raise HTTPException(
+             status_code=status.HTTP_409_CONFLICT,
+-            detail="T-distribution entry already exists for given DF and confidence level"
++            detail="T-distribution entry already exists for given DF and confidence level",
+         )
+- 
+- 
++
++
+ def get_t_distribution_by_id(
+     db: Session,
+-    record_id: int
+-) -> HTWTDistribution:
++    record_id: int,
++):
+     record = (
+-        db.query(HTWTDistribution)
+-        .filter(HTWTDistribution.id == record_id)
++        db.query(models.HTWTDistribution)
++        .filter(models.HTWTDistribution.id == record_id)
+         .first()
+     )
+- 
++
+     if not record:
+         raise HTTPException(
+             status_code=status.HTTP_404_NOT_FOUND,
+-            detail="T-distribution record not found"
++            detail="T-distribution record not found",
+         )
+- 
++
+     return record
+- 
+- 
++
++
+ def list_t_distributions(
+     db: Session,
+-    active_only: bool = True
++    active_only: bool = True,
+ ):
+-    query = db.query(HTWTDistribution)
+- 
++    query = db.query(models.HTWTDistribution)
++
+     if active_only:
+-        query = query.filter(HTWTDistribution.is_active.is_(True))
+- 
++        query = query.filter(models.HTWTDistribution.is_active.is_(True))
++
+     return query.order_by(
+-        HTWTDistribution.degrees_of_freedom.asc(),
+-        HTWTDistribution.confidence_level.asc()
++        models.HTWTDistribution.degrees_of_freedom.asc(),
++        models.HTWTDistribution.confidence_level.asc(),
+     ).all()
+- 
+- 
++
++
+ def update_t_distribution(
+     db: Session,
+     record_id: int,
+-    payload: HTWTDistributionUpdate
+-) -> HTWTDistribution:
++    payload: HTWTDistributionUpdate,
++):
+     record = get_t_distribution_by_id(db, record_id)
+- 
++
+     for field, value in payload.dict(exclude_unset=True).items():
+         setattr(record, field, value)
+- 
++
+     try:
+         db.commit()
+         db.refresh(record)
+         return record
+- 
+     except IntegrityError:
+         db.rollback()
+         raise HTTPException(
+             status_code=status.HTTP_409_CONFLICT,
+-            detail="Duplicate T-distribution entry after update"
++            detail="Duplicate T-distribution entry after update",
+         )
+- 
+- 
++
++
+ def soft_delete_t_distribution(
+     db: Session,
+-    record_id: int
++    record_id: int,
+ ):
+     record = get_t_distribution_by_id(db, record_id)
+     record.is_active = False
+diff --git a/frontend/src/components/AdminComponents/HTWCMCReferenceManager.tsx b/frontend/src/components/AdminComponents/HTWCMCReferenceManager.tsx
+index 5cebe0d4..89c7c3f0 100644
+--- a/frontend/src/components/AdminComponents/HTWCMCReferenceManager.tsx
++++ b/frontend/src/components/AdminComponents/HTWCMCReferenceManager.tsx
+@@ -1,9 +1,9 @@
+-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
++import React, { useState, useEffect, useCallback, FormEvent, useRef } from 'react';
+ import { createPortal } from 'react-dom'; 
+ import { 
+   Loader2, Plus, ArrowLeft, CheckCircle, 
+   PowerOff, Edit, AlertCircle, Save, Scale,
+-  Trash2, X, 
++  Trash2, X, Download, Upload,
+ } from 'lucide-react';
+ import { api } from '../../api/config';
+ 
+@@ -78,6 +78,11 @@ export const HTWCMCReferenceManager: React.FC<HTWCMCReferenceManagerProps> = ({
+   const [deletingId, setDeletingId] = useState<number | null>(null);
+   const [togglingId, setTogglingId] = useState<number | null>(null);
+ 
++  // --- STATE: Import / Template ---
++  const importInputRef = useRef<HTMLInputElement | null>(null);
++  const [importing, setImporting] = useState(false);
++  const [importError, setImportError] = useState<string | null>(null);
++
+   // Handle Scroll Locking
+   useEffect(() => {
+     if (isEditModalOpen) {
+@@ -166,6 +171,73 @@ export const HTWCMCReferenceManager: React.FC<HTWCMCReferenceManagerProps> = ({
+     }
+   };
+ 
++  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
++    try {
++      const response = await api.get('/htw/cmc/template', {
++        params: { file_format: fileFormat },
++        responseType: 'blob',
++      });
++
++      const blob = new Blob([response.data], {
++        type:
++          fileFormat === 'csv'
++            ? 'text/csv;charset=utf-8;'
++            : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
++      });
++
++      const url = window.URL.createObjectURL(blob);
++      const link = document.createElement('a');
++      link.href = url;
++      link.download =
++        fileFormat === 'csv'
++          ? 'htw_cmc_template.csv'
++          : 'htw_cmc_template.xlsx';
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++      window.URL.revokeObjectURL(url);
++    } catch (err: any) {
++      alert(err.response?.data?.detail || 'Failed to download template');
++    }
++  };
++
++  const handleImportClick = () => {
++    importInputRef.current?.click();
++  };
++
++  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++
++    setImportError(null);
++    setImporting(true);
++
++    try {
++      const formData = new FormData();
++      formData.append('file', file);
++
++      await api.post('/htw/cmc/import', formData, {
++        headers: {
++          'Content-Type': 'multipart/form-data',
++        },
++      });
++
++      await fetchData();
++    } catch (err: any) {
++      const detail = err.response?.data?.detail;
++      if (typeof detail === 'string') {
++        setImportError(detail);
++      } else if (Array.isArray(detail)) {
++        setImportError(detail.map((d: any) => d.msg || String(d)).join('\n'));
++      } else {
++        setImportError('Failed to import file');
++      }
++    } finally {
++      setImporting(false);
++      e.target.value = '';
++    }
++  };
++
+   // --- RENDER ---
+   if (viewMode === 'add') {
+     return (
+@@ -193,15 +265,45 @@ export const HTWCMCReferenceManager: React.FC<HTWCMCReferenceManagerProps> = ({
+              <p className="text-sm text-gray-500">Hydraulic CMC Backup Data Limits</p>
+           </div>
+         </div>
+-        <button 
+-          onClick={handleAddNewClick} 
+-          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
+-        >
+-            <Plus size={16} className="mr-2" /> Add New Scope
+-        </button>
++
++        <div className="flex flex-wrap items-center gap-3">
++          <button
++            type="button"
++            onClick={() => downloadTemplate('xlsx')}
++            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
++          >
++            <Download size={16} className="mr-2" /> Download Template
++          </button>
++
++          <button
++            type="button"
++            onClick={handleImportClick}
++            disabled={importing}
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-70"
++          >
++            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
++            Import Excel/CSV
++          </button>
++
++          <input
++            ref={importInputRef}
++            type="file"
++            accept=".xlsx,.csv"
++            className="hidden"
++            onChange={handleImportFile}
++          />
++
++          <button 
++            onClick={handleAddNewClick} 
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
++          >
++              <Plus size={16} className="mr-2" /> Add New Scope
++          </button>
++        </div>
+       </div>
+ 
+       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
++      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
+ 
+       {/* Table */}
+       {loading ? (
+@@ -364,7 +466,7 @@ const AddCMCPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting }) =>
+ 
+         <form onSubmit={handleSubmit} className="p-6 space-y-6">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+-            
++
+             {/* Range */}
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Lower Range<span className="text-red-500">*</span></label>
+@@ -496,7 +598,7 @@ const EditCMCModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, submit
+     // Z-INDEX set high, though portal moves it to body level
+     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
+       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl animate-fadeIn overflow-hidden">
+-        
++
+         {/* Modal Header */}
+         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+@@ -516,7 +618,7 @@ const EditCMCModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, submit
+ 
+         <form onSubmit={handleSubmit} className="p-6">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+-            
++
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Lower Range<span className="text-red-500">*</span></label>
+               <input
+@@ -580,4 +682,4 @@ const EditCMCModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, submit
+       </div>
+     </div>
+   );
+-};
+\ No newline at end of file
++};
+diff --git a/frontend/src/components/AdminComponents/HTWPressureGaugeResolutionForm.tsx b/frontend/src/components/AdminComponents/HTWPressureGaugeResolutionForm.tsx
+index aca7bbc1..737932be 100644
+--- a/frontend/src/components/AdminComponents/HTWPressureGaugeResolutionForm.tsx
++++ b/frontend/src/components/AdminComponents/HTWPressureGaugeResolutionForm.tsx
+@@ -1,10 +1,11 @@
+-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
+-import { createPortal } from 'react-dom'; // 1. Import createPortal
+-import { api } from '../../api/config'; // Adjust path as needed
++import React, { useState, useEffect, useCallback, FormEvent, useRef } from 'react';
++import { createPortal } from 'react-dom';
++import { api } from '../../api/config';
+ import {
+   ArrowLeft, Plus, Edit, Trash2, X, Save,
+   Loader2, AlertCircle, Activity, ArrowRightLeft,
+-  CheckCircle, PowerOff, Ruler, Gauge, Calendar, Eye
++  CheckCircle, PowerOff, Ruler, Gauge, Calendar, Eye,
++  Download, Upload
+ } from 'lucide-react';
+ 
+ // ============================================================================
+@@ -66,40 +67,34 @@ const HTWPressureGaugeResolutionSkeleton = () => {
+ // ============================================================================
+ 
+ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolutionManagerProps> = ({ onBack }) => {
+-  // --- STATE: Data ---
+   const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
+   const [data, setData] = useState<HTWPressureGaugeResolution[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+ 
+-  // --- STATE: Modals ---
+   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+   const [editingItem, setEditingItem] = useState<HTWPressureGaugeResolution | null>(null);
+-  
+-  // View Details Modal State
+   const [viewingItem, setViewingItem] = useState<HTWPressureGaugeResolution | null>(null);
+ 
+-  // --- STATE: Actions ---
+   const [submitting, setSubmitting] = useState(false);
+   const [deletingId, setDeletingId] = useState<number | null>(null);
+   const [togglingId, setTogglingId] = useState<number | null>(null);
+ 
+-  // Handle Scroll Locking
++  const importInputRef = useRef<HTMLInputElement | null>(null);
++  const [importing, setImporting] = useState(false);
++  const [importError, setImportError] = useState<string | null>(null);
++
+   useEffect(() => {
+-    // Check if either Edit Modal OR View Modal is open
+     if (isEditModalOpen || viewingItem) {
+       document.body.style.overflow = 'hidden';
+     } else {
+       document.body.style.overflow = 'unset';
+     }
+-
+     return () => {
+       document.body.style.overflow = 'unset';
+     };
+   }, [isEditModalOpen, viewingItem]);
+ 
+-
+-  // --- API FETCH ---
+   const fetchData = useCallback(async () => {
+     try {
+       setLoading(true);
+@@ -110,7 +105,6 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+       console.error(err);
+       setError(err.response?.data?.detail || 'Failed to load resolutions');
+     } finally {
+-      // Artificial delay for smoother skeleton transition
+       setTimeout(() => setLoading(false), 300);
+     }
+   }, []);
+@@ -119,10 +113,7 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+     fetchData();
+   }, [fetchData]);
+ 
+-  // --- HANDLERS ---
+-  const handleAddNewClick = () => {
+-    setViewMode('add');
+-  };
++  const handleAddNewClick = () => setViewMode('add');
+ 
+   const handleEditClick = (item: HTWPressureGaugeResolution) => {
+     setEditingItem(item);
+@@ -134,25 +125,25 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+     try {
+       setTogglingId(item.id);
+       const newStatus = !item.is_active;
+-      await api.patch(`/htw-pressure-gauge-resolutions/${item.id}`, null, { 
+-        params: { is_active: newStatus } 
++      await api.patch(`/htw-pressure-gauge-resolutions/${item.id}/status`, null, {
++        params: { is_active: newStatus }
+       });
+       setData(prev => prev.map(r => r.id === item.id ? { ...r, is_active: newStatus } : r));
+     } catch (err: any) {
+-      alert(err.response?.data?.detail || "Failed to update status");
++      alert(err.response?.data?.detail || 'Failed to update status');
+     } finally {
+       setTogglingId(null);
+     }
+   };
+ 
+   const handleDelete = async (id: number) => {
+-    if (!window.confirm("Are you sure you want to delete this resolution?")) return;
++    if (!window.confirm('Are you sure you want to delete this resolution?')) return;
+     try {
+       setDeletingId(id);
+       await api.delete(`/htw-pressure-gauge-resolutions/${id}`);
+       setData(prev => prev.filter(r => r.id !== id));
+     } catch (err: any) {
+-      alert(err.response?.data?.detail || "Failed to delete");
++      alert(err.response?.data?.detail || 'Failed to delete');
+     } finally {
+       setDeletingId(null);
+     }
+@@ -182,7 +173,69 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+     return new Date(dateString).toLocaleDateString('en-GB');
+   };
+ 
+-  // --- RENDER ---
++  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
++    try {
++      const response = await api.get('/htw-pressure-gauge-resolutions/template', {
++        params: { file_format: fileFormat },
++        responseType: 'blob',
++      });
++
++      const blob = new Blob([response.data], {
++        type: fileFormat === 'csv'
++          ? 'text/csv;charset=utf-8;'
++          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
++      });
++
++      const url = window.URL.createObjectURL(blob);
++      const link = document.createElement('a');
++      link.href = url;
++      link.download = fileFormat === 'csv'
++        ? 'htw_pressure_gauge_resolution_template.csv'
++        : 'htw_pressure_gauge_resolution_template.xlsx';
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++      window.URL.revokeObjectURL(url);
++    } catch (err: any) {
++      alert(err.response?.data?.detail || 'Failed to download template');
++    }
++  };
++
++  const handleImportClick = () => {
++    importInputRef.current?.click();
++  };
++
++  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++
++    setImportError(null);
++    setImporting(true);
++
++    try {
++      const formData = new FormData();
++      formData.append('file', file);
++
++      await api.post('/htw-pressure-gauge-resolutions/import', formData, {
++        headers: { 'Content-Type': 'multipart/form-data' },
++      });
++
++      await fetchData();
++    } catch (err: any) {
++      const detail = err.response?.data?.detail;
++      if (typeof detail === 'string') {
++        setImportError(detail);
++      } else if (Array.isArray(detail)) {
++        setImportError(detail.map((d: any) => d?.msg || String(d)).join('\n'));
++      } else {
++        setImportError('Failed to import file');
++      }
++    } finally {
++      setImporting(false);
++      e.target.value = '';
++    }
++  };
++
+   if (viewMode === 'add') {
+     return (
+       <AddResolutionPage
+@@ -195,36 +248,63 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+ 
+   return (
+     <div className="animate-fadeIn">
+-      {/* Header */}
+       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+         <div className="flex items-center">
+           <button onClick={onBack} className="mr-4 p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 shadow-sm transition-colors">
+             <ArrowLeft size={20} />
+           </button>
+           <div>
+-             <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+-               <Activity className="text-blue-600" size={24} />
+-               Pressure Gauge Resolutions
+-             </h3>
+-             <p className="text-sm text-gray-500">Standard resolution values for calibration</p>
++            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
++              <Activity className="text-blue-600" size={24} />
++              Pressure Gauge Resolutions
++            </h3>
++            <p className="text-sm text-gray-500">Standard resolution values for calibration</p>
+           </div>
+         </div>
+-        <button 
+-          onClick={handleAddNewClick} 
+-          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors"
+-        >
++
++        <div className="flex flex-wrap items-center gap-3">
++          <button
++            type="button"
++            onClick={() => downloadTemplate('xlsx')}
++            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
++          >
++            <Download size={16} className="mr-2" /> Download Template
++          </button>
++
++          <button
++            type="button"
++            onClick={handleImportClick}
++            disabled={importing}
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-70"
++          >
++            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
++            Import Excel/CSV
++          </button>
++
++          <input
++            ref={importInputRef}
++            type="file"
++            accept=".xlsx,.csv"
++            className="hidden"
++            onChange={handleImportFile}
++          />
++
++          <button
++            onClick={handleAddNewClick}
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors"
++          >
+             <Plus size={16} className="mr-2" /> Add Resolution
+-        </button>
++          </button>
++        </div>
+       </div>
+ 
+       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
++      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
+ 
+-      {/* Table */}
+       {loading ? (
+         <HTWPressureGaugeResolutionSkeleton />
+       ) : (
+         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
+-          {/* Added mb-20 for safe spacing */}
+           <div className="overflow-x-auto">
+             <table className="w-full text-left border-collapse">
+               <thead>
+@@ -251,31 +331,37 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+                           disabled={togglingId === item.id}
+                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                         >
+-                          {togglingId === item.id ? <Loader2 size={12} className="animate-spin mr-1"/> : (item.is_active ? <CheckCircle size={12} className="mr-1"/> : <PowerOff size={12} className="mr-1"/>)}
++                          {togglingId === item.id ? (
++                            <Loader2 size={12} className="animate-spin mr-1" />
++                          ) : item.is_active ? (
++                            <CheckCircle size={12} className="mr-1" />
++                          ) : (
++                            <PowerOff size={12} className="mr-1" />
++                          )}
+                           {item.is_active ? 'Active' : 'Inactive'}
+                         </button>
+                       </td>
+                       <td className="px-6 py-4 text-right">
+-                         <div className="flex items-center justify-end gap-2">
+-                            <button onClick={() => setViewingItem(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="View">
+-                              <Eye size={16} />
+-                            </button>
+-                            <button 
+-                              onClick={() => handleEditClick(item)} 
+-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+-                              title="Edit"
+-                            >
+-                              <Edit size={16} />
+-                            </button>
+-                            <button 
+-                              onClick={() => handleDelete(item.id!)} 
+-                              disabled={deletingId === item.id} 
+-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50" 
+-                              title="Delete"
+-                            >
+-                                {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+-                            </button>
+-                         </div>
++                        <div className="flex items-center justify-end gap-2">
++                          <button onClick={() => setViewingItem(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="View">
++                            <Eye size={16} />
++                          </button>
++                          <button
++                            onClick={() => handleEditClick(item)}
++                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
++                            title="Edit"
++                          >
++                            <Edit size={16} />
++                          </button>
++                          <button
++                            onClick={() => handleDelete(item.id!)}
++                            disabled={deletingId === item.id}
++                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
++                            title="Delete"
++                          >
++                            {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
++                          </button>
++                        </div>
+                       </td>
+                     </tr>
+                   ))
+@@ -286,29 +372,27 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+         </div>
+       )}
+ 
+-      {/* 2. USED PORTAL FOR VIEW MODAL */}
+       {viewingItem && createPortal(
+         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
+           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full animate-fadeIn p-6">
+-             <div className="flex justify-between items-center mb-4">
+-                <h3 className="font-bold text-lg flex items-center gap-2"><Ruler size={18} /> Details</h3>
+-                <button onClick={() => setViewingItem(null)}><X size={18} className="text-gray-400" /></button>
+-             </div>
+-             <div className="text-center bg-blue-50 p-4 rounded-lg mb-4">
+-               <span className="text-2xl font-bold">{viewingItem.pressure}</span> <span className="text-gray-500">{viewingItem.unit}</span>
+-             </div>
+-             <div className="text-sm space-y-2">
+-                <p><span className="font-medium">Valid Upto:</span> {formatDate(viewingItem.valid_upto)}</p>
+-                <p><span className="font-medium">Status:</span> {viewingItem.is_active ? 'Active' : 'Inactive'}</p>
+-             </div>
++            <div className="flex justify-between items-center mb-4">
++              <h3 className="font-bold text-lg flex items-center gap-2"><Ruler size={18} /> Details</h3>
++              <button onClick={() => setViewingItem(null)}><X size={18} className="text-gray-400" /></button>
++            </div>
++            <div className="text-center bg-blue-50 p-4 rounded-lg mb-4">
++              <span className="text-2xl font-bold">{viewingItem.pressure}</span> <span className="text-gray-500">{viewingItem.unit}</span>
++            </div>
++            <div className="text-sm space-y-2">
++              <p><span className="font-medium">Valid Upto:</span> {formatDate(viewingItem.valid_upto)}</p>
++              <p><span className="font-medium">Status:</span> {viewingItem.is_active ? 'Active' : 'Inactive'}</p>
++            </div>
+           </div>
+         </div>,
+         document.body
+       )}
+ 
+-      {/* 3. USED PORTAL FOR EDIT MODAL */}
+       {isEditModalOpen && editingItem && createPortal(
+-        <EditResolutionModal 
++        <EditResolutionModal
+           item={editingItem}
+           onCancel={() => setIsEditModalOpen(false)}
+           onSave={(payload) => handleSave(payload, true)}
+@@ -323,6 +407,7 @@ export const HTWPressureGaugeResolutionManager: React.FC<HTWPressureGaugeResolut
+ // ============================================================================
+ // COMPONENT 1: ADD PAGE (Full Page View)
+ // ============================================================================
++
+ interface AddPageProps {
+   onCancel: () => void;
+   onSave: (payload: HTWPressureGaugeResolution) => Promise<void>;
+@@ -352,7 +437,7 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
+     setError(null);
+ 
+     if (!formData.pressure || parseFloat(formData.pressure) < 0) {
+-      setError("Please enter a valid pressure value.");
++      setError('Please enter a valid pressure value.');
+       return;
+     }
+ 
+@@ -364,15 +449,15 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
+         is_active: formData.is_active
+       });
+     } catch (err: any) {
+-      setError(err.response?.data?.detail || "Failed to save resolution.");
++      setError(err.response?.data?.detail || 'Failed to save resolution.');
+     }
+   };
+ 
+   return (
+     <div className="max-w-3xl mx-auto animate-fadeIn mb-20">
+       <div className="mb-6">
+-        <button 
+-          onClick={onCancel} 
++        <button
++          onClick={onCancel}
+           className="flex items-center text-gray-500 hover:text-blue-600 transition-colors font-medium text-sm"
+         >
+           <ArrowLeft size={16} className="mr-2" /> Back to List
+@@ -395,44 +480,51 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
+ 
+         <form onSubmit={handleSubmit} className="p-6">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+-            
+-            {/* Pressure */}
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Pressure Value <span className="text-red-500">*</span></label>
+               <div className="relative">
+-                <input 
+-                  type="number" name="pressure" value={formData.pressure} onChange={handleChange} 
+-                  required step="0.0001" placeholder="0.0000" 
+-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono" 
++                <input
++                  type="number"
++                  name="pressure"
++                  value={formData.pressure}
++                  onChange={handleChange}
++                  required
++                  step="0.0001"
++                  placeholder="0.0000"
++                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                 />
+                 <Gauge className="absolute left-3 top-2.5 text-gray-400" size={18} />
+               </div>
+             </div>
+ 
+-            {/* Unit */}
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Unit <span className="text-red-500">*</span></label>
+-              <input 
+-                type="text" name="unit" value={formData.unit} onChange={handleChange} 
+-                required placeholder="e.g. bar" 
+-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
++              <input
++                type="text"
++                name="unit"
++                value={formData.unit}
++                onChange={handleChange}
++                required
++                placeholder="e.g. bar"
++                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+               />
+             </div>
+ 
+-            {/* Valid Upto */}
+             <div>
+-              <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto  <span className="text-red-500">*</span></label>
++              <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto <span className="text-red-500">*</span></label>
+               <div className="relative">
+-                <input 
+-                  type="date" name="valid_upto" value={formData.valid_upto} onChange={handleChange} required
+-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
++                <input
++                  type="date"
++                  name="valid_upto"
++                  value={formData.valid_upto}
++                  onChange={handleChange}
++                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                 />
+                 <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
+               </div>
+               <p className="text-xs text-gray-400 mt-1">Leave blank if valid indefinitely</p>
+             </div>
+ 
+-            {/* Is Active Toggle */}
+             <div className="flex items-center h-full pt-6">
+               <label className="relative inline-flex items-center cursor-pointer">
+                 <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+@@ -460,6 +552,7 @@ const AddResolutionPage: React.FC<AddPageProps> = ({ onCancel, onSave, submittin
+ // ============================================================================
+ // COMPONENT 2: EDIT MODAL (Popup Overlay)
+ // ============================================================================
++
+ interface EditModalProps {
+   item: HTWPressureGaugeResolution;
+   onCancel: () => void;
+@@ -490,7 +583,7 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
+     setError(null);
+ 
+     if (!formData.pressure || parseFloat(formData.pressure) < 0) {
+-      setError("Please enter a valid pressure value.");
++      setError('Please enter a valid pressure value.');
+       return;
+     }
+ 
+@@ -502,16 +595,13 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
+         is_active: formData.is_active
+       });
+     } catch (err: any) {
+-      setError(err.response?.data?.detail || "Failed to update resolution.");
++      setError(err.response?.data?.detail || 'Failed to update resolution.');
+     }
+   };
+ 
+   return (
+-    // Z-INDEX high, but Portal moves it to root
+     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
+       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl animate-fadeIn overflow-hidden">
+-        
+-        {/* Modal Header */}
+         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+             <ArrowRightLeft className="text-blue-500" size={20} />
+@@ -530,44 +620,49 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
+ 
+         <form onSubmit={handleSubmit} className="p-6">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+-            
+-            {/* Pressure */}
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Pressure Value <span className="text-red-500">*</span></label>
+               <div className="relative">
+-                <input 
+-                  type="number" name="pressure" value={formData.pressure} onChange={handleChange} 
+-                  required step="0.0001" 
+-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono" 
++                <input
++                  type="number"
++                  name="pressure"
++                  value={formData.pressure}
++                  onChange={handleChange}
++                  required
++                  step="0.0001"
++                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                 />
+                 <Gauge className="absolute left-3 top-2.5 text-gray-400" size={18} />
+               </div>
+             </div>
+ 
+-            {/* Unit */}
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Unit <span className="text-red-500">*</span></label>
+-              <input 
+-                type="text" name="unit" value={formData.unit} onChange={handleChange} 
+-                required placeholder="e.g. bar" 
+-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
++              <input
++                type="text"
++                name="unit"
++                value={formData.unit}
++                onChange={handleChange}
++                required
++                placeholder="e.g. bar"
++                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+               />
+             </div>
+ 
+-            {/* Valid Upto */}
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto <span className="text-red-500">*</span></label>
+               <div className="relative">
+-                <input 
+-                  type="date" name="valid_upto" value={formData.valid_upto} onChange={handleChange} 
+-                  required
+-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
++                <input
++                  type="date"
++                  name="valid_upto"
++                  value={formData.valid_upto}
++                  onChange={handleChange}
++                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                 />
+                 <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
+               </div>
+             </div>
+ 
+-            {/* Is Active Toggle */}
+             <div className="flex items-center h-full pt-6">
+               <label className="relative inline-flex items-center cursor-pointer">
+                 <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+@@ -590,4 +685,4 @@ const EditResolutionModal: React.FC<EditModalProps> = ({ item, onCancel, onSave,
+       </div>
+     </div>
+   );
+-};
+\ No newline at end of file
++};
+diff --git a/frontend/src/components/AdminComponents/HTWStandardUncertaintyForm.tsx b/frontend/src/components/AdminComponents/HTWStandardUncertaintyForm.tsx
+index 42716b18..a60ac540 100644
+--- a/frontend/src/components/AdminComponents/HTWStandardUncertaintyForm.tsx
++++ b/frontend/src/components/AdminComponents/HTWStandardUncertaintyForm.tsx
+@@ -1,10 +1,10 @@
+-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
++import React, { useState, useEffect, useCallback, FormEvent, useRef } from 'react';
+ import { createPortal } from 'react-dom';
+ import { api } from '../../api/config'; // Adjust path
+-import { 
+-  ArrowLeft, Plus, Edit, Trash2, X, Save, 
+-  Loader2, AlertCircle, CheckCircle, PowerOff, 
+-  Calendar, Activity, ArrowRightLeft, Info 
++import {
++  ArrowLeft, Plus, Edit, Trash2, X, Save,
++  Loader2, AlertCircle, CheckCircle, PowerOff,
++  Calendar, Activity, ArrowRightLeft, Info, Download, Upload
+ } from 'lucide-react';
+ 
+ // ============================================================================
+@@ -82,7 +82,7 @@ const HTWStandardUncertaintySkeleton = () => {
+ 
+ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManagerProps> = ({ onBack }) => {
+   const [currentView, setCurrentView] = useState<'list' | 'add'>('list');
+-  
++
+   // State for Edit Modal
+   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+   const [editingItem, setEditingItem] = useState<HTWStandardUncertainty | null>(null);
+@@ -133,9 +133,9 @@ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManag
+   // 1. Render Add Page
+   if (currentView === 'add') {
+     return (
+-      <AddUncertaintyPage 
+-        onCancel={() => setCurrentView('list')} 
+-        onSuccess={handleSaveSuccess} 
++      <AddUncertaintyPage
++        onCancel={() => setCurrentView('list')}
++        onSuccess={handleSaveSuccess}
+       />
+     );
+   }
+@@ -143,9 +143,9 @@ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManag
+   // 2. Render List (Default) + Edit Modal
+   return (
+     <div className="animate-fadeIn">
+-      <HTWStandardUncertaintyList 
+-        onBack={onBack} 
+-        onAddNew={handleAddNew} 
++      <HTWStandardUncertaintyList
++        onBack={onBack}
++        onAddNew={handleAddNew}
+         onEdit={handleEdit}
+         // Pass the controlled key. It only changes on save, not on modal open.
+         refreshTrigger={refreshKey}
+@@ -153,10 +153,10 @@ export const HTWStandardUncertaintyManager: React.FC<HTWStandardUncertaintyManag
+ 
+       {/* 2. USED PORTAL FOR EDIT MODAL */}
+       {isEditModalOpen && editingItem && createPortal(
+-        <EditUncertaintyModal 
+-          item={editingItem} 
+-          onCancel={closeEditModal} 
+-          onSuccess={handleEditSuccess} 
++        <EditUncertaintyModal
++          item={editingItem}
++          onCancel={closeEditModal}
++          onSuccess={handleEditSuccess}
+         />,
+         document.body
+       )}
+@@ -182,12 +182,16 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
+   const [deletingId, setDeletingId] = useState<number | null>(null);
+   const [togglingId, setTogglingId] = useState<number | null>(null);
+ 
++  const importInputRef = useRef<HTMLInputElement | null>(null);
++  const [importing, setImporting] = useState(false);
++  const [importError, setImportError] = useState<string | null>(null);
++
+   const fetchData = useCallback(async () => {
+     try {
+       // Only set loading true if we don't have data yet (initial load)
+-      // or if you prefer a hard reload every time, keep it as is. 
++      // or if you prefer a hard reload every time, keep it as is.
+       // If you want "silent refresh", remove setLoading(true).
+-      setLoading(true); 
++      setLoading(true);
+       setError(null);
+       const response = await api.get('/htw-standard-uncertainty/');
+       setData(response.data || []);
+@@ -239,6 +243,71 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
+     return new Date(dateString).toLocaleDateString('en-GB');
+   };
+ 
++  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
++    try {
++      const response = await api.get('/htw-standard-uncertainty/template', {
++        params: { file_format: fileFormat },
++        responseType: 'blob',
++      });
++
++      const blob = new Blob([response.data], {
++        type: fileFormat === 'csv'
++          ? 'text/csv;charset=utf-8;'
++          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
++      });
++
++      const url = window.URL.createObjectURL(blob);
++      const link = document.createElement('a');
++      link.href = url;
++      link.download = fileFormat === 'csv'
++        ? 'htw_standard_uncertainty_template.csv'
++        : 'htw_standard_uncertainty_template.xlsx';
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++      window.URL.revokeObjectURL(url);
++    } catch (err: any) {
++      alert(err.response?.data?.detail || 'Failed to download template');
++    }
++  };
++
++  const handleImportClick = () => {
++    importInputRef.current?.click();
++  };
++
++  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++
++    setImportError(null);
++    setImporting(true);
++
++    try {
++      const formData = new FormData();
++      formData.append('file', file);
++
++      await api.post('/htw-standard-uncertainty/import', formData, {
++        headers: {
++          'Content-Type': 'multipart/form-data',
++        },
++      });
++
++      await fetchData();
++    } catch (err: any) {
++      const detail = err.response?.data?.detail;
++      if (typeof detail === 'string') {
++        setImportError(detail);
++      } else if (Array.isArray(detail)) {
++        setImportError(detail.map((d: any) => d.msg || String(d)).join('\n'));
++      } else {
++        setImportError('Failed to import file');
++      }
++    } finally {
++      setImporting(false);
++      e.target.value = '';
++    }
++  };
++
+   return (
+     <div className="animate-fadeIn">
+       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+@@ -248,18 +317,48 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
+           </button>
+           <div>
+             <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+-                <Activity className="text-blue-600" size={24} />
+-                Interpolation Ranges
++              <Activity className="text-blue-600" size={24} />
++              Interpolation Ranges
+             </h3>
+             <p className="text-sm text-gray-500">Manage interpolation uncertainty data points</p>
+           </div>
+         </div>
+-        <button onClick={onAddNew} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors">
+-          <Plus size={16} className="mr-2" /> Add New Record
+-        </button>
++
++        <div className="flex flex-wrap items-center gap-3">
++          <button
++            type="button"
++            onClick={() => downloadTemplate('xlsx')}
++            className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-sm transition-colors"
++          >
++            <Download size={16} className="mr-2" /> Download Template
++          </button>
++
++          <button
++            type="button"
++            onClick={handleImportClick}
++            disabled={importing}
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-70"
++          >
++            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
++            Import Excel/CSV
++          </button>
++
++          <input
++            ref={importInputRef}
++            type="file"
++            accept=".xlsx,.csv"
++            className="hidden"
++            onChange={handleImportFile}
++          />
++
++          <button onClick={onAddNew} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors">
++            <Plus size={16} className="mr-2" /> Add New Record
++          </button>
++        </div>
+       </div>
+ 
+       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
++      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
+ 
+       {loading ? (
+         <HTWStandardUncertaintySkeleton />
+@@ -313,12 +412,12 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
+                       </td>
+                       <td className="px-6 py-4 text-right">
+                         <div className="flex items-center justify-end gap-2">
+-                            <button onClick={() => onEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+-                                <Edit size={16} />
+-                            </button>
+-                            <button onClick={() => handleDelete(item.id!)} disabled={deletingId === item.id} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50" title="Delete">
+-                                {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+-                            </button>
++                          <button onClick={() => onEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
++                            <Edit size={16} />
++                          </button>
++                          <button onClick={() => handleDelete(item.id!)} disabled={deletingId === item.id} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50" title="Delete">
++                            {deletingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
++                          </button>
+                         </div>
+                       </td>
+                     </tr>
+@@ -382,7 +481,7 @@ const AddUncertaintyPage: React.FC<AddUncertaintyPageProps> = ({ onCancel, onSuc
+       await api.post('/htw-standard-uncertainty/', payload);
+       onSuccess();
+     } catch (err: any) {
+-      setError(err.response?.data?.detail || "Failed to save record.");
++      setError(err.response?.data?.detail || 'Failed to save record.');
+     } finally {
+       setLoading(false);
+     }
+@@ -391,8 +490,8 @@ const AddUncertaintyPage: React.FC<AddUncertaintyPageProps> = ({ onCancel, onSuc
+   return (
+     <div className="animate-fadeIn max-w-4xl mx-auto mb-20">
+       <div className="mb-6">
+-        <button 
+-          onClick={onCancel} 
++        <button
++          onClick={onCancel}
+           className="flex items-center text-gray-500 hover:text-blue-600 transition-colors font-medium text-sm"
+         >
+           <ArrowLeft size={16} className="mr-2" /> Back to List
+@@ -512,9 +611,9 @@ const AddUncertaintyPage: React.FC<AddUncertaintyPageProps> = ({ onCancel, onSuc
+ 
+           <div className="flex items-center pt-2">
+             <label className="relative inline-flex items-center cursor-pointer">
+-                <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+-                <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
++              <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
++              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
++              <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
+             </label>
+           </div>
+ 
+@@ -583,18 +682,15 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
+       await api.put(`/htw-standard-uncertainty/${item.id}`, payload);
+       onSuccess();
+     } catch (err: any) {
+-      setError(err.response?.data?.detail || "Failed to update record.");
++      setError(err.response?.data?.detail || 'Failed to update record.');
+     } finally {
+       setLoading(false);
+     }
+   };
+ 
+   return (
+-    // Z-INDEX set to 99999, though Portal moves it to body level
+     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
+       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl animate-fadeIn overflow-hidden">
+-        
+-        {/* Header */}
+         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+             <ArrowRightLeft className="text-blue-600" size={20} />
+@@ -612,7 +708,6 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
+         )}
+ 
+         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+-          
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Valid From <span className="text-red-500">*</span></label>
+@@ -653,9 +748,9 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
+ 
+           <div className="flex items-center pt-2">
+             <label className="relative inline-flex items-center cursor-pointer">
+-                <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
+-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+-                <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
++              <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleChange} className="sr-only peer" />
++              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
++              <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
+             </label>
+           </div>
+ 
+@@ -672,4 +767,4 @@ const EditUncertaintyModal: React.FC<EditUncertaintyModalProps> = ({ item, onCan
+       </div>
+     </div>
+   );
+-};
+\ No newline at end of file
++};
+diff --git a/frontend/src/components/AdminComponents/HTWTDistributionManager.tsx b/frontend/src/components/AdminComponents/HTWTDistributionManager.tsx
+index 004fb7a0..50a4df3f 100644
+--- a/frontend/src/components/AdminComponents/HTWTDistributionManager.tsx
++++ b/frontend/src/components/AdminComponents/HTWTDistributionManager.tsx
+@@ -1,10 +1,11 @@
+-import React, { useState, useEffect, useCallback, FormEvent } from 'react';
+-import { createPortal } from 'react-dom'; // 1. Import createPortal
+-import { 
+-  ArrowLeft, Plus, Edit, Trash2, X, Save, 
+-  Loader2, AlertCircle, LineChart, Eye
++import React, { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
++import { createPortal } from 'react-dom';
++import {
++  ArrowLeft, Plus, Edit, Trash2, X, Save,
++  Loader2, AlertCircle, LineChart, Eye,
++  Download, Upload
+ } from 'lucide-react';
+-import { api } from '../../api/config'; // Adjust your import path if needed
++import { api } from '../../api/config';
+ 
+ // --- TYPES ---
+ export interface HTWTDistribution {
+@@ -70,10 +71,15 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+ 
++  // Import
++  const fileInputRef = useRef<HTMLInputElement | null>(null);
++  const [importing, setImporting] = useState(false);
++  const [importError, setImportError] = useState<string | null>(null);
++
+   // --- STATE: Edit Modal & View Modal ---
+   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+   const [editingItem, setEditingItem] = useState<HTWTDistribution | null>(null);
+-  
++
+   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+   const [viewingItem, setViewingItem] = useState<HTWTDistribution | null>(null);
+ 
+@@ -87,14 +93,12 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+ 
+   // Handle Scroll Locking
+   useEffect(() => {
+-    // Check if any of the three modals are open
+     if (isEditModalOpen || isViewModalOpen || isDeleteModalOpen) {
+       document.body.style.overflow = 'hidden';
+     } else {
+       document.body.style.overflow = 'unset';
+     }
+ 
+-    // Cleanup
+     return () => {
+       document.body.style.overflow = 'unset';
+     };
+@@ -104,10 +108,9 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+   const fetchData = useCallback(async () => {
+     try {
+       setLoading(true);
+-      // Ensure your backend endpoint matches. Using active_only=false to see all for admin.
+       const response = await api.get('/admin/t-distribution', { params: { active_only: false } });
+-      
+-      const sorted = (response.data || []).sort((a: HTWTDistribution, b: HTWTDistribution) => 
++
++      const sorted = (response.data || []).sort((a: HTWTDistribution, b: HTWTDistribution) =>
+         a.degrees_of_freedom - b.degrees_of_freedom
+       );
+       setData(sorted);
+@@ -116,7 +119,6 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+       console.error(err);
+       setError(err.response?.data?.detail || 'Failed to load T-Distribution table');
+     } finally {
+-      // Artificial delay for smoother skeleton transition
+       setTimeout(() => setLoading(false), 300);
+     }
+   }, []);
+@@ -125,7 +127,6 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+     fetchData();
+   }, [fetchData]);
+ 
+-  // --- HANDLERS ---
+   const handleAddNewClick = () => {
+     setViewMode('add');
+   };
+@@ -171,19 +172,76 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+         await api.post('/admin/t-distribution', payload);
+         setViewMode('list');
+       }
+-      fetchData(); // Refresh list
++      fetchData();
+     } catch (err: any) {
+-      throw err; // Let form handle error display
++      throw err;
+     } finally {
+       setSubmitting(false);
+     }
+   };
+ 
+-  // Helper
++  const downloadTemplate = async (fileFormat: 'xlsx' | 'csv' = 'xlsx') => {
++    try {
++      const response = await api.get('/admin/t-distribution/template', {
++        params: { file_format: fileFormat },
++        responseType: 'blob',
++      });
++
++      const blob = new Blob([response.data], {
++        type:
++          fileFormat === 'xlsx'
++            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
++            : 'text/csv;charset=utf-8;',
++      });
++
++      const url = window.URL.createObjectURL(blob);
++      const link = document.createElement('a');
++      link.href = url;
++      link.download = fileFormat === 'xlsx'
++        ? 'htw_t_distribution_template.xlsx'
++        : 'htw_t_distribution_template.csv';
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++      window.URL.revokeObjectURL(url);
++    } catch (err) {
++      alert('Failed to download template');
++    }
++  };
++
++  const handleImportClick = () => {
++    fileInputRef.current?.click();
++  };
++
++  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++
++    setImportError(null);
++    setImporting(true);
++
++    try {
++      const formData = new FormData();
++      formData.append('file', file);
++
++      await api.post('/admin/t-distribution/import', formData, {
++        headers: { 'Content-Type': 'multipart/form-data' },
++      });
++
++      await fetchData();
++    } catch (err: any) {
++      const detail = err?.response?.data?.detail || err?.response?.data?.message || 'Failed to import file';
++      setImportError(detail);
++    } finally {
++      setImporting(false);
++      e.target.value = '';
++    }
++  };
++
+   const renderDF = (val: number) => {
+     return val >= 1000000 ? <span className="text-xl">∞</span> : val;
+   };
+-  
++
+   const formatDate = (dateString?: string) => {
+     if (!dateString) return 'N/A';
+     return new Date(dateString).toLocaleDateString('en-GB', {
+@@ -191,10 +249,9 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+     });
+   };
+ 
+-  // --- RENDER ---
+   if (viewMode === 'add') {
+     return (
+-      <AddTDistPage 
++      <AddTDistPage
+         onCancel={() => setViewMode('list')}
+         onSave={(payload) => handleSave(payload, false)}
+         submitting={submitting}
+@@ -212,28 +269,56 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+           </button>
+           <div>
+              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+-               <LineChart className="text-blue-500" size={24}/> 
++               <LineChart className="text-blue-500" size={24}/>
+                Student T Distribution
+              </h3>
+              <p className="text-sm text-gray-500">Manage critical T-values for uncertainty calculations</p>
+           </div>
+         </div>
+-        <button 
+-          onClick={handleAddNewClick} 
+-          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
+-        >
++
++        <div className="flex items-center gap-3 flex-wrap">
++          <button
++            onClick={() => downloadTemplate('xlsx')}
++            className="flex items-center px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 shadow-sm transition-colors"
++          >
++            <Download size={16} className="mr-2" />
++            Download Template
++          </button>
++
++          <button
++            onClick={handleImportClick}
++            disabled={importing}
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 shadow-sm transition-colors disabled:opacity-50"
++          >
++            {importing ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Upload size={16} className="mr-2" />}
++            {importing ? 'Importing...' : 'Import Excel/CSV'}
++          </button>
++
++          <input
++            ref={fileInputRef}
++            type="file"
++            accept=".xlsx,.csv"
++            className="hidden"
++            onChange={handleImportFile}
++          />
++
++          <button
++            onClick={handleAddNewClick}
++            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 shadow-sm transition-colors"
++          >
+             <Plus size={16} className="mr-2" /> Add Entry
+-        </button>
++          </button>
++        </div>
+       </div>
+ 
+       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
++      {importError && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 whitespace-pre-line">{importError}</div>}
+ 
+       {/* Data Table */}
+       {loading ? (
+         <HTWTDistributionSkeleton />
+       ) : (
+         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
+-          {/* Added mb-20 for safe spacing with footer */}
+           <div className="overflow-x-auto">
+             <table className="w-full text-left border-collapse">
+               <thead>
+@@ -265,23 +350,23 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+                       </td>
+                       <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+-                            <button 
+-                              onClick={() => handleViewClick(item)} 
+-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
++                            <button
++                              onClick={() => handleViewClick(item)}
++                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                               title="View Details"
+                             >
+                               <Eye size={16} />
+                             </button>
+-                            <button 
+-                              onClick={() => handleEditClick(item)} 
+-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
++                            <button
++                              onClick={() => handleEditClick(item)}
++                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                               title="Edit"
+                             >
+                               <Edit size={16} />
+                             </button>
+-                            <button 
+-                              onClick={() => handleDeleteClick(item)} 
+-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" 
++                            <button
++                              onClick={() => handleDeleteClick(item)}
++                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                               title="Delete"
+                             >
+                                 <Trash2 size={16} />
+@@ -297,7 +382,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+         </div>
+       )}
+ 
+-      {/* 2. USED PORTAL FOR VIEW MODAL */}
++      {/* View Modal */}
+       {isViewModalOpen && viewingItem && createPortal(
+         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
+           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm animate-fadeIn overflow-hidden">
+@@ -310,7 +395,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+                 <X size={20} />
+               </button>
+             </div>
+-            
++
+             <div className="p-6 space-y-4">
+               <div className="grid grid-cols-2 gap-4">
+                 <div className="p-3 bg-gray-50 rounded-lg">
+@@ -346,7 +431,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+             </div>
+ 
+             <div className="p-4 bg-gray-50 flex justify-end">
+-              <button 
++              <button
+                 onClick={() => setIsViewModalOpen(false)}
+                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100"
+               >
+@@ -358,9 +443,9 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+         document.body
+       )}
+ 
+-      {/* 3. USED PORTAL FOR EDIT MODAL */}
++      {/* Edit Modal */}
+       {isEditModalOpen && editingItem && createPortal(
+-        <EditTDistModal 
++        <EditTDistModal
+           item={editingItem}
+           onCancel={() => setIsEditModalOpen(false)}
+           onSave={(payload) => handleSave(payload, true)}
+@@ -369,7 +454,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+         document.body
+       )}
+ 
+-      {/* 4. USED PORTAL FOR DELETE MODAL */}
++      {/* Delete Modal */}
+       {isDeleteModalOpen && itemToDelete && createPortal(
+         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] animate-fadeIn">
+           <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+@@ -384,7 +469,7 @@ export const HTWTDistributionManager: React.FC<HTWTDistributionManagerProps> = (
+                 </div>
+               </div>
+               <p className="text-sm text-gray-700 mb-6">
+-                Are you sure you want to delete the record for <strong>DF: {renderDF(itemToDelete.degrees_of_freedom)}</strong>? 
++                Are you sure you want to delete the record for <strong>DF: {renderDF(itemToDelete.degrees_of_freedom)}</strong>?
+                 This will remove it from the T-Distribution table.
+               </p>
+               <div className="flex justify-end gap-3">
+@@ -456,7 +541,6 @@ const AddTDistPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting })
+     e.preventDefault();
+     setError(null);
+ 
+-    // Validation
+     const payload = {
+       degrees_of_freedom: parseInt(formData.degrees_of_freedom),
+       confidence_level: parseFloat(formData.confidence_level),
+@@ -480,8 +564,8 @@ const AddTDistPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting })
+   return (
+     <div className="max-w-xl mx-auto animate-fadeIn mb-20">
+       <div className="mb-6">
+-        <button 
+-          onClick={onCancel} 
++        <button
++          onClick={onCancel}
+           className="flex items-center text-gray-500 hover:text-blue-600 transition-colors font-medium text-sm"
+         >
+           <ArrowLeft size={16} className="mr-2" /> Back to List
+@@ -563,12 +647,12 @@ const AddTDistPage: React.FC<AddPageProps> = ({ onCancel, onSave, submitting })
+           <div className="p-4 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-between mt-2">
+              <span className="text-sm font-medium text-gray-700">Record Status<span className="text-red-500">*</span></span>
+              <label className="relative inline-flex items-center cursor-pointer">
+-               <input 
+-                  type="checkbox" 
++               <input
++                  type="checkbox"
+                   name="is_active"
+-                  checked={formData.is_active} 
+-                  onChange={handleChange} 
+-                  className="sr-only peer" 
++                  checked={formData.is_active}
++                  onChange={handleChange}
++                  className="sr-only peer"
+                 />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <span className="ml-3 text-sm font-medium text-gray-600 w-16">{formData.is_active ? 'Active' : 'Inactive'}</span>
+@@ -651,11 +735,8 @@ const EditTDistModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, subm
+   };
+ 
+   return (
+-    // UPDATED Z-INDEX: z-[9999]
+     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
+       <div className="bg-white rounded-xl shadow-xl w-full max-w-md animate-fadeIn overflow-hidden">
+-        
+-        {/* Modal Header */}
+         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+             <LineChart className="text-blue-500" size={20} />
+@@ -728,12 +809,12 @@ const EditTDistModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, subm
+ 
+           <div className="flex items-center h-full pt-2">
+             <label className="relative inline-flex items-center cursor-pointer">
+-              <input 
+-                type="checkbox" 
+-                name="is_active" 
+-                checked={formData.is_active} 
+-                onChange={handleChange} 
+-                className="sr-only peer" 
++              <input
++                type="checkbox"
++                name="is_active"
++                checked={formData.is_active}
++                onChange={handleChange}
++                className="sr-only peer"
+               />
+               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+               <span className="ml-3 text-sm font-medium text-gray-900">{formData.is_active ? 'Active' : 'Inactive'}</span>
+@@ -761,4 +842,4 @@ const EditTDistModal: React.FC<EditModalProps> = ({ item, onCancel, onSave, subm
+       </div>
+     </div>
+   );
+-};
+\ No newline at end of file
++};

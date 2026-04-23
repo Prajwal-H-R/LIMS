@@ -16,7 +16,7 @@ class Deviation(Base):
     )
     certificate_id = Column(
         Integer,
-        ForeignKey("htw_certificate.certificate_id", ondelete="SET NULL"),
+        ForeignKey("certificate.certificate_id", ondelete="SET NULL"),
         nullable=True,
     )
     repeatability_id = Column(

@@ -140,7 +140,7 @@ app.add_middleware(
 BASE_DIR = Path(__file__).resolve().parent   # backend folder
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 CERT_ASSETS_DIR = BASE_DIR / "certificate_assets"
 CERT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
