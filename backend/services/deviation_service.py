@@ -3,6 +3,7 @@ from pathlib import Path
 import uuid
 from typing import Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.models.deviation import Deviation
@@ -25,23 +26,20 @@ DEVIATION_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _derive_deviation_type(d: Deviation) -> str:
-    return "OOT" if d.repeatability_id is not None else "MANUAL"
+    # OOT rows are system-created from HTW calculations.
+    # Manual deviations may also carry job_id, so created_by differentiates source.
+    if d.job_id is not None and d.created_by is None:
+        return "OOT"
+    return "MANUAL"
 
 
 def _derive_calibration_status(job_status: Optional[str], deviation_type: str) -> str:
-    s = (job_status or "").strip().lower()
-    if any(k in s for k in ("calibrated", "complete", "completed", "closed", "done")):
-        return "calibrated"
-    if deviation_type == "MANUAL" and ("progress" in s):
-        return "not calibrated"
-    return "not calibrated"
+    return "calibrated" if deviation_type == "OOT" else "not calibrated"
 
 
 def _get_job_for_deviation(db: Session, d: Deviation) -> Optional[HTWJob]:
-    if d.repeatability_id is not None:
-        rep = db.query(HTWRepeatability).filter(HTWRepeatability.id == d.repeatability_id).first()
-        if rep:
-            return db.query(HTWJob).filter(HTWJob.job_id == rep.job_id).first()
+    if d.job_id is not None:
+        return db.query(HTWJob).filter(HTWJob.job_id == d.job_id).first()
     return (
         db.query(HTWJob)
         .filter(HTWJob.inward_eqp_id == d.inward_eqp_id)
@@ -192,6 +190,34 @@ def _row_to_customer_item(
     )
 
 
+def _get_primary_oot_step(db: Session, job_id: Optional[int]) -> Optional[HTWRepeatability]:
+    if job_id is None:
+        return None
+    return (
+        db.query(HTWRepeatability)
+        .filter(
+            HTWRepeatability.job_id == job_id,
+            HTWRepeatability.deviation_percent.isnot(None),
+        )
+        .order_by(func.abs(HTWRepeatability.deviation_percent).desc())
+        .first()
+    )
+
+
+def _get_oot_steps_for_job(db: Session, job_id: Optional[int]) -> List[HTWRepeatability]:
+    if job_id is None:
+        return []
+    return (
+        db.query(HTWRepeatability)
+        .filter(
+            HTWRepeatability.job_id == job_id,
+            HTWRepeatability.deviation_percent.isnot(None),
+        )
+        .order_by(HTWRepeatability.step_percent.asc().nullslast())
+        .all()
+    )
+
+
 def _collapse_manual_items(items: List[CustomerDeviationItem]) -> List[CustomerDeviationItem]:
     """
     Keep a single MANUAL deviation row per equipment for listing UIs.
@@ -243,13 +269,9 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
             Inward.customer_dc_no,
             Inward.customer_dc_date,
             Inward.inward_id,
-            HTWRepeatability,
-            HTWJob.job_id,
         )
         .join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id)
         .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
-        .outerjoin(HTWRepeatability, HTWRepeatability.id == Deviation.repeatability_id)
-        .outerjoin(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
         .filter(Inward.customer_id == customer_id)
         .order_by(Deviation.created_at.desc())
         .all()
@@ -261,10 +283,14 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
     if changed:
         db.commit()
 
-    all_items = [
-        _row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, rep, job_id)
-        for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, rep, job_id in rows
-    ]
+    all_items: List[CustomerDeviationItem] = []
+    for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id in rows:
+        primary_rep = _get_primary_oot_step(db, d.job_id)
+        all_items.append(
+            _row_to_customer_item(
+                d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, primary_rep, d.job_id
+            )
+        )
     manual_items = [i for i in all_items if (i.deviation_type or "").upper() == "MANUAL"]
     non_manual_items = [i for i in all_items if (i.deviation_type or "").upper() != "MANUAL"]
     collapsed_manual = _collapse_manual_items(manual_items)
@@ -289,7 +315,6 @@ def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]
         )
         .join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id)
         .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
-        .filter(Deviation.repeatability_id.is_(None))
         .order_by(Deviation.created_at.desc())
         .all()
     )
@@ -302,6 +327,8 @@ def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]
 
     items: List[CustomerDeviationItem] = []
     for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id in rows:
+        if _derive_deviation_type(d) != "MANUAL":
+            continue
         job = _get_job_for_deviation(db, d)
         items.append(
             _row_to_customer_item(
@@ -334,6 +361,7 @@ def create_manual_deviation(
 
     d = Deviation(
         inward_eqp_id=payload.inward_eqp_id,
+        job_id=payload.job_id,
         created_by=created_by,
         status="OPEN",
         calibration_status="not calibrated",
@@ -390,20 +418,16 @@ def update_customer_decision(
             Inward.customer_dc_no,
             Inward.customer_dc_date,
             Inward.inward_id,
-            HTWRepeatability,
-            HTWJob.job_id,
         )
         .join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id)
         .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
-        .outerjoin(HTWRepeatability, HTWRepeatability.id == Deviation.repeatability_id)
-        .outerjoin(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
         .filter(Deviation.id == deviation_id, Inward.customer_id == customer_id)
         .first()
     )
     if not row:
         return None
 
-    d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, rep, job_id = row
+    d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id = row
     stripped = decision.strip()
     d.customer_decision = stripped if stripped else None
     if stripped and (d.status or "").upper() != "CLOSED":
@@ -413,7 +437,10 @@ def update_customer_decision(
     d.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(d)
-    return _row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, rep, job_id)
+    primary_rep = _get_primary_oot_step(db, d.job_id)
+    return _row_to_customer_item(
+        d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, primary_rep, d.job_id
+    )
 
 
 def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
@@ -423,21 +450,19 @@ def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[D
             Deviation,
             InwardEquipment,
             Inward,
-            HTWRepeatability,
-            HTWJob.job_id,
         )
         .join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id)
         .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
-        .outerjoin(HTWRepeatability, HTWRepeatability.id == Deviation.repeatability_id)
-        .outerjoin(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
         .filter(Deviation.id == deviation_id)
         .first()
     )
     if not row:
         return None
-    d, eq, inward, rep, job_id = row
+    d, eq, inward = row
     if sync_deviation_calibration_status(db, d):
         db.commit()
+    primary_rep = _get_primary_oot_step(db, d.job_id)
+    oot_steps = _get_oot_steps_for_job(db, d.job_id)
     atts = (
         db.query(DeviationAttachment)
         .filter(DeviationAttachment.deviation_id == deviation_id)
@@ -456,13 +481,13 @@ def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[D
         make=eq.make if eq else None,
         model=eq.model if eq else None,
         serial_no=eq.serial_no if eq else None,
-        job_id=job_id,
-        repeatability_id=d.repeatability_id,
-        step_percent=float(rep.step_percent) if rep and rep.step_percent is not None else None,
-        set_torque=float(rep.set_torque_ts) if rep and rep.set_torque_ts is not None else None,
-        corrected_mean=float(rep.corrected_mean) if rep and rep.corrected_mean is not None else None,
-        deviation_percent=float(rep.deviation_percent)
-        if rep and rep.deviation_percent is not None
+        job_id=d.job_id,
+        repeatability_id=None,
+        step_percent=float(primary_rep.step_percent) if primary_rep and primary_rep.step_percent is not None else None,
+        set_torque=float(primary_rep.set_torque_ts) if primary_rep and primary_rep.set_torque_ts is not None else None,
+        corrected_mean=float(primary_rep.corrected_mean) if primary_rep and primary_rep.corrected_mean is not None else None,
+        deviation_percent=float(primary_rep.deviation_percent)
+        if primary_rep and primary_rep.deviation_percent is not None
         else None,
         deviation_type=_derive_deviation_type(d),
         certificate_id=d.certificate_id,
@@ -473,6 +498,15 @@ def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[D
         report=d.report or (d.created_at.date() if d.created_at else None),
         created_at=d.created_at,
         updated_at=d.updated_at,
+        oot_steps=[
+            {
+                "step_percent": float(step.step_percent) if step.step_percent is not None else None,
+                "set_torque": float(step.set_torque_ts) if step.set_torque_ts is not None else None,
+                "corrected_mean": float(step.corrected_mean) if step.corrected_mean is not None else None,
+                "deviation_percent": float(step.deviation_percent) if step.deviation_percent is not None else None,
+            }
+            for step in oot_steps
+        ],
         attachments=[DeviationAttachmentOut.model_validate(a) for a in atts],
     )
 
@@ -486,22 +520,20 @@ def get_deviation_detail_for_customer(
             Deviation,
             InwardEquipment,
             Inward,
-            HTWRepeatability,
-            HTWJob.job_id,
         )
         .join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id)
         .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
-        .outerjoin(HTWRepeatability, HTWRepeatability.id == Deviation.repeatability_id)
-        .outerjoin(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
         .filter(Deviation.id == deviation_id, Inward.customer_id == customer_id)
         .first()
     )
     if not row:
         return None
 
-    d, eq, inward, rep, job_id = row
+    d, eq, inward = row
     if sync_deviation_calibration_status(db, d):
         db.commit()
+    primary_rep = _get_primary_oot_step(db, d.job_id)
+    oot_steps = _get_oot_steps_for_job(db, d.job_id)
     atts = (
         db.query(DeviationAttachment)
         .filter(DeviationAttachment.deviation_id == deviation_id)
@@ -520,13 +552,13 @@ def get_deviation_detail_for_customer(
         make=eq.make if eq else None,
         model=eq.model if eq else None,
         serial_no=eq.serial_no if eq else None,
-        job_id=job_id,
-        repeatability_id=d.repeatability_id,
-        step_percent=float(rep.step_percent) if rep and rep.step_percent is not None else None,
-        set_torque=float(rep.set_torque_ts) if rep and rep.set_torque_ts is not None else None,
-        corrected_mean=float(rep.corrected_mean) if rep and rep.corrected_mean is not None else None,
-        deviation_percent=float(rep.deviation_percent)
-        if rep and rep.deviation_percent is not None
+        job_id=d.job_id,
+        repeatability_id=None,
+        step_percent=float(primary_rep.step_percent) if primary_rep and primary_rep.step_percent is not None else None,
+        set_torque=float(primary_rep.set_torque_ts) if primary_rep and primary_rep.set_torque_ts is not None else None,
+        corrected_mean=float(primary_rep.corrected_mean) if primary_rep and primary_rep.corrected_mean is not None else None,
+        deviation_percent=float(primary_rep.deviation_percent)
+        if primary_rep and primary_rep.deviation_percent is not None
         else None,
         deviation_type=_derive_deviation_type(d),
         certificate_id=d.certificate_id,
@@ -537,6 +569,15 @@ def get_deviation_detail_for_customer(
         report=d.report or (d.created_at.date() if d.created_at else None),
         created_at=d.created_at,
         updated_at=d.updated_at,
+        oot_steps=[
+            {
+                "step_percent": float(step.step_percent) if step.step_percent is not None else None,
+                "set_torque": float(step.set_torque_ts) if step.set_torque_ts is not None else None,
+                "corrected_mean": float(step.corrected_mean) if step.corrected_mean is not None else None,
+                "deviation_percent": float(step.deviation_percent) if step.deviation_percent is not None else None,
+            }
+            for step in oot_steps
+        ],
         attachments=[DeviationAttachmentOut.model_validate(a) for a in atts],
     )
 
