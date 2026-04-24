@@ -19,9 +19,9 @@ class Deviation(Base):
         ForeignKey("certificate.certificate_id", ondelete="SET NULL"),
         nullable=True,
     )
-    repeatability_id = Column(
+    job_id = Column(
         Integer,
-        ForeignKey("htw_repeatability.id", ondelete="SET NULL"),
+        ForeignKey("htw_job.job_id", ondelete="CASCADE"),
         nullable=True,
     )
     created_by = Column(

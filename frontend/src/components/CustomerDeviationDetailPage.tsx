@@ -30,6 +30,7 @@ interface DeviationDetail {
   created_at?: string | null;
   updated_at?: string | null;
   attachments: { id: number; file_name: string; file_type?: string | null; file_url: string; created_at: string }[];
+  oot_steps?: { step_percent?: number | null; set_torque?: number | null; corrected_mean?: number | null; deviation_percent?: number | null }[];
 }
 
 const CustomerDeviationDetailPage: React.FC = () => {
@@ -38,6 +39,14 @@ const CustomerDeviationDetailPage: React.FC = () => {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return value;
     return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  const formatCalibrationStatus = (value?: string | null) => {
+    return (value || "not calibrated")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
   };
 
   const navigate = useNavigate();
@@ -143,7 +152,7 @@ const CustomerDeviationDetailPage: React.FC = () => {
                   ? "bg-green-100 text-green-800 border-green-200"
                   : "bg-slate-100 text-slate-700 border-slate-200"
               }`}>
-                {detail.calibration_status || "not calibrated"}
+                {formatCalibrationStatus(detail.calibration_status)}
               </span>
             </div>
           </div>
@@ -152,11 +161,35 @@ const CustomerDeviationDetailPage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div><span className="text-slate-500">SRF</span> <span className="font-medium text-slate-900 ml-2">{detail.srf_no || "—"}</span></div>
               <div><span className="text-slate-500">NEPL ID</span> <span className="font-medium text-slate-900 ml-2">{detail.nepl_id || "—"}</span></div>
-              <div><span className="text-slate-500">Job</span> <span className="font-medium text-slate-900 ml-2">{detail.job_id != null ? `#${detail.job_id}` : "—"}</span></div>
-              <div><span className="text-slate-500">Step %</span> <span className="font-medium text-slate-900 ml-2">{detail.step_percent ?? "—"}</span></div>
-              <div><span className="text-slate-500">Deviation %</span> <span className="font-semibold text-red-700 ml-2">{detail.deviation_percent ?? "—"}</span></div>
               <div><span className="text-slate-500">Report date</span> <span className="font-medium text-slate-900 ml-2">{detail.report || "—"}</span></div>
             </div>
+            {((detail.oot_steps?.length || 0) > 0) && (
+              <div className="mt-4 overflow-x-auto">
+                <p className="text-slate-600 text-xs font-semibold uppercase tracking-wide mb-2">
+                  OOT Steps (one decision for all)
+                </p>
+                <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr className="text-left text-slate-600">
+                      <th className="px-3 py-2">Step %</th>
+                      <th className="px-3 py-2">Set Torque</th>
+                      <th className="px-3 py-2">Corrected Mean</th>
+                      <th className="px-3 py-2">Deviation %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.oot_steps?.map((step, idx) => (
+                      <tr key={`oot-step-${idx}`} className="border-t border-slate-100">
+                        <td className="px-3 py-2 text-slate-800">{step.step_percent ?? "—"}</td>
+                        <td className="px-3 py-2 text-slate-700">{step.set_torque ?? "—"}</td>
+                        <td className="px-3 py-2 text-slate-700">{step.corrected_mean ?? "—"}</td>
+                        <td className="px-3 py-2 font-medium text-red-700">{step.deviation_percent ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 mt-3">
               <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold">
                 DC No: {detail.customer_dc_no || "—"}

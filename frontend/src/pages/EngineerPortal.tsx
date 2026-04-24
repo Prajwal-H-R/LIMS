@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Routes, Route, useNavigate, useLocation, useParams } from "react-router-dom";
 import { 
   Wrench, FileText, Award, ClipboardList, AlertTriangle, 
-  ArrowRight, Mail, Download, Briefcase, ChevronLeft, ChevronDown, ChevronRight, XCircle, Loader2, Eye, Save
+  ArrowRight, Mail, Download, Briefcase, ChevronLeft, XCircle, Loader2, Eye, Save
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -36,6 +36,7 @@ interface DeviationDetailResponse {
   created_at?: string | null;
   updated_at?: string | null;
   attachments: { id: number; file_name: string; file_type?: string | null; file_url: string; created_at: string }[];
+  oot_steps?: { step_percent?: number | null; set_torque?: number | null; corrected_mean?: number | null; deviation_percent?: number | null }[];
 }
 
 interface OOTDeviationItem {
@@ -54,6 +55,7 @@ interface OOTDeviationItem {
   make?: string | null;
   model?: string | null;
   serial_no?: string | null;
+  oot_steps?: { step_percent?: number | null; set_torque?: number | null; corrected_mean?: number | null; deviation_percent?: number | null }[];
 }
 
 // --- Import page components ---
@@ -123,6 +125,14 @@ const formatTableName = (tableName: string) => {
       .join(' ');
 };
 
+const formatCalibrationStatus = (value?: string | null) => {
+  return (value || "not calibrated")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+};
+
 const DeviationPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -130,8 +140,6 @@ const DeviationPage = () => {
   const [ootItems, setOotItems] = useState<OOTDeviationItem[]>([]);
   const [manualItems, setManualItems] = useState<OOTDeviationItem[]>([]);
   const [activeDeviationSection, setActiveDeviationSection] = useState<"OOT" | "MANUAL">("OOT");
-  const [expandedSrfGroups, setExpandedSrfGroups] = useState<Record<string, boolean>>({});
-  const [expandedNeplGroups, setExpandedNeplGroups] = useState<Record<string, boolean>>({});
 
   const loadOOT = useCallback(async () => {
     try {
@@ -210,13 +218,6 @@ const DeviationPage = () => {
     });
   }, [groupedManualBySrf]);
 
-  const truncate = (s: string | null | undefined, n: number) => {
-    if (!s) return "—";
-    const t = s.trim();
-    if (t.length <= n) return t;
-    return `${t.slice(0, n)}…`;
-  };
-
   const formatDcDate = (value?: string | null) => {
     if (!value) return "—";
     const d = new Date(value);
@@ -224,18 +225,9 @@ const DeviationPage = () => {
     return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
   };
 
-  const toggleNeplGroup = (groupKey: string) => {
-    setExpandedNeplGroups((prev) => ({
-      ...prev,
-      [groupKey]: !(prev[groupKey] ?? false),
-    }));
-  };
-
-  const toggleSrfGroup = (srfKey: string) => {
-    setExpandedSrfGroups((prev) => ({
-      ...prev,
-      [srfKey]: !(prev[srfKey] ?? false),
-    }));
+  const openSrfRecords = (section: "OOT" | "MANUAL", srfKey: string) => {
+    const encoded = encodeURIComponent(srfKey);
+    navigate(`/engineer/deviations/srf/${section}/${encoded}`);
   };
 
   return (
@@ -299,21 +291,10 @@ const DeviationPage = () => {
           {groupKeys.map((srfKey) => {
             const items = groupedBySrf[srfKey] || [];
             const first = items[0];
-            const srfStateKey = `OOT__${srfKey}`;
-            const isSrfExpanded = expandedSrfGroups[srfStateKey] ?? false;
             return (
               <div key={srfKey} className="border border-gray-200 rounded-xl overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => toggleSrfGroup(srfStateKey)}
-                  className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left hover:bg-gray-100"
-                >
+                <div className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left">
                   <div className="flex items-center gap-2 flex-wrap">
-                    {isSrfExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-gray-500" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-gray-500" />
-                    )}
                     <div className="font-medium text-slate-600">SRF: {srfKey}</div>
                     {(first?.customer_dc_no || first?.customer_dc_date) && (
                       <>
@@ -326,107 +307,14 @@ const DeviationPage = () => {
                       </>
                     )}
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
-                    {items.length} deviation{items.length > 1 ? "s" : ""}
-                  </span>
-                </button>
-                {isSrfExpanded && <div className="p-3 space-y-3">
-                  {Object.entries(
-                    items.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
-                      const neplKey = item.nepl_id?.trim() || "Without NEPL ID";
-                      if (!acc[neplKey]) acc[neplKey] = [];
-                      acc[neplKey].push(item);
-                      return acc;
-                    }, {})
-                  )
-                    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
-                    .map(([neplKey, neplItems]) => {
-                      const expandedKey = `OOT__${srfKey}__${neplKey}`;
-                      const isExpanded = expandedNeplGroups[expandedKey] ?? false;
-                      const statusSet = Array.from(
-                        new Set(neplItems.map((item) => (item.status || "OPEN").toUpperCase()))
-                      );
-                      const neplStatus = statusSet.length === 1 ? statusSet[0] : "MIXED";
-                      return (
-                        <div key={expandedKey} className="border border-gray-200 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => toggleNeplGroup(expandedKey)}
-                            className="w-full px-3 py-2 bg-white hover:bg-gray-50 border-b border-gray-100 flex items-center justify-between text-left"
-                          >
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-gray-500" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-gray-500" />
-                              )}
-                              <span className="font-medium text-gray-800">NEPL ID: {neplKey}</span>
-                              <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-medium text-xs">
-                                {neplStatus}
-                              </span>
-                            </div>
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
-                              {neplItems.length} record{neplItems.length > 1 ? "s" : ""}
-                            </span>
-                          </button>
-
-                          {isExpanded && (
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead className="bg-slate-50 border-b border-slate-200">
-                                  <tr className="text-left text-slate-600">
-                                    <th className="px-3 py-2 min-w-[220px]">Equipment</th>
-                                    <th className="px-3 py-2">Step %</th>
-                                    <th className="px-3 py-2">Deviation %</th>
-                                    <th className="px-3 py-2 min-w-[220px]">Engineer remarks</th>
-                                    <th className="px-3 py-2 min-w-[240px]">Your decision</th>
-                                    <th className="px-3 py-2 w-[120px]">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {neplItems.map((item) => (
-                                    <tr key={item.deviation_id ?? item.repeatability_id} className="border-t border-slate-100 align-top">
-                                      <td className="px-3 py-3">
-                                        <div className="font-semibold text-slate-900">{item.nepl_id || "Equipment"}</div>
-                                        <div className="text-xs text-slate-600 mt-0.5">
-                                          {[item.make, item.model, item.serial_no].filter(Boolean).join(" · ") || "—"}
-                                        </div>
-                                        <div className="mt-1 text-xs">
-                                          {item.job_id != null ? <span className="text-slate-500">Job #{item.job_id}</span> : <span className="text-slate-400">Job —</span>}
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-3 text-slate-700">{item.step_percent ?? "-"}</td>
-                                      <td className="px-3 py-3 font-medium text-red-700">{item.deviation_percent ?? "-"}</td>
-                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.engineer_remarks || undefined}>
-                                        {truncate(item.engineer_remarks, 80)}
-                                      </td>
-                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.customer_decision || undefined}>
-                                        {truncate(item.customer_decision, 60)}
-                                      </td>
-                                      <td className="px-3 py-3">
-                                        {item.deviation_id != null ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => navigate(`/engineer/deviations/${item.deviation_id}`)}
-                                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                                          >
-                                            <Eye className="h-4 w-4" />
-                                            Open
-                                          </button>
-                                        ) : (
-                                          "—"
-                                        )}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>}
+                  <button
+                    type="button"
+                    onClick={() => openSrfRecords("OOT", srfKey)}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                  >
+                    Open
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -442,21 +330,10 @@ const DeviationPage = () => {
           {manualGroupKeys.map((srfKey) => {
             const items = groupedManualBySrf[srfKey] || [];
             const first = items[0];
-            const srfStateKey = `MANUAL__${srfKey}`;
-            const isSrfExpanded = expandedSrfGroups[srfStateKey] ?? false;
             return (
               <div key={`manual-${srfKey}`} className="border border-gray-200 rounded-xl overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => toggleSrfGroup(srfStateKey)}
-                  className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left hover:bg-gray-100"
-                >
+                <div className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left">
                   <div className="flex items-center gap-2 flex-wrap">
-                    {isSrfExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-gray-500" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-gray-500" />
-                    )}
                     <div className="font-medium text-slate-600">SRF: {srfKey}</div>
                     {(first?.customer_dc_no || first?.customer_dc_date) && (
                       <>
@@ -469,107 +346,175 @@ const DeviationPage = () => {
                       </>
                     )}
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
-                    {items.length} deviation{items.length > 1 ? "s" : ""}
-                  </span>
-                </button>
-                {isSrfExpanded && <div className="p-3 space-y-3">
-                  {Object.entries(
-                    items.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
-                      const neplKey = item.nepl_id?.trim() || "Without NEPL ID";
-                      if (!acc[neplKey]) acc[neplKey] = [];
-                      acc[neplKey].push(item);
-                      return acc;
-                    }, {})
-                  )
-                    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
-                    .map(([neplKey, neplItems]) => {
-                      const expandedKey = `MANUAL__${srfKey}__${neplKey}`;
-                      const isExpanded = expandedNeplGroups[expandedKey] ?? false;
-                      const statusSet = Array.from(
-                        new Set(neplItems.map((item) => (item.status || "OPEN").toUpperCase()))
-                      );
-                      const neplStatus = statusSet.length === 1 ? statusSet[0] : "MIXED";
-                      return (
-                        <div key={expandedKey} className="border border-gray-200 rounded-lg overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => toggleNeplGroup(expandedKey)}
-                            className="w-full px-3 py-2 bg-white hover:bg-gray-50 border-b border-gray-100 flex items-center justify-between text-left"
-                          >
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-gray-500" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-gray-500" />
-                              )}
-                              <span className="font-medium text-gray-800">NEPL ID: {neplKey}</span>
-                              <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-medium text-xs">
-                                {neplStatus}
-                              </span>
-                            </div>
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
-                              {neplItems.length} record{neplItems.length > 1 ? "s" : ""}
-                            </span>
-                          </button>
+                  <button
+                    type="button"
+                    onClick={() => openSrfRecords("MANUAL", srfKey)}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                  >
+                    Open
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
-                          {isExpanded && (
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead className="bg-slate-50 border-b border-slate-200">
-                                  <tr className="text-left text-slate-600">
-                                    <th className="px-3 py-2 min-w-[220px]">Equipment</th>
-                                    <th className="px-3 py-2">Step %</th>
-                                    <th className="px-3 py-2">Deviation %</th>
-                                    <th className="px-3 py-2 min-w-[220px]">Engineer remarks</th>
-                                    <th className="px-3 py-2 min-w-[240px]">Your decision</th>
-                                    <th className="px-3 py-2 w-[120px]">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {neplItems.map((item) => (
-                                    <tr key={`manual-${item.deviation_id ?? item.repeatability_id}`} className="border-t border-slate-100 align-top">
-                                      <td className="px-3 py-3">
-                                        <div className="font-semibold text-slate-900">{item.nepl_id || "Equipment"}</div>
-                                        <div className="text-xs text-slate-600 mt-0.5">
-                                          {[item.make, item.model, item.serial_no].filter(Boolean).join(" · ") || "—"}
-                                        </div>
-                                        <div className="mt-1 text-xs">
-                                          {item.job_id != null ? <span className="text-slate-500">Job #{item.job_id}</span> : <span className="text-slate-400">Job —</span>}
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-3 text-slate-700">{item.step_percent ?? "-"}</td>
-                                      <td className="px-3 py-3 font-medium text-red-700">{item.deviation_percent ?? "-"}</td>
-                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.engineer_remarks || undefined}>
-                                        {truncate(item.engineer_remarks, 80)}
-                                      </td>
-                                      <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap" title={item.customer_decision || undefined}>
-                                        {truncate(item.customer_decision, 60)}
-                                      </td>
-                                      <td className="px-3 py-3">
-                                        {item.deviation_id != null ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => navigate(`/engineer/deviations/${item.deviation_id}`)}
-                                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                                          >
-                                            <Eye className="h-4 w-4" />
-                                            Open
-                                          </button>
-                                        ) : (
-                                          "—"
-                                        )}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+const SrfDeviationRecordsPage = () => {
+  const navigate = useNavigate();
+  const { section, srfKey } = useParams<{ section: string; srfKey: string }>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<OOTDeviationItem[]>([]);
+
+  const activeSection: "OOT" | "MANUAL" =
+    (section || "").toUpperCase() === "MANUAL" ? "MANUAL" : "OOT";
+  const decodedSrf = decodeURIComponent(srfKey || "Without SRF");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (activeSection === "OOT") {
+        const res = await api.get("/htw-calculations/deviations/oot", { params: { threshold: 4 } });
+        setItems(Array.isArray(res.data?.items) ? res.data.items : []);
+      } else {
+        const res = await api.get<OOTDeviationItem[]>(ENDPOINTS.STAFF_DEVIATIONS.MANUAL);
+        setItems(Array.isArray(res.data) ? res.data : []);
+      }
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "response" in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      setError(msg || "Failed to load deviations.");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeSection]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    return items.filter((item) => (item.srf_no?.trim() || "Without SRF") === decodedSrf);
+  }, [items, decodedSrf]);
+
+  const neplGroups = useMemo(() => {
+    return filtered.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
+      const key = item.nepl_id?.trim() || "Without NEPL ID";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+  }, [filtered]);
+
+  const neplKeys = useMemo(
+    () => Object.keys(neplGroups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
+    [neplGroups]
+  );
+
+  return (
+    <div className="p-8 bg-white rounded-2xl shadow-lg">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">
+            {activeSection === "OOT" ? "OOT SRF Records" : "Manual SRF Records"}
+          </h2>
+          <p className="text-sm text-gray-600 mt-1">
+            SRF: <span className="font-semibold text-gray-800">{decodedSrf}</span> · {filtered.length} record(s)
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/engineer/deviations")}
+          className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm"
+        >
+          <ChevronLeft size={16} />
+          <span>Back to Deviations</span>
+        </button>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 text-gray-600 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading SRF records...
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">{error}</div>
+      )}
+
+      {!loading && !error && neplKeys.length === 0 && (
+        <div className="p-8 text-center text-gray-500 border border-gray-200 rounded-xl">
+          No records found for this SRF.
+        </div>
+      )}
+
+      {!loading && !error && neplKeys.length > 0 && (
+        <div className="space-y-4">
+          {neplKeys.map((neplKey) => {
+            const rows = neplGroups[neplKey] || [];
+            const statusSet = Array.from(new Set(rows.map((row) => (row.status || "OPEN").toUpperCase())));
+            const neplStatus = statusSet.length === 1 ? statusSet[0] : "MIXED";
+            return (
+              <div key={neplKey} className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-900">NEPL ID: {neplKey}</span>
+                    <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-medium text-xs">
+                      {neplStatus}
+                    </span>
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+                    {rows.length} record{rows.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr className="text-left text-slate-600">
+                        <th className="px-3 py-2 min-w-[220px]">Equipment</th>
+                        <th className="px-3 py-2 min-w-[220px]">Engineer remarks</th>
+                        <th className="px-3 py-2 min-w-[240px]">Customer decision</th>
+                        <th className="px-3 py-2 w-[120px]">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <tr key={row.deviation_id ?? `${neplKey}-${row.job_id}`} className="border-t border-slate-100 align-top">
+                          <td className="px-3 py-3">
+                            <div className="font-semibold text-slate-900">{row.nepl_id || "Equipment"}</div>
+                            <div className="text-xs text-slate-600 mt-0.5">
+                              {[row.make, row.model, row.serial_no].filter(Boolean).join(" · ") || "—"}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>}
+                          </td>
+                          <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap">{row.engineer_remarks || "—"}</td>
+                          <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap">{row.customer_decision || "—"}</td>
+                          <td className="px-3 py-3">
+                            {row.deviation_id != null ? (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/engineer/deviations/${row.deviation_id}`)}
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                              >
+                                <Eye className="h-4 w-4" />
+                                Open
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             );
           })}
@@ -735,8 +680,9 @@ const DeviationDetailPage = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Deviation ID</p>
-              <p className="text-xl font-bold text-gray-900 mt-1">#{detail.deviation_id}</p>
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">DC Details</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">No: {detail.customer_dc_no || "—"}</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">Date: {formatDcDate(detail.customer_dc_date)}</p>
             </div>
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
               <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Status</p>
@@ -757,7 +703,7 @@ const DeviationDetailPage = () => {
                   ? "bg-green-100 text-green-800 border-green-200"
                   : "bg-gray-100 text-gray-700 border-gray-200"
               }`}>
-                {detail.calibration_status || "not calibrated"}
+                {formatCalibrationStatus(detail.calibration_status)}
               </span>
             </div>
           </div>
@@ -766,11 +712,35 @@ const DeviationDetailPage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div><span className="text-gray-500">SRF</span> <span className="font-medium text-gray-900 ml-2">{detail.srf_no || "—"}</span></div>
               <div><span className="text-gray-500">NEPL ID</span> <span className="font-medium text-gray-900 ml-2">{detail.nepl_id || "—"}</span></div>
-              <div><span className="text-gray-500">Job</span> <span className="font-medium text-gray-900 ml-2">{detail.job_id != null ? `#${detail.job_id}` : "—"}</span></div>
-              <div><span className="text-gray-500">Step %</span> <span className="font-medium text-gray-900 ml-2">{detail.step_percent ?? "—"}</span></div>
-              <div><span className="text-gray-500">Deviation %</span> <span className="font-semibold text-red-700 ml-2">{detail.deviation_percent ?? "—"}</span></div>
               <div><span className="text-gray-500">Report date</span> <span className="font-medium text-gray-900 ml-2">{detail.report || "—"}</span></div>
             </div>
+            {((detail.oot_steps?.length || 0) > 0) && (
+              <div className="mt-4 overflow-x-auto">
+                <p className="text-gray-600 text-xs font-semibold uppercase tracking-wide mb-2">
+                  OOT Steps (single response applies to all)
+                </p>
+                <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr className="text-left text-slate-600">
+                      <th className="px-3 py-2">Step %</th>
+                      <th className="px-3 py-2">Set Torque</th>
+                      <th className="px-3 py-2">Corrected Mean</th>
+                      <th className="px-3 py-2">Deviation %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.oot_steps?.map((step, idx) => (
+                      <tr key={`oot-step-${idx}`} className="border-t border-slate-100">
+                        <td className="px-3 py-2 text-slate-800">{step.step_percent ?? "—"}</td>
+                        <td className="px-3 py-2 text-slate-700">{step.set_torque ?? "—"}</td>
+                        <td className="px-3 py-2 text-slate-700">{step.corrected_mean ?? "—"}</td>
+                        <td className="px-3 py-2 font-medium text-red-700">{step.deviation_percent ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 mt-3">
               <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 font-semibold">
                 DC No: {detail.customer_dc_no || "—"}
@@ -1244,6 +1214,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           <Route path="uncertainty-budget/:inwardId/:equipmentId" element={<UncertaintyBudgetPage />} />
           <Route path="certificates" element={<CertificatesPage />} />
           <Route path="deviations" element={<DeviationPage />} />
+          <Route path="deviations/srf/:section/:srfKey" element={<SrfDeviationRecordsPage />} />
           <Route path="deviations/:deviationId" element={<DeviationDetailPage />} />
         </Routes>
       </main>

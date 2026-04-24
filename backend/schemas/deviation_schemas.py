@@ -56,6 +56,13 @@ class ManualDeviationCreate(BaseModel):
     engineer_remarks: str = Field(min_length=1, max_length=8000)
 
 
+class OOTStepOut(BaseModel):
+    step_percent: Optional[float] = None
+    set_torque: Optional[float] = None
+    corrected_mean: Optional[float] = None
+    deviation_percent: Optional[float] = None
+
+
 class DeviationDetailOut(BaseModel):
     deviation_id: int
     inward_id: Optional[int] = None
@@ -83,4 +90,5 @@ class DeviationDetailOut(BaseModel):
     report: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    oot_steps: List[OOTStepOut] = []
     attachments: List[DeviationAttachmentOut] = []
