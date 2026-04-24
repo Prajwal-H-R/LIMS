@@ -1049,8 +1049,9 @@ def get_stored_loading_point(db: Session, job_id: int):
 
 def get_oot_deviations(db: Session, threshold: float = 4.0):
     """
-    Returns OOT deviations linked through the deviation table.
-    Automatically creates missing Deviation rows for OOT repeatability entries.
+    Returns one OOT deviation row per job.
+    Automatically creates missing Deviation rows for OOT jobs and includes
+    all out-of-tolerance step records inside each item.
     """
     # Backfill old records so historical OPEN entries with customer decisions show correctly.
     legacy_rows = db.query(Deviation).filter(Deviation.customer_decision.isnot(None)).all()
@@ -1064,30 +1065,35 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
     if legacy_changed:
         db.commit()
 
-    oot_rows = (
+    oot_jobs = (
         db.query(
-            HTWRepeatability.id.label("repeatability_id"),
+            HTWRepeatability.job_id.label("job_id"),
             HTWJob.inward_eqp_id.label("inward_eqp_id"),
         )
         .join(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
         .filter(
+            HTWRepeatability.job_id.isnot(None),
             HTWRepeatability.deviation_percent.isnot(None),
             func.abs(HTWRepeatability.deviation_percent) > threshold,
             HTWJob.inward_eqp_id.isnot(None),
         )
+        .distinct()
         .all()
     )
 
-    existing_by_repeatability = {
-        d.repeatability_id: d
-        for d in db.query(Deviation)
-        .filter(Deviation.repeatability_id.isnot(None))
+    existing_by_job = {}
+    for d in (
+        db.query(Deviation)
+        .filter(Deviation.job_id.isnot(None), Deviation.created_by.is_(None))
+        .order_by(desc(Deviation.updated_at), desc(Deviation.id))
         .all()
-    }
+    ):
+        if d.job_id not in existing_by_job:
+            existing_by_job[d.job_id] = d
 
     created_any = False
-    for row in oot_rows:
-        existing = existing_by_repeatability.get(row.repeatability_id)
+    for row in oot_jobs:
+        existing = existing_by_job.get(row.job_id)
         if existing:
             if existing.inward_eqp_id != row.inward_eqp_id:
                 existing.inward_eqp_id = row.inward_eqp_id
@@ -1097,7 +1103,7 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
         db.add(
             Deviation(
                 inward_eqp_id=row.inward_eqp_id,
-                repeatability_id=row.repeatability_id,
+                job_id=row.job_id,
                 status="OPEN",
             )
         )
@@ -1106,19 +1112,23 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
     if created_any:
         db.commit()
 
-    rows = (
+    oot_job_ids = [r.job_id for r in oot_jobs]
+    if not oot_job_ids:
+        return {
+            "section": "OOT - Out of Tolerance",
+            "tolerance_limit_percent": threshold,
+            "count": 0,
+            "items": [],
+        }
+
+    raw_rows = (
         db.query(
             Deviation.id.label("deviation_id"),
             Deviation.status.label("status"),
             Deviation.engineer_remarks.label("engineer_remarks"),
             Deviation.customer_decision.label("customer_decision"),
             Deviation.report.label("report"),
-            HTWRepeatability.id.label("repeatability_id"),
-            HTWRepeatability.job_id.label("job_id"),
-            HTWRepeatability.step_percent.label("step_percent"),
-            HTWRepeatability.set_torque_ts.label("set_torque"),
-            HTWRepeatability.corrected_mean.label("corrected_mean"),
-            HTWRepeatability.deviation_percent.label("deviation_percent"),
+            Deviation.job_id.label("job_id"),
             InwardEquipment.inward_eqp_id.label("inward_eqp_id"),
             InwardEquipment.nepl_id.label("nepl_id"),
             InwardEquipment.make.label("make"),
@@ -1129,23 +1139,41 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
             Inward.customer_dc_no.label("customer_dc_no"),
             Inward.customer_dc_date.label("customer_dc_date"),
         )
-        .join(HTWRepeatability, HTWRepeatability.id == Deviation.repeatability_id)
-        .join(HTWJob, HTWJob.job_id == HTWRepeatability.job_id)
+        .join(HTWJob, HTWJob.job_id == Deviation.job_id)
         .outerjoin(Inward, Inward.inward_id == HTWJob.inward_id)
         .outerjoin(InwardEquipment, InwardEquipment.inward_eqp_id == HTWJob.inward_eqp_id)
-        .filter(
-            HTWRepeatability.deviation_percent.isnot(None),
-            func.abs(HTWRepeatability.deviation_percent) > threshold,
-        )
-        .order_by(desc(func.abs(HTWRepeatability.deviation_percent)))
+        .filter(Deviation.job_id.in_(oot_job_ids), Deviation.created_by.is_(None))
+        .order_by(desc(Deviation.updated_at), desc(Deviation.id))
         .all()
     )
 
-    return {
-        "section": "OOT - Out of Tolerance",
-        "tolerance_limit_percent": threshold,
-        "count": len(rows),
-        "items": [
+    rows = []
+    seen_jobs = set()
+    for row in raw_rows:
+        if row.job_id in seen_jobs:
+            continue
+        seen_jobs.add(row.job_id)
+        rows.append(row)
+
+    items = []
+    for r in rows:
+        step_rows = (
+            db.query(
+                HTWRepeatability.step_percent.label("step_percent"),
+                HTWRepeatability.set_torque_ts.label("set_torque"),
+                HTWRepeatability.corrected_mean.label("corrected_mean"),
+                HTWRepeatability.deviation_percent.label("deviation_percent"),
+            )
+            .filter(
+                HTWRepeatability.job_id == r.job_id,
+                HTWRepeatability.deviation_percent.isnot(None),
+                func.abs(HTWRepeatability.deviation_percent) > threshold,
+            )
+            .order_by(desc(func.abs(HTWRepeatability.deviation_percent)))
+            .all()
+        )
+        primary = step_rows[0] if step_rows else None
+        items.append(
             {
                 "deviation_id": r.deviation_id,
                 "status": r.status,
@@ -1153,7 +1181,7 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
                 "customer_decision": r.customer_decision,
                 "report": r.report.isoformat() if r.report else None,
                 "deviation_type": "OOT",
-                "repeatability_id": r.repeatability_id,
+                "repeatability_id": None,
                 "job_id": r.job_id,
                 "inward_id": r.inward_id,
                 "srf_no": r.srf_no,
@@ -1168,11 +1196,25 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
                 "make": r.make,
                 "model": r.model,
                 "serial_no": r.serial_no,
-                "step_percent": float(r.step_percent) if r.step_percent is not None else None,
-                "set_torque": float(r.set_torque) if r.set_torque is not None else None,
-                "corrected_mean": float(r.corrected_mean) if r.corrected_mean is not None else None,
-                "deviation_percent": float(r.deviation_percent) if r.deviation_percent is not None else None,
+                "step_percent": float(primary.step_percent) if primary and primary.step_percent is not None else None,
+                "set_torque": float(primary.set_torque) if primary and primary.set_torque is not None else None,
+                "corrected_mean": float(primary.corrected_mean) if primary and primary.corrected_mean is not None else None,
+                "deviation_percent": float(primary.deviation_percent) if primary and primary.deviation_percent is not None else None,
+                "oot_steps": [
+                    {
+                        "step_percent": float(step.step_percent) if step.step_percent is not None else None,
+                        "set_torque": float(step.set_torque) if step.set_torque is not None else None,
+                        "corrected_mean": float(step.corrected_mean) if step.corrected_mean is not None else None,
+                        "deviation_percent": float(step.deviation_percent) if step.deviation_percent is not None else None,
+                    }
+                    for step in step_rows
+                ],
             }
-            for r in rows
-        ],
+        )
+
+    return {
+        "section": "OOT - Out of Tolerance",
+        "tolerance_limit_percent": threshold,
+        "count": len(items),
+        "items": items,
     }
