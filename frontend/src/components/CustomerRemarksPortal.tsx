@@ -74,8 +74,17 @@ const resolvePhotoUrl = (path: string) => {
   if (!path) return '';
   const sanitized = path.replace(/\\/g, '/');
   if (/^https?:\/\//i.test(sanitized)) return sanitized;
-  const normalized = sanitized.replace(/^\/+/, '');
-  return `${BACKEND_ROOT_URL}/${normalized}`;
+  const normalized = sanitized.startsWith('/') ? sanitized : `/${sanitized}`;
+
+  // Build asset host independent from API prefix. Images are served from /uploads,
+  // while API calls may use /api as base.
+  let assetHost = '';
+  const rawRoot = (BACKEND_ROOT_URL || '').trim().replace(/\/+$/, '');
+  if (rawRoot && /^https?:\/\//i.test(rawRoot)) {
+    assetHost = rawRoot.replace(/\/api$/i, '');
+  }
+
+  return `${assetHost}${normalized}`;
 };
  
 // Sub-components
