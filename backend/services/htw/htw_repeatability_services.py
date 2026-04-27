@@ -1,6 +1,6 @@
 import math
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, asc, func, exists
+from sqlalchemy import and_, desc, asc, func
 from datetime import datetime
 
 # --- MODELS ---
@@ -1066,13 +1066,6 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
     if legacy_changed:
         db.commit()
 
-    post_check_exists = exists().where(
-        and_(
-            HTWJobEnvironment.job_id == HTWRepeatability.job_id,
-            HTWJobEnvironment.condition_stage == "POST",
-        )
-    )
-
     oot_jobs = (
         db.query(
             HTWRepeatability.job_id.label("job_id"),
@@ -1084,7 +1077,6 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
             HTWRepeatability.deviation_percent.isnot(None),
             func.abs(HTWRepeatability.deviation_percent) > threshold,
             HTWJob.inward_eqp_id.isnot(None),
-            post_check_exists,
         )
         .distinct()
         .all()
