@@ -54,7 +54,16 @@ class CustomerPortalService:
                 formatted.append(path)
                 continue
             path = path.lstrip("/")
-            formatted.append(f"/{path}" if path else "")
+            if not path:
+                continue
+            # Serve uploaded media through API-prefixed path so frontend proxies
+            # can always resolve assets in local/dev environments.
+            if path.startswith("uploads/"):
+                formatted.append(f"/api/{path}")
+            elif path.startswith("api/uploads/"):
+                formatted.append(f"/{path}")
+            else:
+                formatted.append(f"/{path}")
         return formatted
 
     # --- LISTING METHODS ---

@@ -309,7 +309,14 @@ class InwardService:
             .where(Inward.created_by == user_id, Inward.is_draft == True)
             .order_by(desc(Inward.draft_updated_at))
         ).all()
-        return [DraftResponse.model_validate(d) for d in drafts]
+        safe_drafts: List[DraftResponse] = []
+        for d in drafts:
+            try:
+                safe_drafts.append(DraftResponse.model_validate(d))
+            except Exception:
+                # Keep drafts endpoint resilient to legacy/corrupt draft payloads.
+                logger.warning("Skipping invalid draft row inward_id=%s", getattr(d, "inward_id", None), exc_info=True)
+        return safe_drafts
 
     async def get_draft_by_id(self, draft_id: int, user_id: int) -> DraftResponse:
         draft = self.db.scalars(
@@ -385,6 +392,10 @@ class InwardService:
             self.db.commit()
             self.db.refresh(draft)
             return DraftResponse.model_validate(draft)
+        except HTTPException:
+            # Preserve intended HTTP status codes (e.g. 404 for missing/inaccessible draft).
+            self.db.rollback()
+            raise
         except IntegrityError as e:
             self.db.rollback()
             logger.warning(f"Draft save failed due to a data conflict: {e.orig}")

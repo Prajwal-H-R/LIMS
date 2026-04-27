@@ -18,7 +18,8 @@ from backend.models import (
     HTWReproducibilityReading,
     HTWOutputDriveVariation, HTWOutputDriveVariationReading,
     HTWDriveInterfaceVariation, HTWDriveInterfaceVariationReading,
-    HTWLoadingPointVariation, HTWLoadingPointVariationReading
+    HTWLoadingPointVariation, HTWLoadingPointVariationReading,
+    HTWJobEnvironment,
 )
 
 # --- SCHEMAS ---

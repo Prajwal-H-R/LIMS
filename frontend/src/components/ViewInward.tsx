@@ -17,9 +17,19 @@ export const ViewInward: React.FC = () => {
 
   const resolvePhotoUrl = (photo: string) => {
     if (!photo) return "";
-    if (/^https?:\/\//i.test(photo)) return photo;
-    const normalized = photo.startsWith("/") ? photo : `/${photo}`;
-    return `${BACKEND_ROOT_URL}${normalized}`;
+    const sanitized = photo.replace(/\\/g, "/");
+    if (/^https?:\/\//i.test(sanitized)) return sanitized;
+    const normalized = sanitized.startsWith("/") ? sanitized : `/${sanitized}`;
+    const normalizedApiPath = normalized.startsWith("/api/uploads/")
+      ? normalized
+      : normalized.replace(/^\/uploads\//i, "/api/uploads/");
+
+    let assetHost = "";
+    const rawRoot = (BACKEND_ROOT_URL || "").trim().replace(/\/+$/, "");
+    if (rawRoot && /^https?:\/\//i.test(rawRoot)) {
+      assetHost = rawRoot.replace(/\/api$/i, "");
+    }
+    return `${assetHost}${normalizedApiPath}`;
   };
 
   const openImageModal = (photos: string[]) => {

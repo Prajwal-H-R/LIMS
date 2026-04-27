@@ -151,6 +151,8 @@ class DraftResponse(BaseModel):
     @field_validator('draft_data', mode='before')
     @classmethod
     def ensure_response_dict(cls, value: Any) -> Dict[str, Any]:
+        if value is None:
+            return {}
         if isinstance(value, str):
             try: return json.loads(value)
             except json.JSONDecodeError as exc: raise ValueError("draft_data must be valid JSON") from exc
