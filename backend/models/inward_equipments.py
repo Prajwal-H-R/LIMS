@@ -9,8 +9,8 @@ if TYPE_CHECKING:
     from .inward import Inward
     from .srf_equipments import SrfEquipment
     # ✅ ADDED: Import HTWJob for type checking
-    from .htw_job import HTWJob
-
+    from .htw.htw_job import HTWJob
+    from .external_deviation import ExternalDeviation
 class InwardEquipment(Base):
     __tablename__ = "inward_equipments"
 
@@ -55,3 +55,8 @@ class InwardEquipment(Base):
     # ✅ ADDED: Relationship to HTWJob
     # This matches 'equipment_rel' defined in htw_job.py
     jobs: Mapped[List["HTWJob"]] = relationship("HTWJob", back_populates="equipment_rel")
+    deviations: Mapped[List["ExternalDeviation"]] = relationship(
+    "ExternalDeviation",
+    back_populates="inward_equipment",
+    cascade="all, delete-orphan"
+)

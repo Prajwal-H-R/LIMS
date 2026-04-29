@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Routes, Route, useNavigate, useLocation, useParams } from "react-router-dom";
 import { 
   Wrench, FileText, Award, ClipboardList, AlertTriangle, 
-  ArrowRight, Mail, Download, Briefcase, ChevronLeft, XCircle, Loader2, Eye, Save
+  ArrowRight, Mail, Download, Briefcase, ChevronLeft, XCircle, 
+  Loader2, Eye, Save, FileUp, Paperclip, ExternalLink 
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { User } from "../types";
 import { api, ENDPOINTS } from "../api/config";
 
+// --- UPDATED INTERFACE ---
 interface DeviationDetailResponse {
   deviation_id: number;
   inward_id?: number | null;
@@ -29,7 +31,8 @@ interface DeviationDetailResponse {
   deviation_percent?: number | null;
   certificate_id?: number | null;
   status: string;
-  calibration_status?: string | null;
+  calibration_status?: string | null; // For internal deviations
+  tool_status?: string | null; // For external deviations
   engineer_remarks?: string | null;
   customer_decision?: string | null;
   report?: string | null;
@@ -40,6 +43,7 @@ interface DeviationDetailResponse {
 }
 
 interface OOTDeviationItem {
+  deviation_type: string; 
   deviation_id?: number | null;
   status?: string | null;
   engineer_remarks?: string | null;
@@ -74,6 +78,7 @@ import CalibrationPage from "../components/CalibrationPage";
 import UncertaintyBudgetPage from '../components/UncertaintyBudgetPage';
 import { CertificatesPage } from "../components/CertificatesPage";
 import ProfilePage from "../components/ProfilePage";
+import ManualCalibrationPage from "../components/ManualCalibrationPage";
 
 // --- Interfaces ---
 interface EngineerPortalProps {
@@ -126,61 +131,53 @@ const formatTableName = (tableName: string) => {
 };
 
 const formatCalibrationStatus = (value?: string | null) => {
-  return (value || "not calibrated")
+  if (!value) return "Not Available";
+  return value
     .split(" ")
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(" ");
 };
 
+const ALL_STAFF_DEVIATIONS_ENDPOINT = "/deviations/all-staff";
+
 const DeviationPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [ootItems, setOotItems] = useState<OOTDeviationItem[]>([]);
-  const [manualItems, setManualItems] = useState<OOTDeviationItem[]>([]);
+  const [items, setItems] = useState<OOTDeviationItem[]>([]);
   const [activeDeviationSection, setActiveDeviationSection] = useState<"OOT" | "MANUAL">("OOT");
 
-  const loadOOT = useCallback(async () => {
+  const loadDeviations = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const res = await api.get("/htw-calculations/deviations/oot", { params: { threshold: 4 } });
-      setOotItems(res.data?.items || []);
+      const res = await api.get<OOTDeviationItem[]>(ALL_STAFF_DEVIATIONS_ENDPOINT);
+      setItems(Array.isArray(res.data) ? res.data : []);
     } catch (e: unknown) {
       const msg =
         e && typeof e === "object" && "response" in e
           ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : null;
-      throw new Error(msg || "Failed to load OOT deviations.");
-    }
-  }, []);
-
-  const loadManual = useCallback(async () => {
-    try {
-      const res = await api.get<OOTDeviationItem[]>(ENDPOINTS.STAFF_DEVIATIONS.MANUAL);
-      setManualItems(Array.isArray(res.data) ? res.data : []);
-    } catch (e: unknown) {
-      const msg =
-        e && typeof e === "object" && "response" in e
-          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : null;
-      throw new Error(msg || "Failed to load manual deviations.");
+      setError(msg || "Failed to load deviations.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const loadAll = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        await Promise.all([loadOOT(), loadManual()]);
-      } catch (e: any) {
-        setError(e?.message || "Failed to load deviations.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadAll();
-  }, [loadOOT, loadManual]);
+    loadDeviations();
+  }, [loadDeviations]);
+
+  const ootItems = useMemo(
+    () => items.filter((item) => item.deviation_type.toUpperCase() === "OOT"),
+    [items]
+  );
+
+  const manualItems = useMemo(
+    () => items.filter((item) => item.deviation_type.toUpperCase() === "MANUAL"),
+    [items]
+  );
 
   const groupedBySrf = useMemo(() => {
     return ootItems.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
@@ -227,9 +224,10 @@ const DeviationPage = () => {
 
   const openSrfRecords = (section: "OOT" | "MANUAL", srfKey: string) => {
     const encoded = encodeURIComponent(srfKey);
-    navigate(`/engineer/deviations/srf/${section}/${encoded}`);
+    const itemsToPass = section === 'OOT' ? ootItems : manualItems;
+    navigate(`/engineer/deviations/srf/${section}/${encoded}`, { state: { items: itemsToPass } });
   };
-
+  
   return (
     <div className="p-8 bg-white rounded-2xl shadow-lg">
       <div className="flex items-center justify-between mb-6">
@@ -274,7 +272,7 @@ const DeviationPage = () => {
       {loading && (
         <div className="flex items-center gap-2 text-gray-600 text-sm">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading OOT deviations...
+          Loading deviations...
         </div>
       )}
 
@@ -365,44 +363,24 @@ const DeviationPage = () => {
 
 const SrfDeviationRecordsPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { section, srfKey } = useParams<{ section: string; srfKey: string }>();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<OOTDeviationItem[]>([]);
+
+  const allItems: OOTDeviationItem[] = location.state?.items || [];
 
   const activeSection: "OOT" | "MANUAL" =
     (section || "").toUpperCase() === "MANUAL" ? "MANUAL" : "OOT";
   const decodedSrf = decodeURIComponent(srfKey || "Without SRF");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (activeSection === "OOT") {
-        const res = await api.get("/htw-calculations/deviations/oot", { params: { threshold: 4 } });
-        setItems(Array.isArray(res.data?.items) ? res.data.items : []);
-      } else {
-        const res = await api.get<OOTDeviationItem[]>(ENDPOINTS.STAFF_DEVIATIONS.MANUAL);
-        setItems(Array.isArray(res.data) ? res.data : []);
-      }
-    } catch (e: unknown) {
-      const msg =
-        e && typeof e === "object" && "response" in e
-          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : null;
-      setError(msg || "Failed to load deviations.");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeSection]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (allItems.length === 0) {
+      navigate("/engineer/deviations");
+    }
+  }, [allItems, navigate]);
 
   const filtered = useMemo(() => {
-    return items.filter((item) => (item.srf_no?.trim() || "Without SRF") === decodedSrf);
-  }, [items, decodedSrf]);
+    return allItems.filter((item) => (item.srf_no?.trim() || "Without SRF") === decodedSrf);
+  }, [allItems, decodedSrf]);
 
   const neplGroups = useMemo(() => {
     return filtered.reduce<Record<string, OOTDeviationItem[]>>((acc, item) => {
@@ -417,6 +395,15 @@ const SrfDeviationRecordsPage = () => {
     () => Object.keys(neplGroups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
     [neplGroups]
   );
+
+  if (allItems.length === 0) {
+    return (
+        <div className="flex items-center justify-center h-64 gap-2 text-gray-600 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading records...
+        </div>
+    );
+  }
 
   return (
     <div className="p-8 bg-white rounded-2xl shadow-lg">
@@ -439,24 +426,13 @@ const SrfDeviationRecordsPage = () => {
         </button>
       </div>
 
-      {loading && (
-        <div className="flex items-center gap-2 text-gray-600 text-sm">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading SRF records...
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="p-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm">{error}</div>
-      )}
-
-      {!loading && !error && neplKeys.length === 0 && (
+       {neplKeys.length === 0 && (
         <div className="p-8 text-center text-gray-500 border border-gray-200 rounded-xl">
           No records found for this SRF.
         </div>
       )}
 
-      {!loading && !error && neplKeys.length > 0 && (
+      {neplKeys.length > 0 && (
         <div className="space-y-4">
           {neplKeys.map((neplKey) => {
             const rows = neplGroups[neplKey] || [];
@@ -524,6 +500,7 @@ const SrfDeviationRecordsPage = () => {
   );
 };
 
+// --- UPDATED DEVIATION DETAIL COMPONENT ---
 const DeviationDetailPage = () => {
   const navigate = useNavigate();
   const { deviationId } = useParams<{ deviationId: string }>();
@@ -534,6 +511,15 @@ const DeviationDetailPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<DeviationDetailResponse | null>(null);
   const [engineerRemarksInput, setEngineerRemarksInput] = useState("");
+
+  const isExternalRecord = deviationId ? Number(deviationId) < 0 : false;
+
+  const getFileFullUrl = (url: string) => {
+    if (!url) return "#";
+    if (url.startsWith('http')) return url;
+    const host = api.defaults.baseURL?.split('/api')[0] || '';
+    return `${host}${url}`; 
+  };
 
   const formatDcDate = (value?: string | null) => {
     if (!value) return "—";
@@ -569,16 +555,30 @@ const DeviationDetailPage = () => {
   }, [deviationId]);
 
   const saveEngineerRemarks = async () => {
-    if (!detail) return;
+    if (!detail || !deviationId) return;
     setSavingRemarks(true);
     setError(null);
     try {
-      const res = await api.patch<DeviationDetailResponse>(
-        ENDPOINTS.STAFF_DEVIATIONS.UPDATE_ENGINEER_REMARKS(detail.deviation_id),
-        { engineer_remarks: engineerRemarksInput }
-      );
-      setDetail(res.data);
-      setEngineerRemarksInput(res.data.engineer_remarks || "");
+      let response;
+      const payload = { engineer_remarks: engineerRemarksInput };
+      const id = Number(deviationId);
+
+      if (isExternalRecord) {
+        const externalId = Math.abs(id);
+        response = await api.patch<DeviationDetailResponse>(
+          `/external-deviations/${externalId}`, 
+          payload
+        );
+      } else {
+        response = await api.patch<DeviationDetailResponse>(
+          ENDPOINTS.STAFF_DEVIATIONS.UPDATE_ENGINEER_REMARKS(id),
+          payload
+        );
+      }
+      
+      setDetail(response.data);
+      setEngineerRemarksInput(response.data.engineer_remarks || "");
+
     } catch (e: unknown) {
       const msg =
         e && typeof e === "object" && "response" in e
@@ -657,26 +657,28 @@ const DeviationDetailPage = () => {
 
       {!loading && !error && detail && (
         <div className="space-y-5 text-sm">
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              disabled={closingDeviation || (detail.status || "").toUpperCase() === "CLOSED"}
-              onClick={closeDeviationRecord}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-black disabled:opacity-60"
-            >
-              {closingDeviation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {(detail.status || "").toUpperCase() === "CLOSED" ? "Closed" : "Close Deviation"}
-            </button>
-            <button
-              type="button"
-              disabled={terminatingDeviationJob}
-              onClick={terminateDeviationJob}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
-            >
-              {terminatingDeviationJob ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Terminate Job
-            </button>
-          </div>
+          {!isExternalRecord && (
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={closingDeviation || (detail.status || "").toUpperCase() === "CLOSED"}
+                onClick={closeDeviationRecord}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-black disabled:opacity-60"
+              >
+                {closingDeviation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {(detail.status || "").toUpperCase() === "CLOSED" ? "Closed" : "Close Deviation"}
+              </button>
+              <button
+                type="button"
+                disabled={terminatingDeviationJob}
+                onClick={terminateDeviationJob}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+              >
+                {terminatingDeviationJob ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Terminate Job
+              </button>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -697,13 +699,16 @@ const DeviationDetailPage = () => {
               </span>
             </div>
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Calibration status</p>
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
+                {isExternalRecord ? "Tool Status" : "Calibration status"}
+              </p>
               <span className={`inline-flex mt-2 text-xs px-2.5 py-1 rounded-full font-semibold border ${
-                (detail.calibration_status || "").toLowerCase() === "calibrated"
+                (detail.tool_status || detail.calibration_status || "").toLowerCase().includes("calibrated") || 
+                (detail.tool_status || detail.calibration_status || "").toLowerCase().includes("ok")
                   ? "bg-green-100 text-green-800 border-green-200"
                   : "bg-gray-100 text-gray-700 border-gray-200"
               }`}>
-                {formatCalibrationStatus(detail.calibration_status)}
+                {formatCalibrationStatus(isExternalRecord ? detail.tool_status : detail.calibration_status)}
               </span>
             </div>
           </div>
@@ -712,9 +717,9 @@ const DeviationDetailPage = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div><span className="text-gray-500">SRF</span> <span className="font-medium text-gray-900 ml-2">{detail.srf_no || "—"}</span></div>
               <div><span className="text-gray-500">NEPL ID</span> <span className="font-medium text-gray-900 ml-2">{detail.nepl_id || "—"}</span></div>
-              <div><span className="text-gray-500">Report date</span> <span className="font-medium text-gray-900 ml-2">{detail.report || "—"}</span></div>
+              <div><span className="text-gray-500">Report date</span> <span className="font-medium text-gray-900 ml-2">{detail.report ? formatDcDate(detail.report) : "—"}</span></div>
             </div>
-            {((detail.oot_steps?.length || 0) > 0) && (
+            {(detail.oot_steps?.length || 0) > 0 && (
               <div className="mt-4 overflow-x-auto">
                 <p className="text-gray-600 text-xs font-semibold uppercase tracking-wide mb-2">
                   OOT Steps (single response applies to all)
@@ -723,8 +728,6 @@ const DeviationDetailPage = () => {
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr className="text-left text-slate-600">
                       <th className="px-3 py-2">Step %</th>
-                      <th className="px-3 py-2">Set Torque</th>
-                      <th className="px-3 py-2">Corrected Mean</th>
                       <th className="px-3 py-2">Deviation %</th>
                     </tr>
                   </thead>
@@ -732,8 +735,6 @@ const DeviationDetailPage = () => {
                     {detail.oot_steps?.map((step, idx) => (
                       <tr key={`oot-step-${idx}`} className="border-t border-slate-100">
                         <td className="px-3 py-2 text-slate-800">{step.step_percent ?? "—"}</td>
-                        <td className="px-3 py-2 text-slate-700">{step.set_torque ?? "—"}</td>
-                        <td className="px-3 py-2 text-slate-700">{step.corrected_mean ?? "—"}</td>
                         <td className="px-3 py-2 font-medium text-red-700">{step.deviation_percent ?? "—"}</td>
                       </tr>
                     ))}
@@ -789,19 +790,46 @@ const DeviationDetailPage = () => {
               {detail.customer_decision || "—"}
             </p>
           </div>
-          {detail.attachments?.length > 0 && (
-            <div>
-              <p className="text-gray-500 font-medium mb-2">Attachments</p>
-              <ul className="space-y-1">
+
+          {/* --- ATTACHMENTS SECTION --- */}
+          {detail.attachments && detail.attachments.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Paperclip size={16} className="text-gray-400" />
+                <p className="text-gray-500 font-medium">Evidence & Attachments</p>
+                <span className="ml-auto text-xs font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full border border-blue-100">
+                    {detail.attachments.length} File(s)
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {detail.attachments.map((a) => (
-                  <li key={a.id} className="text-blue-600">
-                    <a href={a.file_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                      {a.file_name}
-                    </a>
-                    {a.file_type && <span className="text-gray-400 text-xs ml-2">({a.file_type})</span>}
-                  </li>
+                  <a 
+                    key={a.id} 
+                    href={getFileFullUrl(a.file_url)} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-100 bg-gray-50 hover:bg-blue-50 hover:border-blue-200 transition-all group"
+                  >
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="p-2 bg-white rounded border border-gray-200 text-blue-500">
+                        <FileText size={18} />
+                      </div>
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="text-sm font-semibold text-gray-700 truncate group-hover:text-blue-700">
+                          {a.file_name}
+                        </span>
+                        {a.file_type && (
+                          <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">
+                            {a.file_type.split('/')[1] || a.file_type}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <ExternalLink size={14} className="text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
+                  </a>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
         </div>
@@ -814,7 +842,6 @@ const DeviationDetailPage = () => {
 const DashboardSkeleton = () => {
   return (
     <div className="animate-pulse w-full">
-      {/* Header Skeleton */}
       <div className="flex items-center justify-between mb-10">
         <div className="flex items-center gap-4">
           <div className="h-16 w-16 bg-slate-200 rounded-2xl"></div>
@@ -824,11 +851,7 @@ const DashboardSkeleton = () => {
           </div>
         </div>
       </div>
-
-      {/* Alert Banner Skeleton (Optional placeholder) */}
       <div className="h-24 w-full bg-slate-100 rounded-xl mb-6 border border-slate-200"></div>
-
-      {/* Quick Actions Grid Skeleton */}
       <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
         <div className="h-8 w-48 bg-slate-200 rounded mb-6 border-b pb-3"></div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -889,9 +912,7 @@ const EngineerDashboard: React.FC = () => {
   const [availableDrafts, setAvailableDrafts] = useState<AvailableDraft[]>([]);
   const [reviewedFirCount, setReviewedFirCount] = useState(0);
   
-  // State for expired standards (Kept for Notification Banner only)
   const [expiredStandards, setExpiredStandards] = useState<string[]>([]);
-  
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchDashboardData = useCallback(async (isInitialLoad = false) => {
@@ -905,7 +926,6 @@ const EngineerDashboard: React.FC = () => {
         api.get<FailedNotificationsResponse>(`${ENDPOINTS.STAFF.INWARDS}/notifications/failed?_t=${timestamp}`),
         api.get<AvailableDraft[]>(`${ENDPOINTS.STAFF.INWARDS}/drafts?_t=${timestamp}`), 
         api.get<ReviewedFir[]>(`${ENDPOINTS.STAFF.INWARDS}/reviewed-firs?_t=${timestamp}`),
-        // We still check expiry to show the alert banner, but we won't block the button
         api.post<ExpiryCheckResponse>('/calibration/check-expiry', { reference_date: todayStr })
       ]);
 
@@ -914,7 +934,6 @@ const EngineerDashboard: React.FC = () => {
       if (draftsRes.status === 'fulfilled') setAvailableDrafts(draftsRes.value.data || []);
       if (reviewedFirsRes.status === 'fulfilled') setReviewedFirCount(reviewedFirsRes.value.data.length);
       
-      // Handle Expiry Response for the Banner
       if (expiryRes.status === 'fulfilled' && expiryRes.value.data) {
         if ('affected_tables' in expiryRes.value.data && Array.isArray(expiryRes.value.data.affected_tables)) {
             setExpiredStandards(expiryRes.value.data.affected_tables);
@@ -969,42 +988,12 @@ const EngineerDashboard: React.FC = () => {
         colorClasses: "bg-gradient-to-r from-cyan-500 to-blue-600", 
         badge: reviewedFirCount 
     },
-    { 
-        label: "Export Inward", 
-        description: "Filter and export updated inward records", 
-        icon: <Download className="h-8 w-8" />, 
-        route: "export-inward", 
-        colorClasses: "bg-gradient-to-r from-indigo-500 to-purple-600" 
-    },
-    { 
-        label: "SRF Management", 
-        description: "View and manage Service Request Forms", 
-        icon: <FileText className="h-8 w-8" />, 
-        route: "srfs", 
-        colorClasses: "bg-gradient-to-r from-green-500 to-emerald-600" 
-    },
-    { 
-        label: "Jobs Management", 
-        // Logic removed: Always active, standard description
-        description: "Manage calibration jobs and job status", 
-        icon: <Briefcase className="h-8 w-8" />, 
-        route: "jobs", 
-        colorClasses: "bg-gradient-to-r from-teal-500 to-cyan-600"
-    },
-    { 
-        label: "View Deviations", 
-        description: "Access deviation reports", 
-        icon: <AlertTriangle className="h-8 w-8" />, 
-        route: "deviations", 
-        colorClasses: "bg-gradient-to-r from-orange-500 to-red-500" 
-    },
-    { 
-        label: "Certificates", 
-        description: "Generate and manage certificates", 
-        icon: <Award className="h-8 w-8" />, 
-        route: "certificates", 
-        colorClasses: "bg-gradient-to-r from-purple-500 to-indigo-600" 
-    },
+    { label: "Export Inward", description: "Filter and export updated inward records", icon: <Download className="h-8 w-8" />, route: "export-inward", colorClasses: "bg-gradient-to-r from-indigo-500 to-purple-600" },
+    { label: "SRF Management", description: "View and manage Service Request Forms", icon: <FileText className="h-8 w-8" />, route: "srfs", colorClasses: "bg-gradient-to-r from-green-500 to-emerald-600" },
+    { label: "Jobs Management", description: "Manage calibration jobs and job status", icon: <Briefcase className="h-8 w-8" />, route: "jobs", colorClasses: "bg-gradient-to-r from-teal-500 to-cyan-600"},
+    { label: "Manual Calibration", description: "View and manage Service Request Forms", icon: <FileUp className="h-8 w-8" />, route: "manual-calibration", colorClasses: "bg-gradient-to-r from-slate-500 to-slate-700"},
+    { label: "View Deviations", description: "Access deviation reports", icon: <AlertTriangle className="h-8 w-8" />, route: "deviations", colorClasses: "bg-gradient-to-r from-orange-500 to-red-500" },
+    { label: "Certificates", description: "Generate and manage certificates", icon: <Award className="h-8 w-8" />, route: "certificates", colorClasses: "bg-gradient-to-r from-purple-500 to-indigo-600" },
   ];
 
   if (isLoading) {
@@ -1025,28 +1014,16 @@ const EngineerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* --- EXPIRED STANDARDS ALERT (Informational Only) --- */}
       {expiredStandards.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6 shadow-lg animate-fade-in relative overflow-hidden">
-           <div className="absolute top-0 right-0 p-4 opacity-10">
-              <AlertTriangle className="w-32 h-32 text-red-600" />
-           </div>
+           <div className="absolute top-0 right-0 p-4 opacity-10"> <AlertTriangle className="w-32 h-32 text-red-600" /> </div>
            <div className="relative z-10 flex items-start gap-4">
-            <div className="p-3 bg-red-100 rounded-full flex-shrink-0">
-               <AlertTriangle className="h-6 w-6 text-red-600" />
-            </div>
+            <div className="p-3 bg-red-100 rounded-full flex-shrink-0"> <AlertTriangle className="h-6 w-6 text-red-600" /> </div>
             <div className="flex-1">
               <h3 className="text-lg font-bold text-red-900 mb-2">Attention: Master Standards Expired</h3>
-              <p className="text-red-800 text-sm mb-3 font-medium">
-                The following master standards have expired. Please be aware that creating new jobs may be restricted in the Jobs module until these are updated by an administrator.
-              </p>
+              <p className="text-red-800 text-sm mb-3 font-medium"> The following master standards have expired. Please be aware that creating new jobs may be restricted in the Jobs module until these are updated by an administrator. </p>
               <div className="flex flex-wrap gap-2 mt-2">
-                 {expiredStandards.map((table, idx) => (
-                    <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-white border border-red-200 text-red-700 shadow-sm">
-                        <XCircle size={12} className="mr-1.5" />
-                        {formatTableName(table)}
-                    </span>
-                 ))}
+                 {expiredStandards.map((table, idx) => ( <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-white border border-red-200 text-red-700 shadow-sm"> <XCircle size={12} className="mr-1.5" /> {formatTableName(table)} </span> ))}
               </div>
             </div>
           </div>
@@ -1082,13 +1059,7 @@ const EngineerDashboard: React.FC = () => {
       <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
         <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b pb-3">Quick Actions</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {quickActions.map((action) => (
-            <ActionButton 
-                key={action.label} 
-                {...action} 
-                onClick={() => navigate(action.route)} 
-            />
-          ))}
+          {quickActions.map((action) => ( <ActionButton key={action.label} {...action} onClick={() => navigate(action.route)} /> ))}
         </div>
       </div>
 
@@ -1098,7 +1069,6 @@ const EngineerDashboard: React.FC = () => {
   );
 };
 
-// --- 2. MAIN LAYOUT COMPONENT ---
 const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
   const username = user?.full_name || user?.email || "Engineer";
   const navigate = useNavigate();
@@ -1210,6 +1180,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           <Route path="srfs" element={<SrfListPage />} />
           <Route path="srfs/:srfId" element={<SrfDetailPage />} />
           <Route path="jobs" element={<JobsManagementPage />} />
+          <Route path="manual-calibration" element={<ManualCalibrationPage />} />
           <Route path="calibration/:inwardId/:equipmentId" element={<CalibrationPage />} />
           <Route path="uncertainty-budget/:inwardId/:equipmentId" element={<UncertaintyBudgetPage />} />
           <Route path="certificates" element={<CertificatesPage />} />

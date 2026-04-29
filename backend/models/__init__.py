@@ -43,4 +43,8 @@ from .htw.htw_job_standard_snapshot import HTWJobStandardSnapshot
 from .lab_scope import LabScope
 from .deviation import Deviation
 from .deviation_attachments import DeviationAttachment
+from .equipment_flow_config import EquipmentFlowConfig
+from .external_upload import ExternalUpload
+from .external_deviation import ExternalDeviation
+from .external_deviation_attachments import ExternalDeviationAttachment
 from backend.db import Base

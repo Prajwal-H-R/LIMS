@@ -30,6 +30,7 @@ class CustomerDeviationItem(BaseModel):
     deviation_percent: Optional[float] = None
     deviation_type: str = "OOT"
     status: str
+    tool_status: Optional[str] = None  # Add this
     calibration_status: str = "not calibrated"
     engineer_remarks: Optional[str] = None
     customer_decision: Optional[str] = None
@@ -83,7 +84,7 @@ class DeviationDetailOut(BaseModel):
     deviation_percent: Optional[float] = None
     deviation_type: str = "OOT"
     certificate_id: Optional[int] = None
-    status: str
+    tool_status: Optional[str] = None
     calibration_status: str = "not calibrated"
     engineer_remarks: Optional[str] = None
     customer_decision: Optional[str] = None

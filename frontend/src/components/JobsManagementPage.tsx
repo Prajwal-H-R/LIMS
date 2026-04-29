@@ -28,13 +28,16 @@ import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
 // --- Interfaces ---
 
+// ⭐ UPDATED to match the new high-performance backend response
 interface InwardJob {
-  inward_id?: number;
-  id?: number;        
+  inward_id: number;
   srf_no: string;
   customer_dc_no: string;
   customer_dc_date: string | null;
   status: string;
+  pending_count: number;
+  in_progress_count: number;
+  completed_count: number;
 }
 
 interface InwardEquipment {
@@ -69,20 +72,19 @@ interface HtwJobResponse {
   job_status: string;
 }
 
-// Interface for Expiry Check
 interface ExpiryCheckResponse {
     message: string;
     affected_tables: string[];
 }
 
-type EquipmentTab = "pending" | "in_progress" | "completed" | "terminated";
-interface ListStatusCounts {
-  pending: number;
-  in_progress: number;
-  completed: number;
+interface FlowConfig {
+  equipment_type: string;
+  is_active: boolean;
 }
 
-// --- Skeleton Components ---
+type EquipmentTab = "pending" | "in_progress" | "completed" | "terminated";
+
+// --- Skeleton Components (Unchanged) ---
 
 const JobListSkeleton: React.FC = () => {
   return (
@@ -151,7 +153,6 @@ const JobDetailSkeleton: React.FC = () => {
 };
 
 // --- Main Component ---
-
 const JobsManagementPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -167,19 +168,30 @@ const JobsManagementPage: React.FC = () => {
   const [selectedJob, setSelectedJob] = useState<InwardDetailResponse | null>(null);
 
   const [jobs, setJobs] = useState<InwardJob[]>([]);
-  const [jobStatusCountsByInward, setJobStatusCountsByInward] = useState<Record<number, ListStatusCounts>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filterStartDate, setFilterStartDate] = useState("");
   const [filterEndDate, setFilterEndDate] = useState("");
-
-  // State to track expired standards
   const [expiredStandards, setExpiredStandards] = useState<string[]>([]);
+  const [systemDrivenTypes, setSystemDrivenTypes] = useState<string[]>([]);
 
   useEffect(() => {
     fetchJobs();
+    fetchSystemDrivenTypes();
     checkExpiry();
   }, []);
+
+  const fetchSystemDrivenTypes = async () => {
+    try {
+      const res = await api.get<FlowConfig[]>('/flow-configs');
+      const activeTypes = res.data
+        .filter(config => config.is_active)
+        .map(config => config.equipment_type.toLowerCase().trim());
+      setSystemDrivenTypes(activeTypes);
+    } catch (error) {
+      console.error("Failed to fetch equipment flow configurations", error);
+    }
+  };
 
   const checkExpiry = async () => {
     try {
@@ -212,87 +224,29 @@ const JobsManagementPage: React.FC = () => {
 
   useEffect(() => {
     if (activeJobId) {
-        if (!selectedJob || selectedJob.inward_id !== activeJobId) {
+        if ((!selectedJob || selectedJob.inward_id !== activeJobId) && systemDrivenTypes.length > 0) {
             fetchJobDetails(activeJobId);
         }
     } else {
         setSelectedJob(null);
     }
-  }, [activeJobId]);
+  }, [activeJobId, systemDrivenTypes]);
 
-  const getEquipmentCategoryForRecord = (
-    item: InwardEquipment,
-    inwardTerminated: boolean
-  ): EquipmentTab | null => {
-    if (inwardTerminated) return "terminated";
-
-    const inwardStatus = (item.status || "").toLowerCase();
-    if (inwardStatus === "pending") return null;
-
-    if (!item.job_id) return "pending";
-
-    const jobStatus = (item.job_status || "").toLowerCase();
-    if (jobStatus.includes("term") || jobStatus.includes("cancel") || jobStatus.includes("reject")) return "terminated";
-    if (jobStatus.includes("complete") || jobStatus.includes("calibrated") || jobStatus.includes("done")) return "completed";
-    return "in_progress";
-  };
-
-  const buildRecordStatusCounts = async (inwardId: number): Promise<ListStatusCounts> => {
-    try {
-      const res = await api.get<InwardDetailResponse>(`${ENDPOINTS.STAFF.INWARDS}/${inwardId}`);
-      const inwardData = res.data;
-      const equipments = inwardData?.equipments || [];
-
-      const enrichedEquipments = await Promise.all(
-        equipments.map(async (eq) => {
-          try {
-            const jobRes = await api.get<HtwJobResponse[]>(`/htw-jobs/`, {
-              params: { inward_eqp_id: eq.inward_eqp_id },
-            });
-            const jobData = Array.isArray(jobRes.data) && jobRes.data.length > 0 ? jobRes.data[0] : null;
-            return {
-              ...eq,
-              job_id: jobData ? jobData.job_id : null,
-              job_status: jobData ? jobData.job_status : null,
-            };
-          } catch {
-            return { ...eq, job_id: null, job_status: null };
-          }
-        })
-      );
-
-      const counts: ListStatusCounts = { pending: 0, in_progress: 0, completed: 0 };
-      enrichedEquipments.forEach((eq) => {
-        const category = getEquipmentCategoryForRecord(eq, !!inwardData.inward_srf_flag);
-        if (category === "pending") counts.pending += 1;
-        if (category === "in_progress") counts.in_progress += 1;
-        if (category === "completed") counts.completed += 1;
-      });
-      return counts;
-    } catch {
-      return { pending: 0, in_progress: 0, completed: 0 };
-    }
-  };
-
+  // ✅ SIMPLIFIED AND FAST
   const fetchJobs = async () => {
     try {
-      if(!activeJobId) setLoading(true);
+      if (!activeJobId) setLoading(true);
       setErrorMsg(null);
-      const res = await api.get<InwardJob[]>(`${ENDPOINTS.STAFF.INWARDS}`);
+      console.log(`[JobsManagementPage] ==> Fetching LIST and COUNTS from SINGLE high-performance endpoint: '/flow-configs/system-driven-jobs'`);
+      const res = await api.get<InwardJob[]>('/flow-configs/system-driven-jobs');
       const data = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
+      console.log(`[JobsManagementPage] ✅ Received ${data.length} jobs with pre-calculated counts. Page will load instantly.`);
       setJobs(data);
-      const inwardIds = data
-        .map((j) => j.inward_id || j.id)
-        .filter((id): id is number => typeof id === "number");
-      const entries = await Promise.all(
-        inwardIds.map(async (id) => [id, await buildRecordStatusCounts(id)] as const)
-      );
-      setJobStatusCountsByInward(Object.fromEntries(entries));
     } catch (error) {
       console.error("Failed to fetch inward jobs", error);
       setErrorMsg("Failed to load jobs list.");
     } finally {
-      if(!activeJobId) setLoading(false);
+      if (!activeJobId) setLoading(false);
     }
   };
 
@@ -300,25 +254,28 @@ const JobsManagementPage: React.FC = () => {
     try {
       setLoading(true);
       setErrorMsg(null);
-
       const url = `${ENDPOINTS.STAFF.INWARDS}/${id}`;
+      console.log(`[JobsManagementPage] ==> Fetching ALL details for a single job from ORIGINAL endpoint: '${url}'`);
+      
       const res = await api.get<InwardDetailResponse>(url);
       const inwardData = res.data;
 
+      if (inwardData.equipments) {
+        console.log(`[JobsManagementPage] Filtering ${inwardData.equipments.length} equipments against ${systemDrivenTypes.length} system-driven rules.`);
+        const filteredEquipmentList = inwardData.equipments.filter(eq =>
+          systemDrivenTypes.includes(eq.material_description.toLowerCase().trim())
+        );
+        inwardData.equipments = filteredEquipmentList;
+        console.log(`[JobsManagementPage] Found ${filteredEquipmentList.length} matching system-driven equipments.`);
+      }
+      
       if (inwardData.equipments && inwardData.equipments.length > 0) {
         const enrichedEquipments = await Promise.all(
             inwardData.equipments.map(async (eq) => {
                 try {
-                    const jobRes = await api.get<HtwJobResponse[]>(`/htw-jobs/`, {
-                        params: { inward_eqp_id: eq.inward_eqp_id }
-                    });
+                    const jobRes = await api.get<HtwJobResponse[]>(`/htw-jobs/`, { params: { inward_eqp_id: eq.inward_eqp_id } });
                     const jobData = jobRes.data.length > 0 ? jobRes.data[0] : null;
-
-                    return {
-                        ...eq,
-                        job_id: jobData ? jobData.job_id : null,
-                        job_status: jobData ? jobData.job_status : null
-                    };
+                    return { ...eq, job_id: jobData?.job_id, job_status: jobData?.job_status };
                 } catch (err) {
                     console.error(`Failed to fetch job status for eqp ${eq.inward_eqp_id}`, err);
                     return { ...eq, job_id: null, job_status: null };
@@ -342,19 +299,12 @@ const JobsManagementPage: React.FC = () => {
   };
 
   const getEquipmentCategory = (item: InwardEquipment): EquipmentTab | null => {
-    if (selectedJob?.inward_srf_flag) {
-        return "terminated";
-    }
-
-    const inwardStatus = (item.status || "").toLowerCase();
-    if (inwardStatus === "pending") return null; 
-
+    if (selectedJob?.inward_srf_flag) return "terminated";
+    if ((item.status || "").toLowerCase() === "pending") return null; 
     if (!item.job_id) return "pending";
-
     const jobStatus = (item.job_status || "").toLowerCase();
     if (jobStatus.includes("term") || jobStatus.includes("cancel") || jobStatus.includes("reject")) return "terminated";
     if (jobStatus.includes("complete") || jobStatus.includes("calibrated") || jobStatus.includes("done")) return "completed";
-    
     return "in_progress";
   };
 
@@ -375,9 +325,7 @@ const JobsManagementPage: React.FC = () => {
   };
 
   const handleStartCalibration = (inwardId: number, equipmentId: number) => {
-    // Extra safety check
     if (expiredStandards.length > 0) return;
-    
     navigate(`/engineer/calibration/${inwardId}/${equipmentId}`, {
         state: { viewJobId: inwardId, activeTab: activeDetailTab } 
     });
@@ -410,28 +358,10 @@ const JobsManagementPage: React.FC = () => {
 
   const getStatusConfig = (status: string | null | undefined) => {
     const s = (status || "").toLowerCase();
-    if (s.includes("complete") || s.includes("calibrated")) {
-      return { 
-        iconBg: "bg-green-100", iconText: "text-green-600",
-        badge: "bg-green-50 text-green-700 border-green-200", icon: CheckCircle2
-      };
-    }
-    if (s.includes("progress")) {
-      return { 
-        iconBg: "bg-blue-100", iconText: "text-blue-600",
-        badge: "bg-blue-50 text-blue-700 border-blue-200", icon: Activity
-      };
-    }
-    if (s.includes("term") || s.includes("cancel")) {
-      return { 
-        iconBg: "bg-red-100", iconText: "text-red-600",
-        badge: "bg-red-50 text-red-700 border-red-200", icon: XCircle
-      };
-    }
-    return { 
-      iconBg: "bg-teal-100", iconText: "text-teal-600",
-      badge: "bg-gray-100 text-gray-600 border-gray-200", icon: Clock
-    };
+    if (s.includes("complete") || s.includes("calibrated")) return { iconBg: "bg-green-100", iconText: "text-green-600", badge: "bg-green-50 text-green-700 border-green-200", icon: CheckCircle2 };
+    if (s.includes("progress")) return { iconBg: "bg-blue-100", iconText: "text-blue-600", badge: "bg-blue-50 text-blue-700 border-blue-200", icon: Activity };
+    if (s.includes("term") || s.includes("cancel")) return { iconBg: "bg-red-100", iconText: "text-red-600", badge: "bg-red-50 text-red-700 border-red-200", icon: XCircle };
+    return { iconBg: "bg-teal-100", iconText: "text-teal-600", badge: "bg-gray-100 text-gray-600 border-gray-200", icon: Clock };
   };
 
   const filteredJobs = useMemo(() => {
@@ -454,19 +384,11 @@ const JobsManagementPage: React.FC = () => {
 
   const isStandardsExpired = expiredStandards.length > 0;
 
-  // ==========================================
-  // VIEW MODE: DETAIL
-  // ==========================================
   if (viewMode === "detail") {
-    
     if (loading || !selectedJob) {
         return <JobDetailSkeleton />;
     }
-
-    const filteredEquipments = (selectedJob.equipments || []).filter(eq => 
-        getEquipmentCategory(eq) === activeDetailTab
-    );
-    
+    const filteredEquipments = (selectedJob.equipments || []).filter(eq => getEquipmentCategory(eq) === activeDetailTab);
     const counts = {
         pending: (selectedJob.equipments || []).filter(e => getEquipmentCategory(e) === "pending").length,
         in_progress: (selectedJob.equipments || []).filter(e => getEquipmentCategory(e) === "in_progress").length,
@@ -477,8 +399,6 @@ const JobsManagementPage: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto space-y-6">
-            
-            {/* Header */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
                 <div>
                     <div className="flex items-center gap-3">
@@ -495,16 +415,11 @@ const JobsManagementPage: React.FC = () => {
                         </span>
                     </div>
                 </div>
-                <button
-                    onClick={handleBackToList}
-                    className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm"
-                >
+                <button onClick={handleBackToList} className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm">
                     <ArrowLeft className="h-4 w-4" />
                     <span>Back to List</span>
                 </button>
             </div>
-
-            {/* EXPIRED STANDARDS ALERT */}
             {isStandardsExpired && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 shadow-sm animate-fade-in">
                     <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -516,8 +431,6 @@ const JobsManagementPage: React.FC = () => {
                     </div>
                 </div>
             )}
-
-            {/* Info Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
                     <div className="flex items-start gap-3">
@@ -548,8 +461,6 @@ const JobsManagementPage: React.FC = () => {
                     </div>
                 </div>
             </div>
-
-            {/* Tabs & Table */}
             <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
                 <div className="bg-gray-50 border-b border-gray-200 p-2">
                     <div className="flex space-x-1 overflow-x-auto">
@@ -567,7 +478,6 @@ const JobsManagementPage: React.FC = () => {
                         </button>
                     </div>
                 </div>
-
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                     <thead>
@@ -583,12 +493,8 @@ const JobsManagementPage: React.FC = () => {
                     <tbody className="divide-y divide-gray-100 text-sm">
                         {filteredEquipments.length > 0 ? (
                             filteredEquipments.map((item) => {
-                                const displayStatus = selectedJob.inward_srf_flag 
-                                    ? "Terminated" 
-                                    : (item.job_status || "Not Started");
-                                
+                                const displayStatus = selectedJob.inward_srf_flag ? "Terminated" : (item.job_status || "Not Started");
                                 const statusConfig = getStatusConfig(selectedJob.inward_srf_flag ? "terminated" : item.job_status);
-
                                 return (
                                 <tr key={item.inward_eqp_id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4 font-medium text-blue-600 align-top">{item.nepl_id}</td>
@@ -608,67 +514,36 @@ const JobsManagementPage: React.FC = () => {
                                                 </span>
                                             ) : (
                                                 <>
-                                                    {/* START JOB BUTTON */}
                                                     {!item.job_id && (
                                                         <button 
                                                             onClick={() => !isStandardsExpired && handleStartCalibration(selectedJob.inward_id, item.inward_eqp_id)} 
                                                             disabled={isStandardsExpired}
-                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm w-full transition-colors 
-                                                                ${isStandardsExpired 
-                                                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' 
-                                                                    : 'bg-green-600 text-white hover:bg-green-700'}`
-                                                            }
-                                                            title={isStandardsExpired ? "Master Standards Expired" : "Start Calibration"}
-                                                        >
-                                                            {isStandardsExpired ? <Lock className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} 
-                                                            Start Job
+                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm w-full transition-colors ${isStandardsExpired ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' : 'bg-green-600 text-white hover:bg-green-700'}`}>
+                                                            {isStandardsExpired ? <Lock className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} Start Job
                                                         </button>
                                                     )}
-
-                                                    {/* RESUME BUTTON */}
                                                     {item.job_id && activeDetailTab === 'in_progress' && (
                                                         <button 
                                                             onClick={() => !isStandardsExpired && handleStartCalibration(selectedJob.inward_id, item.inward_eqp_id)} 
                                                             disabled={isStandardsExpired}
-                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm w-full transition-colors 
-                                                                ${isStandardsExpired 
-                                                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' 
-                                                                    : 'bg-blue-600 text-white hover:bg-blue-700'}`
-                                                            }
-                                                            title={isStandardsExpired ? "Master Standards Expired" : "Resume Calibration"}
-                                                        >
-                                                            {isStandardsExpired ? <Lock className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} 
-                                                            Resume
+                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm w-full transition-colors ${isStandardsExpired ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                                                            {isStandardsExpired ? <Lock className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} Resume
                                                         </button>
                                                     )}
-
-                                                    {/* EDIT DATA BUTTON */}
                                                     {item.job_id && activeDetailTab === 'completed' && (
                                                         <button 
                                                             onClick={() => !isStandardsExpired && handleStartCalibration(selectedJob.inward_id, item.inward_eqp_id)} 
                                                             disabled={isStandardsExpired}
-                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm w-full transition-colors 
-                                                                ${isStandardsExpired 
-                                                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' 
-                                                                    : 'bg-amber-600 text-white hover:bg-amber-700'}`
-                                                            }
-                                                            title={isStandardsExpired ? "Master Standards Expired" : "Edit Calibration Data"}
-                                                        >
-                                                            {isStandardsExpired ? <Lock className="h-3.5 w-3.5" /> : <Edit className="h-3.5 w-3.5" />} 
-                                                            Edit Data
+                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm w-full transition-colors ${isStandardsExpired ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200' : 'bg-amber-600 text-white hover:bg-amber-700'}`}>
+                                                            {isStandardsExpired ? <Lock className="h-3.5 w-3.5" /> : <Edit className="h-3.5 w-3.5" />} Edit Data
                                                         </button>
                                                     )}
-
-                                                    {/* BUDGET BUTTON (Always allowed if job_id exists) */}
                                                     {item.job_id && (
                                                         <button 
                                                             onClick={() => handleViewUncertaintyBudget(selectedJob.inward_id, item.inward_eqp_id)} 
                                                             disabled={verifyingId === item.inward_eqp_id} 
-                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white text-blue-600 text-xs font-semibold rounded-lg hover:bg-blue-50 border border-blue-200 transition-colors shadow-sm w-full 
-                                                                ${verifyingId === item.inward_eqp_id ? 'opacity-70 cursor-wait' : ''}`}
-                                                        >
-                                                            {verifyingId === item.inward_eqp_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calculator className="h-3.5 w-3.5" />} 
-                                                            Budget
+                                                            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white text-blue-600 text-xs font-semibold rounded-lg hover:bg-blue-50 border border-blue-200 transition-colors shadow-sm w-full ${verifyingId === item.inward_eqp_id ? 'opacity-70 cursor-wait' : ''}`}>
+                                                            {verifyingId === item.inward_eqp_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calculator className="h-3.5 w-3.5" />} Budget
                                                         </button>
                                                     )}
                                                 </>
@@ -690,111 +565,62 @@ const JobsManagementPage: React.FC = () => {
     );
   }
 
-  // ==========================================
-  // VIEW MODE: LIST (Unchanged Logic, mostly)
-  // ==========================================
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
-        
-        {/* Header Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-teal-50 text-teal-600 rounded-xl border border-teal-100">
               <ClipboardList className="h-8 w-8" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
-                Jobs Management
-              </h2>
-              <p className="text-gray-500 text-sm mt-1">
-                Overview of Inwards, SRFs, and Customer DCs
-              </p>
+              <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Jobs Management</h2>
+              <p className="text-gray-500 text-sm mt-1">Overview of Inwards, SRFs, and Customer DCs</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate("/engineer")}
-            className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm"
-          >
+          <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm">
             <ArrowLeft size={16} />
             <span>Back to Dashboard</span>
           </button>
         </div>
-
-        {/* Main Content Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
-           
-           {/* Toolbar */}
            <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
               <div className="relative max-w-md w-full">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Search className="h-4 w-4 text-gray-400" />
                   </div>
-                  <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search by SRF or DC No..."
-                      className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-shadow bg-white"
-                  />
+                  <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search by SRF or DC No..." className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-shadow bg-white" />
               </div>
-
               <div className="flex items-center gap-2">
-                  <button
-                      onClick={() => setShowFilters(!showFilters)}
-                      className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg border transition-colors ${
-                          showFilters || filterStartDate || filterEndDate 
-                              ? 'bg-teal-50 border-teal-200 text-teal-700' 
-                              : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                      }`}
-                  >
+                  <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg border transition-colors ${(showFilters || filterStartDate || filterEndDate) ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
                       <Filter className="h-4 w-4" />
                       Filters
                   </button>
               </div>
            </div>
-
-           {/* Expandable Date Filters */}
            {(showFilters || filterStartDate || filterEndDate) && (
               <div className="px-5 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-4 animate-in fade-in slide-in-from-top-2">
                   <div>
                       <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">DC Start Date</label>
-                      <input
-                          type="date"
-                          value={filterStartDate}
-                          onChange={(e) => setFilterStartDate(e.target.value)}
-                          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500"
-                      />
+                      <input type="date" value={filterStartDate} onChange={(e) => setFilterStartDate(e.target.value)} className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500" />
                   </div>
                   <div>
                       <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">DC End Date</label>
-                      <input
-                          type="date"
-                          value={filterEndDate}
-                          onChange={(e) => setFilterEndDate(e.target.value)}
-                          className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500"
-                      />
+                      <input type="date" value={filterEndDate} onChange={(e) => setFilterEndDate(e.target.value)} className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500" />
                   </div>
                   {(filterStartDate || filterEndDate) && (
-                      <button
-                          onClick={() => { setFilterStartDate(""); setFilterEndDate(""); }}
-                          className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1"
-                      >
+                      <button onClick={() => { setFilterStartDate(""); setFilterEndDate(""); }} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1">
                           <X className="h-4 w-4" /> Clear
                       </button>
                   )}
               </div>
            )}
-
            {errorMsg && (
               <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
                   <AlertCircle className="h-5 w-5" />
                   <span>{errorMsg}</span>
               </div>
            )}
-
-           {/* Content Area */}
            <div className="p-4 sm:p-6">
                 {loading ? (
                     <JobListSkeleton />
@@ -804,22 +630,14 @@ const JobsManagementPage: React.FC = () => {
                             <Package className="h-8 w-8 text-gray-300" />
                         </div>
                         <h3 className="text-lg font-medium text-gray-900">No jobs found</h3>
-                        <p className="text-gray-500 mt-1 max-w-sm mx-auto">
-                            No jobs match your current search criteria.
-                        </p>
+                        <p className="text-gray-500 mt-1 max-w-sm mx-auto">No system-driven jobs match your current search criteria.</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
                         {filteredJobs.map((job) => {
                             const config = getStatusConfig(job.status);
-                            const inwardKey = job.inward_id || job.id;
-                            const counts = inwardKey ? jobStatusCountsByInward[inwardKey] : undefined;
                             return (
-                                <div 
-                                    key={job.inward_id || job.id}
-                                    onClick={() => handleOpenJob(job.inward_id || job.id)}
-                                    className="flex items-center justify-between p-5 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer"
-                                >
+                                <div key={job.inward_id} onClick={() => handleOpenJob(job.inward_id)} className="flex items-center justify-between p-5 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer">
                                     <div className="flex items-start gap-4">
                                         <div className="mt-1">
                                             <div className={`p-2 rounded-full ${config.iconBg} ${config.iconText}`}>
@@ -828,26 +646,22 @@ const JobsManagementPage: React.FC = () => {
                                         </div>
                                         <div>
                                             <div className="flex items-center gap-3">
-                                                <p className="font-semibold text-lg text-gray-800">
-                                                    SRF No: {job.srf_no || "N/A"}
-                                                </p>
+                                                <p className="font-semibold text-lg text-gray-800">SRF No: {job.srf_no || "N/A"}</p>
                                             </div>
-                                            <p className="text-sm text-gray-600 mt-1">
-                                                DC: <span className="font-medium text-gray-900">{job.customer_dc_no || "N/A"}</span> — Received on <span className="font-medium text-gray-700">{formatDate(job.customer_dc_date)}</span>
-                                            </p>
-                                            {counts && (
-                                              <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                                <span className="px-2 py-0.5 rounded-full border bg-gray-100 text-gray-700 border-gray-200">
-                                                  Pending: {counts.pending}
-                                                </span>
-                                                <span className="px-2 py-0.5 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
-                                                  In Progress: {counts.in_progress}
-                                                </span>
-                                                <span className="px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">
-                                                  Completed: {counts.completed}
-                                                </span>
-                                              </div>
-                                            )}
+                                            <p className="text-sm text-gray-600 mt-1">DC: <span className="font-medium text-gray-900">{job.customer_dc_no || "N/A"}</span> — Received on <span className="font-medium text-gray-700">{formatDate(job.customer_dc_date)}</span></p>
+                                            
+                                            {/* ✅ COUNTS RENDERED DIRECTLY FROM THE API RESPONSE */}
+                                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                              <span className="px-2 py-0.5 rounded-full border bg-gray-100 text-gray-700 border-gray-200">
+                                                Pending: {job.pending_count}
+                                              </span>
+                                              <span className="px-2 py-0.5 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
+                                                In Progress: {job.in_progress_count}
+                                              </span>
+                                              <span className="px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">
+                                                Completed: {job.completed_count}
+                                              </span>
+                                            </div>
                                         </div>
                                     </div>
                                     <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-colors" />
