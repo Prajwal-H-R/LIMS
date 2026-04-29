@@ -1139,3 +1139,9 @@ class InwardService:
         except Exception as e:
             logger.error(f"Error sending scheduled report for task {task_id}: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to send scheduled report.")
+    def get_equipment_metadata(self, inward_eqp_id: int):
+        # This assumes you have InwardEquipment model imported in the service file
+        from backend.models.inward_equipments import InwardEquipment 
+        return self.db.query(InwardEquipment).filter(
+            InwardEquipment.inward_eqp_id == inward_eqp_id
+        ).first()

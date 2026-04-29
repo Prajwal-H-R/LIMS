@@ -237,7 +237,9 @@ export const ENDPOINTS = {
     DELETE: (id: number) => `/lab-scope/${id}`,
     ACTIVE: `/lab-scope/active`,
   },
-
+EQUIPMENT_FLOW_CONFIGS: {
+      LIST: '/flow-configs', // The path from your FastAPI routes file
+    },
   CERTIFICATES: {
     LIST: `/certificates/`,
     SRF_GROUPS: `/certificates/srf-groups`,

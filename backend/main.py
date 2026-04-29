@@ -56,8 +56,10 @@ from backend.routes.htw.expiry_routes import router as expiry_router
 from backend.routes.lock_router import router as lock_router
 from backend.routes.lab_scope_router import router as lab_scope_router
 from backend.routes.deviation_router import router as deviation_router
-
-
+from backend.routes.equipment_flow import router as equipment_flow
+from backend.routes.external_upload import router as external_upload
+from backend.routes.external_deviation import router as external_deviation
+from backend.routes.external_deviation_attachments import router as external_deviation_attachments
 # --- BACKGROUND TASKS & LIFESPAN ---
 async def automated_daily_maintenance():
     while True:
@@ -140,7 +142,7 @@ app.add_middleware(
 BASE_DIR = Path(__file__).resolve().parent   # backend folder
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 CERT_ASSETS_DIR = BASE_DIR / "certificate_assets"
 CERT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -182,6 +184,10 @@ app.include_router(license_router)
 # Lock Router
 app.include_router(lock_router, prefix="/api")
 app.include_router(deviation_router, prefix="/api")
+app.include_router(equipment_flow, prefix="/api")
+app.include_router(external_upload, prefix="/api")
+app.include_router(external_deviation, prefix="/api")
+app.include_router(external_deviation_attachments, prefix="/api")
 
 
 # --- ROOT ENDPOINT ---

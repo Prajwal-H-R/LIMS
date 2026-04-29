@@ -39,7 +39,16 @@ def create_manual_deviation(
         )
     return created
 
-
+@router.get("/all-staff", response_model=List[CustomerDeviationItem])
+def list_all_deviations_for_staff(
+    db: Session = Depends(get_db),
+    _current_user: UserResponse = Depends(check_staff_role),
+):
+    """
+    Returns a unified list of all OOT and MANUAL deviations from all sources
+    for the staff deviation page.
+    """
+    return svc.list_all_deviations_for_staff(db)
 @router.post("/{deviation_id}/attachments", response_model=DeviationDetailOut)
 async def upload_deviation_attachments(
     deviation_id: int,

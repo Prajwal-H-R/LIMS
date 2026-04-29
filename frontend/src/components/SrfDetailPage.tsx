@@ -80,6 +80,12 @@ interface SrfDetail {
   turnaround_time?: string | null;
   remarks?: string | null;
 }
+
+interface EquipmentFlowConfig {
+  id: number;
+  equipment_type: string;
+  is_active: boolean;
+}
  
 // --- Helper Functions ---
 const generateNeplSrfNo = (srfNo: string | number | undefined): string => {
@@ -105,6 +111,24 @@ const fetchUnitForMakeModel = async (make: string, model: string): Promise<strin
     console.error("Failed to fetch unit", error);
     return '';
   }
+};
+
+/**
+ * High-performance fetcher for equipment configurations.
+ * Returns a Set of lowercase material descriptions for O(1) lookups.
+ */
+const fetchConfiguredEquipmentTypes = async (): Promise<Set<string>> => {
+    try {
+        const response = await api.get<EquipmentFlowConfig[]>(`/flow-configs`);
+        return new Set(
+            response.data
+                .filter(cfg => cfg.is_active)
+                .map(cfg => cfg.equipment_type.toLowerCase().trim())
+        );
+    } catch (error) {
+        console.error("Failed to fetch equipment flow configs", error);
+        return new Set();
+    }
 };
  
 // --- Skeleton Component ---
@@ -157,8 +181,6 @@ export const SrfDetailPage: React.FC = () => {
   const isNewSrfFromUrl = paramSrfId?.startsWith("new-");
   const inwardIdFromUrl = isNewSrfFromUrl ? parseInt(paramSrfId!.split("new-")[1]) : undefined;
  
-  // 1. If creating new: Lock "INWARD" (source) to prevent duplicate creation.
-  // 2. If editing existing: Lock "SRF" (target).
   const lockEntityType = isNewSrfFromUrl ? "INWARD" : "SRF";
   const lockTargetId = isNewSrfFromUrl
     ? inwardIdFromUrl
@@ -169,6 +191,7 @@ export const SrfDetailPage: React.FC = () => {
  
   const [activeSrfId, setActiveSrfId] = useState<number | null>(null);
   const [srfData, setSrfData] = useState<SrfDetail | null>(null);
+  const [configuredTypes, setConfiguredTypes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoSaving, setAutoSaving] = useState(false);
@@ -540,8 +563,14 @@ export const SrfDetailPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await api.get<SrfDetail>(`${ENDPOINTS.SRFS}${id}`, { signal });
-        const data = response.data;
+        // High Performance: Fetch SRF data and Equipment Flow Config in parallel
+        const [srfResponse, configSet] = await Promise.all([
+            api.get<SrfDetail>(`${ENDPOINTS.SRFS}${id}`, { signal }),
+            fetchConfiguredEquipmentTypes()
+        ]);
+
+        setConfiguredTypes(configSet);
+        const data = srfResponse.data;
         const rawData = data as any;
  
         // Populate Equipment Defaults
@@ -609,11 +638,13 @@ export const SrfDetailPage: React.FC = () => {
       setLoading(true);
       const fetchInwardData = async () => {
         try {
-          const response: AxiosResponse<InwardDetail> = await api.get<InwardDetail>(
-            `${ENDPOINTS.STAFF.INWARDS}/${inwardIdFromUrl}`,
-            { signal: controller.signal }
-          );
-          const inward = response.data;
+          const [inwardResponse, configSet] = await Promise.all([
+             api.get<InwardDetail>(`${ENDPOINTS.STAFF.INWARDS}/${inwardIdFromUrl}`, { signal: controller.signal }),
+             fetchConfiguredEquipmentTypes()
+          ]);
+
+          setConfiguredTypes(configSet);
+          const inward = inwardResponse.data;
  
           for (const eq of (inward.equipments || [])) {
             if (!eq.srf_equipment) eq.srf_equipment = {};
@@ -1201,25 +1232,35 @@ export const SrfDetailPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {srfData.inward?.equipments.map((eq) => (
-                    <tr key={eq.inward_eqp_id} className="bg-white border-b hover:bg-blue-50 transition">
-                      <td className="px-4 py-2">{eq.material_description}</td>
-                      <td className="px-4 py-2 font-medium">{eq.model}</td>
-                      <td className="px-4 py-2">{eq.serial_no}</td>
-                      <td className="px-4 py-2">{eq.range}</td>
-                      <td className="px-4 py-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={eq.srf_equipment?.unit || eq.unit || ""}
-                          className="block w-full rounded-lg border-gray-300 px-2 py-1 text-sm bg-gray-50 cursor-not-allowed"
-                          placeholder="Auto-filled from spec"
-                        />
-                      </td>
-                      <td className="px-2 py-1"><input type="text" className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${canEdit ? "bg-white" : "bg-gray-100 cursor-not-allowed"}`} readOnly={!canEdit} value={eq.srf_equipment?.no_of_calibration_points ?? ""} onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "no_of_calibration_points", e.target.value)} /></td>
-                      <td className="px-2 py-1"><input type="text" className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${canEdit ? "bg-white" : "bg-gray-100 cursor-not-allowed"}`} readOnly={!canEdit} value={eq.srf_equipment?.mode_of_calibration || ""} onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "mode_of_calibration", e.target.value)} /></td>
-                    </tr>
-                  ))}
+                  {srfData.inward?.equipments.map((eq) => {
+                    // Logic check: if the material_description is in our configuration set
+                    const isConfigured = configuredTypes.has(eq.material_description.toLowerCase().trim());
+                    // Unit is Read Only if: User cannot edit OR Tool is configured (System Driven)
+                    const isUnitReadOnly = !canEdit || isConfigured;
+
+                    return (
+                        <tr key={eq.inward_eqp_id} className="bg-white border-b hover:bg-blue-50 transition">
+                        <td className="px-4 py-2">{eq.material_description}</td>
+                        <td className="px-4 py-2 font-medium">{eq.model}</td>
+                        <td className="px-4 py-2">{eq.serial_no}</td>
+                        <td className="px-4 py-2">{eq.range}</td>
+                        <td className="px-4 py-2">
+                            <input
+                            type="text"
+                            readOnly={isUnitReadOnly}
+                            value={eq.srf_equipment?.unit || eq.unit || ""}
+                            onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "unit", e.target.value)}
+                            className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${
+                                isUnitReadOnly ? "bg-gray-100 cursor-not-allowed" : "bg-white border-blue-400 focus:ring-2 focus:ring-blue-500"
+                            }`}
+                            placeholder={isConfigured ? "Auto-filled from spec" : "Enter Unit"}
+                            />
+                        </td>
+                        <td className="px-2 py-1"><input type="text" className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${canEdit ? "bg-white" : "bg-gray-100 cursor-not-allowed"}`} readOnly={!canEdit} value={eq.srf_equipment?.no_of_calibration_points ?? ""} onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "no_of_calibration_points", e.target.value)} /></td>
+                        <td className="px-2 py-1"><input type="text" className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${canEdit ? "bg-white" : "bg-gray-100 cursor-not-allowed"}`} readOnly={!canEdit} value={eq.srf_equipment?.mode_of_calibration || ""} onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "mode_of_calibration", e.target.value)} /></td>
+                        </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
