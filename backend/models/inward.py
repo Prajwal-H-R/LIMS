@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .notifications import Notification
     from .delayed_email_tasks import DelayedEmailTask
     # ✅ ADDED: Import HTWJob for type checking
-    from .htw_job import HTWJob 
+    from .htw.htw_job import HTWJob 
 
 
 class Inward(Base):

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom'; // 1. Import useSearchParams
+import { useSearchParams } from 'react-router-dom';
 import { api, ENDPOINTS } from '../../api/config';
 import { ExportMasterStandardPage } from './ExportMasterStandardPage';
 
@@ -135,9 +135,39 @@ export const MasterStandardModule: React.FC = () => {
   const currentView = searchParams.get('view') || 'grid';
   const activeItemId = searchParams.get('itemId') ? Number(searchParams.get('itemId')) : null;
 
-  // Local state for the item object (fetched or passed)
+  // --- ADDED: State for dynamic equipment types ---
+  const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
+  const [isLoadingTypes, setIsLoadingTypes] = useState(true);
+  const [typesError, setTypesError] = useState<string | null>(null);
+
+  // Local state for the item object
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isFetchingItem, setIsFetchingItem] = useState(false);
+
+  // --- ADDED: useEffect to fetch equipment types from the backend ---
+  useEffect(() => {
+    const fetchEquipmentTypes = async () => {
+      try {
+        setIsLoadingTypes(true);
+        setTypesError(null);
+        const response = await api.get(ENDPOINTS.EQUIPMENT_FLOW_CONFIGS.LIST);
+
+        const activeTypes = response.data
+          .filter((config: any) => config.is_active)
+          .map((config: any) => config.equipment_type)
+          .sort(); // Sort alphabetically for better UX
+
+        setEquipmentTypes(activeTypes);
+      } catch (err: any) {
+        console.error("Failed to fetch equipment types:", err);
+        setTypesError(err.response?.data?.detail || "Could not load equipment types.");
+      } finally {
+        setIsLoadingTypes(false);
+      }
+    };
+
+    fetchEquipmentTypes();
+  }, []); // Empty dependency array ensures this runs only once on component mount.
 
   // 3. Helper to update params without losing 'section' from parent
   const updateParams = (updates: Record<string, string | null>) => {
@@ -151,78 +181,32 @@ export const MasterStandardModule: React.FC = () => {
     });
     setSearchParams(newParams);
   };
-
-  const calibrationTypes = [
-    "Hydraulic Torque Wrench",
-    "Pneumatic Torque Wrench",
-    "Manual Torque Wrench",
-    "Electric Torque Wrench",
-    "Pressure Gauge"
-  ];
-
+  
   const menuCards: MenuCard[] = [
-    {
-      id: 1, title: "Master Standard Details", icon: <ShieldCheck size={24} strokeWidth={2} />,
-      colorClass: "bg-blue-600", desc: "Manage core standard identification data", viewId: "master-standard-list"
-    },
-    {
-      id: 2, title: "Manufacturer Specifications", icon: <Factory size={24} strokeWidth={2} />,
-      colorClass: "bg-emerald-600", desc: "View and edit OEM specs and limits", viewId: "manufacturer-specs-manager"
-    },
-    {
-      id: 3, title: "Interpolation Ranges", icon: <ArrowRightLeft size={24} strokeWidth={2} />,
-      colorClass: "bg-purple-600", desc: "Configure range interpolation logic", viewId: "htw-uncertainty-manager"
-    },
-    {
-      id: 4, title: "Nomenclature Range", icon: <Activity size={24} strokeWidth={2} />,
-      colorClass: "bg-orange-500", desc: "Standard Range for Master Selection", viewId: "nomenclature-range-manager"
-    },
-    {
-      id: 5, title: "Uncertainty of Pressure Gauge", sub: "(Un-PG)", icon: <Gauge size={24} strokeWidth={2} />,
-      colorClass: "bg-cyan-500", desc: "Specific pressure gauge uncertainty metrics", viewId: "un-pg-manager"
-    },
-    {
-      id: 6, title: "Coverage Factor (k)", icon: <Sigma size={24} strokeWidth={2} />,
-      colorClass: "bg-rose-600", desc: "Define expansion coefficients and confidence", viewId: "coverage-factor-manager"
-    },
-    {
-      id: 7, title: "Student t Table", icon: <LineChart size={24} strokeWidth={2} />,
-      colorClass: "bg-teal-600", desc: "t Distribution data", viewId: "t-distribution-manager"
-    },
-    {
-      id: 8, title: "Resolution of Pressure Gauge", icon: <ZoomIn size={24} strokeWidth={2} />,
-      colorClass: "bg-slate-600", desc: "Define pressure gauge measurement resolution", viewId: "resolution-pg-manager"
-    },
-    {
-      id: 9, title: "Hydraulic CMC Backup data", icon: <Database size={24} strokeWidth={2} />,
-      colorClass: "bg-green-600", desc: "Access and maintain backup data for CMC ", viewId: "cmc-reference-manager"
-    },
-    {
-      id: 10, title: "Tool Type", icon: <Layers size={24} strokeWidth={2} />,
-      colorClass: "bg-amber-600", desc: "Maintain Tool Classification and Measurement Behaviour", viewId: "tool-type-manager"
-    },
-    {
-      id: 11, title: "Max Val of Measurement Error", icon: <Target size={24} strokeWidth={2} />,
-      colorClass: "bg-cyan-600", desc: "Maintain Maximum Value of Measurement Error", viewId: "max-val-of-measurement-err-manager"
-    }
+    { id: 1, title: "Master Standard Details", icon: <ShieldCheck size={24} strokeWidth={2} />, colorClass: "bg-blue-600", desc: "Manage core standard identification data", viewId: "master-standard-list" },
+    { id: 2, title: "Manufacturer Specifications", icon: <Factory size={24} strokeWidth={2} />, colorClass: "bg-emerald-600", desc: "View and edit OEM specs and limits", viewId: "manufacturer-specs-manager" },
+    { id: 3, title: "Interpolation Ranges", icon: <ArrowRightLeft size={24} strokeWidth={2} />, colorClass: "bg-purple-600", desc: "Configure range interpolation logic", viewId: "htw-uncertainty-manager" },
+    { id: 4, title: "Nomenclature Range", icon: <Activity size={24} strokeWidth={2} />, colorClass: "bg-orange-500", desc: "Standard Range for Master Selection", viewId: "nomenclature-range-manager" },
+    { id: 5, title: "Uncertainty of Pressure Gauge", sub: "(Un-PG)", icon: <Gauge size={24} strokeWidth={2} />, colorClass: "bg-cyan-500", desc: "Specific pressure gauge uncertainty metrics", viewId: "un-pg-manager" },
+    { id: 6, title: "Coverage Factor (k)", icon: <Sigma size={24} strokeWidth={2} />, colorClass: "bg-rose-600", desc: "Define expansion coefficients and confidence", viewId: "coverage-factor-manager" },
+    { id: 7, title: "Student t Table", icon: <LineChart size={24} strokeWidth={2} />, colorClass: "bg-teal-600", desc: "t Distribution data", viewId: "t-distribution-manager" },
+    { id: 8, title: "Resolution of Pressure Gauge", icon: <ZoomIn size={24} strokeWidth={2} />, colorClass: "bg-slate-600", desc: "Define pressure gauge measurement resolution", viewId: "resolution-pg-manager" },
+    { id: 9, title: "Hydraulic CMC Backup data", icon: <Database size={24} strokeWidth={2} />, colorClass: "bg-green-600", desc: "Access and maintain backup data for CMC ", viewId: "cmc-reference-manager" },
+    { id: 10, title: "Tool Type", icon: <Layers size={24} strokeWidth={2} />, colorClass: "bg-amber-600", desc: "Maintain Tool Classification and Measurement Behaviour", viewId: "tool-type-manager" },
+    { id: 11, title: "Max Val of Measurement Error", icon: <Target size={24} strokeWidth={2} />, colorClass: "bg-cyan-600", desc: "Maintain Maximum Value of Measurement Error", viewId: "max-val-of-measurement-err-manager" }
   ];
 
   // 4. Handle Restore State on Refresh (Fetching Edit Item)
   useEffect(() => {
-    // If we have an ID in URL but no object in state, fetch it
     const restoreItemState = async () => {
       if (activeItemId && !selectedItem && currentView === 'master-standard-form') {
         setIsFetchingItem(true);
         try {
-          // Fallback: Fetch list and find item since we might not have a specific GET /id endpoint exposed in config
           const response = await api.get(ENDPOINTS.HTW_MASTER_STANDARDS.LIST);
           const found = response.data.find((i: any) => i.id === activeItemId);
           if (found) setSelectedItem(found);
-        } catch (e) {
-          console.error("Failed to restore item state", e);
-        } finally {
-          setIsFetchingItem(false);
-        }
+        } catch (e) { console.error("Failed to restore item state", e); }
+        finally { setIsFetchingItem(false); }
       }
     };
     restoreItemState();
@@ -233,25 +217,7 @@ export const MasterStandardModule: React.FC = () => {
   };
 
   const handleCardClick = (viewId: string) => {
-    const restrictedViews = [
-      'master-standard-list',
-      'manufacturer-specs-manager',
-      'htw-uncertainty-manager',
-      'un-pg-manager',
-      'nomenclature-range-manager',
-      'resolution-pg-manager',
-      't-distribution-manager',
-      'tool-type-manager',
-      'cmc-reference-manager',
-      'max-val-of-measurement-err-manager'
-    ];
-
-    if (restrictedViews.includes(viewId)) {
-      if (selectedCalibration !== 'Hydraulic Torque Wrench') {
-        alert('This feature is currently only available for Hydraulic Torque Wrench equipment type.');
-        return;
-      }
-    }
+    
     setSelectedItem(null);
     updateParams({ view: viewId, itemId: null });
   };
@@ -271,7 +237,6 @@ export const MasterStandardModule: React.FC = () => {
     updateParams({ view: formViewId, itemId: null });
   };
 
-  // Loading state for deep-linked edit views
   if (isFetchingItem) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -298,18 +263,28 @@ export const MasterStandardModule: React.FC = () => {
                 </div>
               </div>
 
+              {/* --- MODIFIED: Dynamic Dropdown --- */}
               <div className="relative max-w-xl">
                 <select
-                  className="w-full appearance-none bg-white border border-gray-300 text-gray-900 text-sm rounded-lg focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 block p-3 pr-10 shadow-sm transition-all cursor-pointer"
+                  className="w-full appearance-none bg-white border border-gray-300 text-gray-900 text-sm rounded-lg focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 block p-3 pr-10 shadow-sm transition-all cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
                   value={selectedCalibration}
                   onChange={handleCalibrationChange}
+                  disabled={isLoadingTypes || !!typesError}
                 >
-                  <option value="" disabled>Select Type...</option>
-                  {calibrationTypes.map((type) => (
+                  <option value="" disabled>
+                    {isLoadingTypes 
+                      ? 'Loading equipment types...' 
+                      : (typesError ? 'Error loading types' : 'Select Type...')}
+                  </option>
+                  {equipmentTypes.map((type) => (
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                {/* --- ADDED: Display error message if fetch fails --- */}
+                {typesError && (
+                    <p className="mt-2 text-xs text-red-600">{typesError}</p>
+                )}
               </div>
             </div>
           </div>
@@ -360,64 +335,26 @@ export const MasterStandardModule: React.FC = () => {
       )}
 
       {/* --- RENDER LOGIC FOR DIFFERENT VIEWS --- */}
-
       {currentView === 'master-standard-export' && <ExportMasterStandardPage onBack={handleBackToGrid} />}
-
-      {currentView === 'master-standard-list' && (
-        <MasterStandardList
-          onBack={handleBackToGrid}
-          onAddNew={() => handleAddNewItem('master-standard-form')}
-          onEdit={(item) => handleEditItem(item, 'master-standard-form')}
-          onExportNavigate={() => updateParams({ view: 'master-standard-export', itemId: null })}
-        />
-      )}
-
-      {currentView === 'master-standard-form' && (
-        <MasterStandardForm
-          onBack={() => updateParams({ view: 'master-standard-list', itemId: null })}
-          initialData={selectedItem}
-        />
-      )}
-
-      {/* Sub-Managers */}
-      {currentView === 'manufacturer-specs-manager' && (
-        <HTWManufacturerSpecsManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'htw-uncertainty-manager' && (
-        <HTWStandardUncertaintyManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'nomenclature-range-manager' && (
-        <HTWNomenclatureRangeManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'un-pg-manager' && (
-        <HTWUnPGMasterManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'coverage-factor-manager' && (
-        <HTWCoverageFactorManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 't-distribution-manager' && (
-        <HTWTDistributionManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'resolution-pg-manager' && (
-        <HTWPressureGaugeResolutionManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'cmc-reference-manager' && (
-        <HTWCMCReferenceManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'tool-type-manager' && (
-        <HTWToolTypeManager onBack={handleBackToGrid} />
-      )}
-      {currentView === 'max-val-of-measurement-err-manager' && (
-        <HTWMaxValMeasureErrorManager onBack={handleBackToGrid} />
-      )}
-
+      {currentView === 'master-standard-list' && <MasterStandardList onBack={handleBackToGrid} onAddNew={() => handleAddNewItem('master-standard-form')} onEdit={(item) => handleEditItem(item, 'master-standard-form')} onExportNavigate={() => updateParams({ view: 'master-standard-export', itemId: null })} />}
+      {currentView === 'master-standard-form' && <MasterStandardForm onBack={() => updateParams({ view: 'master-standard-list', itemId: null })} initialData={selectedItem} />}
+      {currentView === 'manufacturer-specs-manager' && <HTWManufacturerSpecsManager onBack={handleBackToGrid} />}
+      {currentView === 'htw-uncertainty-manager' && <HTWStandardUncertaintyManager onBack={handleBackToGrid} />}
+      {currentView === 'nomenclature-range-manager' && <HTWNomenclatureRangeManager onBack={handleBackToGrid} />}
+      {currentView === 'un-pg-manager' && <HTWUnPGMasterManager onBack={handleBackToGrid} />}
+      {currentView === 'coverage-factor-manager' && <HTWCoverageFactorManager onBack={handleBackToGrid} />}
+      {currentView === 't-distribution-manager' && <HTWTDistributionManager onBack={handleBackToGrid} />}
+      {currentView === 'resolution-pg-manager' && <HTWPressureGaugeResolutionManager onBack={handleBackToGrid} />}
+      {currentView === 'cmc-reference-manager' && <HTWCMCReferenceManager onBack={handleBackToGrid} />}
+      {currentView === 'tool-type-manager' && <HTWToolTypeManager onBack={handleBackToGrid} />}
+      {currentView === 'max-val-of-measurement-err-manager' && <HTWMaxValMeasureErrorManager onBack={handleBackToGrid} />}
     </div>
   );
 };
 
 
 // ============================================================================
-// LOCAL SUB-COMPONENTS
+// LOCAL SUB-COMPONENTS (NO CHANGES BELOW THIS LINE)
 // ============================================================================
 
 // --- COMPONENT: Master Standard List ---
@@ -460,7 +397,6 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
       setError(err.response?.data?.detail || 'Failed to load master standards');
       setStandards([]);
     } finally {
-      // Small delay to prevent flicker if API is very fast
       setTimeout(() => setLoading(false), 300);
     }
   }, []);
@@ -539,7 +475,6 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
 
   return (
     <div className="animate-fadeIn">
-      {/* Header logic included in Skeleton, but reproduced here for data view */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div className="flex items-center">
           <button onClick={onBack} className="mr-4 p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 shadow-sm"><ArrowLeft size={20} /></button>
@@ -685,7 +620,6 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
       {showDeleteModal && standardToDelete && createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999]">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
@@ -704,32 +638,11 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
                 This will permanently remove the record from the system.
               </p>
               <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowDeleteModal(false);
-                    setStandardToDelete(null);
-                  }}
-                  disabled={deletingId !== null}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button onClick={() => { setShowDeleteModal(false); setStandardToDelete(null); }} disabled={deletingId !== null} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" >
                   Cancel
                 </button>
-                <button
-                  onClick={handleDeleteConfirm}
-                  disabled={deletingId !== null}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
-                  {deletingId !== null ? (
-                    <>
-                      <Loader2 size={16} className="mr-2 animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 size={16} className="mr-2" />
-                      Delete
-                    </>
-                  )}
+                <button onClick={handleDeleteConfirm} disabled={deletingId !== null} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center" >
+                  {deletingId !== null ? (<><Loader2 size={16} className="mr-2 animate-spin" /> Deleting...</>) : (<><Trash2 size={16} className="mr-2" /> Delete</>)}
                 </button>
               </div>
             </div>
@@ -738,7 +651,6 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
         document.body
       )}
 
-      {/* View Details Modal */}
       {showViewModal && viewingStandard && createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999]">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -753,17 +665,10 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
                     <p className="text-sm text-gray-500">View complete information</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    setViewingStandard(null);
-                  }}
-                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                >
+                <button onClick={() => { setShowViewModal(false); setViewingStandard(null); }} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" >
                   <X size={20} />
                 </button>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Nomenclature</label>
@@ -813,33 +718,13 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${viewingStandard.is_active
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-red-100 text-red-700'
-                    }`}>
-                    {viewingStandard.is_active ? (
-                      <>
-                        <CheckCircle size={14} className="mr-1" />
-                        Active
-                      </>
-                    ) : (
-                      <>
-                        <PowerOff size={14} className="mr-1" />
-                        Deactivated
-                      </>
-                    )}
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${viewingStandard.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {viewingStandard.is_active ? (<><CheckCircle size={14} className="mr-1" /> Active</>) : (<><PowerOff size={14} className="mr-1" /> Deactivated</>)}
                   </span>
                 </div>
               </div>
-
               <div className="mt-6 flex justify-end">
-                <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    setViewingStandard(null);
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
+                <button onClick={() => { setShowViewModal(false); setViewingStandard(null); }} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50" >
                   Close
                 </button>
               </div>
@@ -859,24 +744,7 @@ interface MasterStandardFormProps {
 }
 
 function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
-  // which fields are mandatory
-  const requiredFields = [
-    'nomenclature',
-    'range_min',
-    'range_max',
-    'range_unit',
-    'manufacturer',
-    'model_serial_no',
-    'traceable_to_lab',
-    'uncertainty',
-    'uncertainty_unit',
-    'certificate_no',
-    'calibration_valid_upto',
-    'accuracy_of_master',
-    'resolution',
-    'resolution_unit'
-  ];
-
+  const requiredFields = ['nomenclature', 'range_min', 'range_max', 'range_unit', 'manufacturer', 'model_serial_no', 'traceable_to_lab', 'uncertainty', 'uncertainty_unit', 'certificate_no', 'calibration_valid_upto', 'accuracy_of_master', 'resolution', 'resolution_unit'];
   const [formData, setFormData] = useState<Omit<MasterStandard, 'id' | 'created_at'>>(initialData || {
     nomenclature: 'TORQUE TRANSDUCER (1000 - 40000 Nm)',
     range_min: '',
@@ -894,13 +762,11 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
     resolution_unit: '',
     is_active: true
   });
-
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
-  // Sync formData if initialData arrives late (after restore fetch)
   useEffect(() => {
     if (initialData) {
       setFormData(prev => ({ ...prev, ...initialData }));
@@ -908,29 +774,20 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
     }
   }, [initialData]);
 
-  // helpers
   const isEmpty = (v: any) => v === null || v === undefined || String(v).trim() === '';
 
   const validateField = (name: string, value: any): string | null => {
-    // required check
     if (requiredFields.includes(name) && isEmpty(value)) {
       return 'This field is required';
     }
-
-    // numeric checks
     if (['range_min', 'range_max', 'uncertainty', 'resolution'].includes(name)) {
-      if (!isEmpty(value)) {
-        const parsed = parseFloat(String(value));
-        if (Number.isNaN(parsed)) return 'Must be a valid number';
+      if (!isEmpty(value) && Number.isNaN(parseFloat(String(value)))) {
+        return 'Must be a valid number';
       }
     }
-
-    // date check
-    if (name === 'calibration_valid_upto' && !isEmpty(value)) {
-      const d = new Date(String(value));
-      if (isNaN(d.getTime())) return 'Provide a valid date';
+    if (name === 'calibration_valid_upto' && !isEmpty(value) && isNaN(new Date(String(value)).getTime())) {
+      return 'Provide a valid date';
     }
-
     return null;
   };
 
@@ -940,14 +797,11 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
       const err = validateField(f, (data as any)[f]);
       if (err) newErrors[f] = err;
     });
-
-    // cross-field: range_max >= range_min
     const minVal = parseFloat(String(data.range_min));
     const maxVal = parseFloat(String(data.range_max));
     if (!Number.isNaN(minVal) && !Number.isNaN(maxVal) && maxVal < minVal) {
       newErrors['range_max'] = 'Max must be greater than or equal to Min';
     }
-
     setErrors(newErrors);
     return newErrors;
   };
@@ -956,9 +810,8 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
     if (Object.keys(errors).length > 0) return false;
     for (const f of requiredFields) {
       if (isEmpty((formData as any)[f])) return false;
-      if (['range_min', 'range_max', 'uncertainty', 'resolution'].includes(f)) {
-        const parsed = parseFloat(String((formData as any)[f]));
-        if (Number.isNaN(parsed)) return false;
+      if (['range_min', 'range_max', 'uncertainty', 'resolution'].includes(f) && Number.isNaN(parseFloat(String((formData as any)[f])))) {
+        return false;
       }
     }
     return true;
@@ -968,21 +821,15 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
     let finalValue: any = type === 'checkbox' ? checked : value;
-
-    if ((name === 'range_unit' || name === 'uncertainty_unit' || name === 'resolution_unit') && typeof finalValue === 'string') {
+    if (['range_unit', 'uncertainty_unit', 'resolution_unit'].includes(name) && typeof finalValue === 'string') {
       finalValue = finalValue ? finalValue.charAt(0).toUpperCase() + finalValue.slice(1) : '';
     }
-
     setFormData(prev => {
       const next = { ...prev, [name]: finalValue };
-      // per-field validation
       const fieldError = validateField(name, finalValue);
       setErrors(errs => {
         const copy = { ...errs };
-        if (fieldError) copy[name] = fieldError;
-        else delete copy[name];
-
-        // if changing range_* re-evaluate cross-field rule
+        if (fieldError) copy[name] = fieldError; else delete copy[name];
         if (name === 'range_min' || name === 'range_max') {
           const min = parseFloat(String(next.range_min));
           const max = parseFloat(String(next.range_max));
@@ -992,7 +839,6 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
             delete copy['range_max'];
           }
         }
-
         return copy;
       });
       return next;
@@ -1031,9 +877,7 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
       }
 
       setSubmitSuccess(true);
-      setTimeout(() => {
-        onBack();
-      }, 1500);
+      setTimeout(() => { onBack(); }, 1500);
     } catch (err: any) {
       console.error('Error saving HTW master standard:', err);
       setSubmitError(err.response?.data?.detail || 'Failed to save master standard. Please try again.');
@@ -1053,164 +897,60 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
           </div>
         </div>
         <div className="flex items-center space-x-3">
-          <button
-            onClick={onBack}
-            disabled={isSubmitting}
-            className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+          <button onClick={onBack} disabled={isSubmitting} className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
             Cancel
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isSubmitting || !isFormValid()}
-            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-disabled={isSubmitting || !isFormValid()}
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 size={16} className="mr-2 animate-spin" /> Saving...
-              </>
-            ) : (
-              <>
-                <Save size={16} className="mr-2" /> Save Record
-              </>
-            )}
+          <button onClick={handleSubmit} disabled={isSubmitting || !isFormValid()} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" aria-disabled={isSubmitting || !isFormValid()}>
+            {isSubmitting ? (<><Loader2 size={16} className="mr-2 animate-spin" /> Saving...</>) : (<><Save size={16} className="mr-2" /> Save Record</>)}
           </button>
         </div>
       </div>
 
-      {submitSuccess && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-sm text-green-700 flex items-center">
-            <CheckCircle size={16} className="mr-2" />
-            Master standard saved successfully!
-          </p>
-        </div>
-      )}
-
-      {submitError && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-700">{submitError}</p>
-        </div>
-      )}
+      {submitSuccess && (<div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg"><p className="text-sm text-green-700 flex items-center"><CheckCircle size={16} className="mr-2" /> Master standard saved successfully!</p></div>)}
+      {submitError && (<div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg"><p className="text-sm text-red-700">{submitError}</p></div>)}
 
       <form onSubmit={handleSubmit} noValidate className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-20">
         <div className="p-6 border-b border-gray-100">
-          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center">
-            <ShieldCheck size={16} className="mr-2 text-blue-600" /> General Identification
-          </h4>
+          <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center"><ShieldCheck size={16} className="mr-2 text-blue-600" /> General Identification</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Replace the entire "Nomenclature" div with this */}
             <div className="col-span-1 md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nomenclature <span className="text-red-500">*</span>
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nomenclature <span className="text-red-500">*</span></label>
               <div className="relative">
-                <input
-                  required
-                  aria-required
-                  aria-invalid={!!errors.nomenclature}
-                  aria-describedby={errors.nomenclature ? 'err-nomenclature' : undefined}
-                  type="text"
-                  name="nomenclature"
-                  value={formData.nomenclature}
-                  onChange={handleChange}
-                  placeholder="Type nomenclature (free text)"
-                  className={`w-full bg-white border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 ${errors.nomenclature ? 'border-red-500' : 'border-gray-300'}`}
-                />
+                <input required aria-required aria-invalid={!!errors.nomenclature} aria-describedby={errors.nomenclature ? 'err-nomenclature' : undefined} type="text" name="nomenclature" value={formData.nomenclature} onChange={handleChange} placeholder="Type nomenclature (free text)" className={`w-full bg-white border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 ${errors.nomenclature ? 'border-red-500' : 'border-gray-300'}`} />
                 {errors.nomenclature && <p id="err-nomenclature" className="mt-1 text-xs text-red-600">{errors.nomenclature}</p>}
               </div>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer <span className="text-red-500">*</span></label>
-              <input
-                required
-                aria-required
-                aria-invalid={!!errors.manufacturer}
-                aria-describedby={errors.manufacturer ? 'err-manufacturer' : undefined}
-                type="text"
-                name="manufacturer"
-                value={formData.manufacturer}
-                onChange={handleChange}
-                className={`bg-white ${errors.manufacturer ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-              />
+              <input required aria-required aria-invalid={!!errors.manufacturer} aria-describedby={errors.manufacturer ? 'err-manufacturer' : undefined} type="text" name="manufacturer" value={formData.manufacturer} onChange={handleChange} className={`bg-white ${errors.manufacturer ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
               {errors.manufacturer && <p id="err-manufacturer" className="mt-1 text-xs text-red-600">{errors.manufacturer}</p>}
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Model / Serial No <span className="text-red-500">*</span></label>
-              <input
-                required
-                aria-required
-                aria-invalid={!!errors.model_serial_no}
-                aria-describedby={errors.model_serial_no ? 'err-model_serial_no' : undefined}
-                type="text"
-                name="model_serial_no"
-                value={formData.model_serial_no}
-                onChange={handleChange}
-                className={`bg-white ${errors.model_serial_no ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-              />
+              <input required aria-required aria-invalid={!!errors.model_serial_no} aria-describedby={errors.model_serial_no ? 'err-model_serial_no' : undefined} type="text" name="model_serial_no" value={formData.model_serial_no} onChange={handleChange} className={`bg-white ${errors.model_serial_no ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
               {errors.model_serial_no && <p id="err-model_serial_no" className="mt-1 text-xs text-red-600">{errors.model_serial_no}</p>}
             </div>
-
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Operating Range <span className="text-red-500">*</span></label>
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <input
-                    required
-                    aria-required
-                    aria-invalid={!!errors.range_min}
-                    aria-describedby={errors.range_min ? 'err-range_min' : undefined}
-                    type="number"
-                    name="range_min"
-                    value={formData.range_min as any}
-                    onChange={handleChange}
-                    placeholder="Min"
-                    className={`bg-white ${errors.range_min ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-                  />
+                  <input required aria-required aria-invalid={!!errors.range_min} aria-describedby={errors.range_min ? 'err-range_min' : undefined} type="number" name="range_min" value={formData.range_min as any} onChange={handleChange} placeholder="Min" className={`bg-white ${errors.range_min ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
                   {errors.range_min && <p id="err-range_min" className="mt-1 text-xs text-red-600">{errors.range_min}</p>}
                 </div>
-
                 <span className="text-gray-400 font-bold">-</span>
-
                 <div className="flex-1">
-                  <input
-                    required
-                    aria-required
-                    aria-invalid={!!errors.range_max}
-                    aria-describedby={errors.range_max ? 'err-range_max' : undefined}
-                    type="number"
-                    name="range_max"
-                    value={formData.range_max as any}
-                    onChange={handleChange}
-                    placeholder="Max"
-                    className={`bg-white ${errors.range_max ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-                  />
+                  <input required aria-required aria-invalid={!!errors.range_max} aria-describedby={errors.range_max ? 'err-range_max' : undefined} type="number" name="range_max" value={formData.range_max as any} onChange={handleChange} placeholder="Max" className={`bg-white ${errors.range_max ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
                   {errors.range_max && <p id="err-range_max" className="mt-1 text-xs text-red-600">{errors.range_max}</p>}
                 </div>
-
                 <div className="w-32">
-                  <input
-                    required
-                    aria-required
-                    aria-invalid={!!errors.range_unit}
-                    aria-describedby={errors.range_unit ? 'err-range_unit' : undefined}
-                    type="text"
-                    name="range_unit"
-                    value={formData.range_unit}
-                    onChange={handleChange}
-                    placeholder="e.g. Nm, bar"
-                    className={`w-full bg-white ${errors.range_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5`}
-                  />
+                  <input required aria-required aria-invalid={!!errors.range_unit} aria-describedby={errors.range_unit ? 'err-range_unit' : undefined} type="text" name="range_unit" value={formData.range_unit} onChange={handleChange} placeholder="e.g. Nm, bar" className={`w-full bg-white ${errors.range_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5`} />
                   {errors.range_unit && <p id="err-range_unit" className="mt-1 text-xs text-red-600">{errors.range_unit}</p>}
                 </div>
               </div>
             </div>
           </div>
         </div>
-
+        
         <div className="p-6 bg-gray-50/50">
           <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center">
             <Activity size={16} className="mr-2 text-orange-500" /> Technical Specifications

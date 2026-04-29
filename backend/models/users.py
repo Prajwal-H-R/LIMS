@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     # --- ADD THIS IMPORT ---
     # This is needed for the new relationship's type hint
     from .delayed_email_tasks import DelayedEmailTask
-
+    from .external_deviation import ExternalDeviation
 
 class User(Base):
     """SQLAlchemy 2.0 model for the users table."""
@@ -94,5 +94,10 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
+    created_deviations: Mapped[List["ExternalDeviation"]] = relationship(
+    "ExternalDeviation",
+    back_populates="creator",
+    foreign_keys="[ExternalDeviation.created_by]"
+)
     def __repr__(self) -> str:
         return f"User(id={self.user_id}, username='{self.username}', role='{self.role}')"

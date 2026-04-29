@@ -15,6 +15,7 @@ from backend.db import get_db
 # ------------------------------------------------------------------
 # ✅ IMPORT Inward (Removed InwardEquipment as it is no longer used here)
 from backend.models.inward import Inward
+from backend.models.inward_equipments import InwardEquipment
 # ✅ IMPORT HTWJob
 from backend.models.htw.htw_job import HTWJob 
 # ------------------------------------------------------------------
@@ -498,3 +499,28 @@ async def update_inward(
     )
     
     return updated_inward
+
+@router.get("/equipment-metadata/{inward_eqp_id}")
+async def get_equipment_metadata(
+    inward_eqp_id: int, 
+    db: Session = Depends(get_db),
+    current_user: UserSchema = Depends(get_current_user)
+):
+    """
+    Fetches Make, Model, Serial No, and Range for a specific equipment 
+    from the inward_equipments table.
+    """
+    eqp = InwardService(db).get_equipment_metadata(inward_eqp_id)
+    if not eqp:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    
+    return {
+        "inward_eqp_id": eqp.inward_eqp_id,
+        "material_description": eqp.material_description,
+        "make": eqp.make,
+        "model": eqp.model,
+        "serial_no": eqp.serial_no,
+        "range": eqp.range,
+        "nepl_id": eqp.nepl_id,
+        "material_description": eqp.material_description
+    }
