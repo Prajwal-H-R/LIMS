@@ -10,8 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.models.deviation import Deviation
 from backend.models.deviation_attachments import DeviationAttachment
-# NEW: Import the ExternalDeviation model
-from backend.models.external_deviation import ExternalDeviation
+from backend.models.external_deviation import ExternalDeviation, ExternalDeviationAttachment
 from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 from backend.models.htw.htw_job import HTWJob
@@ -30,17 +29,12 @@ DEVIATION_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def safe_bytes_encoder(obj: bytes):
     try:
-        # Try to decode normally (for strings sent as bytes)
         return obj.decode("utf-8")
     except UnicodeDecodeError:
-        # If it's an image/binary, return a descriptive string instead of crashing
         return f"<{len(obj)} bytes binary data>"
 
-# Override the default FastAPI encoder for 'bytes' type
 fastapi.encoders.ENCODERS_BY_TYPE[bytes] = safe_bytes_encoder
 def _derive_deviation_type(d: Deviation) -> str:
-    # OOT rows are system-created from HTW calculations.
-    # Manual deviations may also carry job_id, so created_by differentiates source.
     if d.job_id is not None and d.created_by is None:
         return "OOT"
     return "MANUAL"
@@ -189,7 +183,6 @@ def _row_to_customer_item(
     )
 
 
-# NEW: Helper function to transform ExternalDeviation records to the common schema
 def _external_row_to_customer_item(
     d: ExternalDeviation,
     eq: InwardEquipment,
@@ -198,10 +191,6 @@ def _external_row_to_customer_item(
     customer_dc_date: Optional[str],
     inward_id: int,
 ) -> CustomerDeviationItem:
-    """
-    Transforms an ExternalDeviation ORM object into a CustomerDeviationItem schema object.
-    It maps fields and derives others to match the unified deviation list format.
-    """
     deviation_type = "MANUAL" if d.deviation_type == "NC" else "OOT"
     status = "IN_PROGRESS" if d.customer_decision else "OPEN"
     calibration_status = "calibrated" if deviation_type == "OOT" else "not calibrated"
@@ -263,12 +252,6 @@ def _get_oot_steps_for_job(db: Session, job_id: Optional[int]) -> List[HTWRepeat
 
 
 def _collapse_manual_items(items: List[CustomerDeviationItem]) -> List[CustomerDeviationItem]:
-    """
-    Keep a single MANUAL deviation row per equipment for listing UIs.
-    Preference:
-    1) Active manual rows (OPEN/IN_PROGRESS) over CLOSED rows.
-    2) Newer rows over older rows.
-    """
     by_eqp: Dict[int, CustomerDeviationItem] = {}
     for item in items:
         key = item.inward_eqp_id
@@ -293,7 +276,6 @@ def _collapse_manual_items(items: List[CustomerDeviationItem]) -> List[CustomerD
         item_id = abs(item.deviation_id or 0)
         current_id = abs(current.deviation_id or 0)
 
-        # Prioritize original deviation table if timestamps are identical
         item_is_external = (item.deviation_id or 0) < 0
         current_is_external = (current.deviation_id or 0) < 0
 
@@ -301,7 +283,7 @@ def _collapse_manual_items(items: List[CustomerDeviationItem]) -> List[CustomerD
             if item_is_external == current_is_external:
                 if item_id > current_id:
                      by_eqp[key] = item
-            elif not item_is_external: # Prefer original table over external
+            elif not item_is_external:
                  by_eqp[key] = item
 
     return sorted(
@@ -315,7 +297,6 @@ def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
     
     all_items: List[CustomerDeviationItem] = []
 
-    # 1. Fetch from the original 'deviation' table
     rows = (
         db.query(
             Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -331,7 +312,6 @@ def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
             changed = True
     if changed:
         db.commit()
-        # Need to re-fetch to get updated data after commit
         rows = (
             db.query(
                 Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -351,7 +331,6 @@ def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
             )
         )
 
-    # 2. Fetch from the new 'external_deviation' table
     external_rows = (
         db.query(
             ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -366,7 +345,6 @@ def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
             _external_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id)
         )
 
-    # 3. Merge, collapse, and sort the combined list
     manual_items = [i for i in all_items if (i.deviation_type or "").upper() == "MANUAL"]
     non_manual_items = [i for i in all_items if (i.deviation_type or "").upper() != "MANUAL"]
     collapsed_manual = _collapse_manual_items(manual_items)
@@ -377,13 +355,11 @@ def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
         key=lambda x: (x.created_at or datetime.min.replace(tzinfo=timezone.utc)),
         reverse=True,
     )
-# MODIFIED: This function now merges data from both deviation tables for the customer view.
 def list_deviations_for_customer(db: Session, customer_id: int) -> List[CustomerDeviationItem]:
     _sync_legacy_deviation_statuses(db)
     
     all_items: List[CustomerDeviationItem] = []
 
-    # 1. Fetch from the original 'deviation' table
     rows = (
         db.query(
             Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -410,7 +386,6 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
             )
         )
 
-    # 2. Fetch from the new 'external_deviation' table
     external_rows = (
         db.query(
             ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -426,7 +401,6 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
             _external_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id)
         )
 
-    # 3. Merge, collapse, and sort the combined list
     manual_items = [i for i in all_items if (i.deviation_type or "").upper() == "MANUAL"]
     non_manual_items = [i for i in all_items if (i.deviation_type or "").upper() != "MANUAL"]
     collapsed_manual = _collapse_manual_items(manual_items)
@@ -445,7 +419,6 @@ def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]
     
     manual_items: List[CustomerDeviationItem] = []
 
-    # 1. Fetch 'MANUAL' types from the original 'deviation' table
     rows = (
         db.query(
             Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -476,7 +449,6 @@ def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]
             )
         )
 
-    # 2. Fetch 'NC' types from the new 'external_deviation' table
     external_rows = (
         db.query(
             ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -493,7 +465,6 @@ def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]
             _external_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id)
         )
     
-    # 3. Collapse the combined list of all manual items
     return _collapse_manual_items(manual_items)
 
 
@@ -560,7 +531,6 @@ def add_deviation_attachments(
     return get_deviation_detail_for_staff(db, deviation_id)
 
 def _map_attachment_metadata(att) -> DeviationAttachmentOut:
-    """Explicitly map attachment fields to avoid binary data leakage."""
     return DeviationAttachmentOut(
         id=att.id,
         file_name=str(att.file_name),
@@ -568,10 +538,46 @@ def _map_attachment_metadata(att) -> DeviationAttachmentOut:
         file_url=str(att.file_url),
         created_at=att.created_at
     )
+
+# ====================================================================
+# START MODIFIED FUNCTION: update_customer_decision
+# ====================================================================
 def update_customer_decision(
     db: Session, deviation_id: int, customer_id: int, decision: str
 ) -> Optional[CustomerDeviationItem]:
-    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
+    """
+    Handles customer decisions for both internal (positive ID) and external (negative ID) deviations.
+    """
+    # --- Handle negative IDs for ExternalDeviations ---
+    if deviation_id < 0:
+        ext_id = abs(deviation_id)
+        row = (
+            db.query(ExternalDeviation, InwardEquipment, Inward)
+            .join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id)
+            .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
+            .filter(
+                ExternalDeviation.id == ext_id,
+                Inward.customer_id == customer_id # Security check
+            )
+            .first()
+        )
+        if not row:
+            return None
+        
+        d, eq, inward = row
+        stripped = decision.strip()
+        d.customer_decision = stripped if stripped else None
+        d.updated_at = datetime.now(timezone.utc)
+        
+        db.commit()
+        db.refresh(d)
+        
+        # Use existing helper to create the response
+        return _external_row_to_customer_item(
+            d, eq, inward.srf_no, inward.customer_dc_no, str(inward.customer_dc_date), inward.inward_id
+        )
+
+    # --- Existing logic for positive IDs (internal deviations) ---
     row = (
         db.query(
             Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no,
@@ -599,10 +605,12 @@ def update_customer_decision(
     return _row_to_customer_item(
         d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, primary_rep, d.job_id
     )
+# ====================================================================
+# END MODIFIED FUNCTION
+# ====================================================================
 
 
 def _external_row_to_detail_out(db: Session, d: ExternalDeviation, eq: InwardEquipment, inward: Inward) -> DeviationDetailOut:
-    """Transforms ExternalDeviation to DeviationDetailOut without binary leakage."""
     deviation_type = "MANUAL" if d.deviation_type == "NC" else "OOT"
     
     status = "OPEN"
@@ -622,7 +630,6 @@ def _external_row_to_detail_out(db: Session, d: ExternalDeviation, eq: InwardEqu
                 continue
         oot_steps.sort(key=lambda x: x.get("step_percent", 0))
 
-    # CRITICAL FIX: Explicitly map attachments to metadata only
     safe_attachments = [_map_attachment_metadata(a) for a in d.attachments]
 
     return DeviationDetailOut(
@@ -656,7 +663,6 @@ def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[D
 
     if deviation_id < 0:
         ext_id = abs(deviation_id)
-        # FIX: Added joinedload for attachments
         row = db.query(ExternalDeviation, InwardEquipment, Inward)\
             .join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id)\
             .join(Inward, Inward.inward_id == InwardEquipment.inward_id)\
@@ -668,7 +674,6 @@ def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[D
         d, eq, inward = row
         return _external_row_to_detail_out(db, d, eq, inward)
 
-    # Standard positive deviation handling
     row = db.query(Deviation, InwardEquipment, Inward).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(Deviation.id == deviation_id).first()
     if not row: return None
     d, eq, inward = row
@@ -687,11 +692,40 @@ def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[D
         attachments=[DeviationAttachmentOut.model_validate(a) for a in atts]
     )
 
+# ====================================================================
+# START MODIFIED FUNCTION: get_deviation_detail_for_customer
+# ====================================================================
 def get_deviation_detail_for_customer(
     db: Session, deviation_id: int, customer_id: int
 ) -> Optional[DeviationDetailOut]:
-    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
+    """
+    Handles fetching details for both internal (positive ID) and external (negative ID) deviations
+    for a specific customer, ensuring data access is authorized.
+    """
     _sync_legacy_deviation_statuses(db)
+
+    # --- Handle negative IDs for ExternalDeviations ---
+    if deviation_id < 0:
+        ext_id = abs(deviation_id)
+        # Query ExternalDeviation, ensuring it belongs to the customer
+        row = (
+            db.query(ExternalDeviation, InwardEquipment, Inward)
+            .join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id)
+            .join(Inward, Inward.inward_id == InwardEquipment.inward_id)
+            .options(joinedload(ExternalDeviation.attachments)) # Eager load attachments
+            .filter(
+                ExternalDeviation.id == ext_id,
+                Inward.customer_id == customer_id # Security check
+            )
+            .first()
+        )
+        if not row:
+            return None
+        d, eq, inward = row
+        # Use the existing helper to format the response for the customer
+        return _external_row_to_detail_out(db, d, eq, inward)
+
+    # --- Handle positive IDs for internal deviations (existing logic) ---
     row = (
         db.query(Deviation, InwardEquipment, Inward)
         .join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id)
@@ -705,6 +739,8 @@ def get_deviation_detail_for_customer(
     d, eq, inward = row
     if sync_deviation_calibration_status(db, d):
         db.commit()
+        db.refresh(d)
+
     primary_rep = _get_primary_oot_step(db, d.job_id)
     oot_steps = _get_oot_steps_for_job(db, d.job_id)
     atts = (
@@ -713,13 +749,14 @@ def get_deviation_detail_for_customer(
         .order_by(DeviationAttachment.created_at.desc())
         .all()
     )
+    
     return DeviationDetailOut(
         deviation_id=d.id,
         inward_id=inward.inward_id if inward else None,
         inward_eqp_id=d.inward_eqp_id,
         srf_no=inward.srf_no if inward else None,
         customer_dc_no=inward.customer_dc_no if inward else None,
-        customer_dc_date=inward.customer_dc_date if inward else None,
+        customer_dc_date=str(inward.customer_dc_date) if inward else None,
         customer_details=inward.customer_details if inward else None,
         nepl_id=eq.nepl_id if eq else None,
         make=eq.make if eq else None,
@@ -753,7 +790,9 @@ def get_deviation_detail_for_customer(
         ],
         attachments=[DeviationAttachmentOut.model_validate(a) for a in atts],
     )
-
+# ====================================================================
+# END MODIFIED FUNCTION
+# ====================================================================
 
 def update_engineer_remarks(
     db: Session, deviation_id: int, remarks: str
