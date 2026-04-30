@@ -413,6 +413,7 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
     )
 
 
+# MODIFIED: This function now merges data from both deviation tables for the staff view.
 def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
     _sync_legacy_deviation_statuses(db)
     
@@ -796,6 +797,7 @@ def get_deviation_detail_for_customer(
 def update_engineer_remarks(
     db: Session, deviation_id: int, remarks: str
 ) -> Optional[DeviationDetailOut]:
+    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None
@@ -810,6 +812,7 @@ def update_engineer_remarks(
 
 
 def close_deviation(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
+    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None
@@ -824,6 +827,7 @@ def close_deviation(db: Session, deviation_id: int) -> Optional[DeviationDetailO
 
 
 def terminate_deviation_job(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
+    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None
