@@ -7,11 +7,11 @@ class ExternalUploadBase(BaseModel):
     
     # All file fields are now optional
     calibration_worksheet_file_name: Optional[str] = Field(None, max_length=255)
-    calibration_worksheet_file_type: Optional[str] = Field(None, max_length=50)
+    calibration_worksheet_file_type: Optional[str] = Field(None, max_length=255)
     calibration_worksheet_file_url: Optional[str] = None
     
     certificate_file_name: Optional[str] = Field(None, max_length=255)
-    certificate_file_type: Optional[str] = Field(None, max_length=50)
+    certificate_file_type: Optional[str] = Field(None, max_length=255)
     certificate_file_url: Optional[str] = None
     
     created_by: Optional[int] = None
@@ -24,11 +24,11 @@ class ExternalUploadCreate(ExternalUploadBase):
 class ExternalUploadUpdate(BaseModel):
     # This can be used for bulk updates if needed later
     calibration_worksheet_file_name: Optional[str] = Field(None, max_length=255)
-    calibration_worksheet_file_type: Optional[str] = Field(None, max_length=50)
+    calibration_worksheet_file_type: Optional[str] = Field(None, max_length=255)
     calibration_worksheet_file_url: Optional[str] = None
     
     certificate_file_name: Optional[str] = Field(None, max_length=255)
-    certificate_file_type: Optional[str] = Field(None, max_length=50)
+    certificate_file_type: Optional[str] = Field(None, max_length=255)
     certificate_file_url: Optional[str] = None
 
 class ExternalUpload(ExternalUploadBase):
