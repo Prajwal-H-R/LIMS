@@ -29,12 +29,12 @@ class ExternalUpload(Base):
 
     # Calibration worksheet file (maps to 'result' from frontend)
     calibration_worksheet_file_name = Column(String(255), nullable=True)
-    calibration_worksheet_file_type = Column(String(50), nullable=True)
+    calibration_worksheet_file_type = Column(String(255), nullable=True)
     calibration_worksheet_file_url = Column(Text, nullable=True)
 
     # Certificate file (maps to 'certificate' from frontend)
     certificate_file_name = Column(String(255), nullable=True)
-    certificate_file_type = Column(String(50), nullable=True)
+    certificate_file_type = Column(String(255), nullable=True)
     certificate_file_url = Column(Text, nullable=True)
     
     # --- FUTURE EXPANSION for 'deviation' ---

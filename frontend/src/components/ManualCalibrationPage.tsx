@@ -14,7 +14,7 @@ import {
   Plus,
   FilePlus,
   Paperclip,
-  FileText,
+  Calendar,
 } from "lucide-react";
 
 // --- TypeScript Interfaces ---
@@ -50,6 +50,7 @@ interface ExternalDeviationData {
   step_per_deviation: Record<string, any>;
   engineer_remarks?: string;
   customer_decision?: string;
+  report?: string; // Maps to the Date column in your model
   attachments?: DeviationAttachment[];
 }
 
@@ -94,6 +95,7 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
     const [deviationId, setDeviationId] = useState<number | null>(null);
     const [deviationType, setDeviationType] = useState<'OOT' | 'NC'>('OOT');
     const [toolStatus, setToolStatus] = useState('');
+    const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split('T')[0]); // Default to Today
     const [steps, setSteps] = useState([{ step: '', value: '' }]);
     const [engineerRemarks, setEngineerRemarks] = useState('');
     const [customerDecision, setCustomerDecision] = useState('');
@@ -109,9 +111,16 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const resetForm = () => {
-        setDeviationId(null); setDeviationType('OOT'); setToolStatus('');
-        setSteps([{ step: '', value: '' }]); setEngineerRemarks('');
-        setCustomerDecision(''); setAttachments([]); setPendingFiles([]); setError(null);
+        setDeviationId(null); 
+        setDeviationType('OOT'); 
+        setToolStatus('');
+        setReportDate(new Date().toISOString().split('T')[0]);
+        setSteps([{ step: '', value: '' }]); 
+        setEngineerRemarks('');
+        setCustomerDecision(''); 
+        setAttachments([]); 
+        setPendingFiles([]); 
+        setError(null);
     }
     
     useEffect(() => {
@@ -122,25 +131,21 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
             setIsLoadingData(true);
             try {
                 const response = await api.get<ExternalDeviationData[]>(`/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`);
-                console.log("DEBUG: Fetched Deviation Data:", response.data);
                 
                 if (response.data && response.data.length > 0) {
                     const data = response.data[0];
                     setDeviationId(data.id);
                     setDeviationType(data.deviation_type);
                     setToolStatus(data.tool_status || '');
+                    setReportDate(data.report || new Date().toISOString().split('T')[0]);
                     setEngineerRemarks(data.engineer_remarks || '');
                     setCustomerDecision(data.customer_decision || '');
-                    
-                    // Set attachments from backend
-                    console.log("DEBUG: Attachments from Backend:", data.attachments);
                     setAttachments(data.attachments || []); 
                     
                     const stepsArray = Object.entries(data.step_per_deviation || {}).map(([step, value]) => ({ step, value: String(value) }));
                     setSteps(stepsArray.length > 0 ? stepsArray : [{ step: '', value: '' }]);
                 }
             } catch (err) { 
-                console.error("DEBUG: Error fetching deviation:", err);
                 setError("Failed to fetch deviation details."); 
             } finally { setIsLoadingData(false); }
         };
@@ -152,7 +157,6 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
         if (!file) return;
 
         if (isEditMode && deviationId) {
-            // Immediate upload if record already exists
             setIsUploadingSingle(true);
             const formData = new FormData();
             formData.append("file", file);
@@ -161,7 +165,6 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
                 setAttachments(prev => [...prev, response.data]);
             } catch (err) { alert("Upload failed."); } finally { setIsUploadingSingle(false); }
         } else {
-            // Queue for saving with the new record
             setPendingFiles(prev => [...prev, file]);
         }
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -176,70 +179,54 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null); 
-    setIsSubmitting(true);
-    
-    console.log("DEBUG LOG: --- Starting Submission ---");
+        e.preventDefault();
+        setError(null); 
+        setIsSubmitting(true);
+        
+        const payload = {
+            inward_eqp_id: equipment.inward_eqp_id,
+            deviation_type: deviationType,
+            tool_status: toolStatus,
+            report: reportDate, // Sending the report date to backend
+            step_per_deviation: deviationType === 'OOT' ? steps.reduce((acc, curr) => { 
+                if(curr.step) acc[curr.step] = curr.value; return acc; 
+            }, {} as Record<string, string>) : {},
+            engineer_remarks: engineerRemarks,
+            customer_decision: customerDecision,
+        };
 
-    const payload = {
-        inward_eqp_id: equipment.inward_eqp_id,
-        deviation_type: deviationType,
-        tool_status: toolStatus,
-        step_per_deviation: deviationType === 'OOT' ? steps.reduce((acc, curr) => { 
-            if(curr.step) acc[curr.step] = curr.value; return acc; 
-        }, {} as Record<string, string>) : {},
-        engineer_remarks: engineerRemarks,
-        customer_decision: customerDecision,
-    };
+        try {
+            let currentId = deviationId;
 
-    try {
-        let currentId = deviationId;
+            if (isEditMode && deviationId) {
+                await api.patch(`/external-deviations/${deviationId}`, payload);
+            } else {
+                const response = await api.post('/external-deviations/', payload);
+                currentId = response.data.id;
+            }
 
-        // STEP 1: CREATE OR UPDATE DEVIATION (JSON ONLY)
-        if (isEditMode && deviationId) {
-            console.log(`DEBUG LOG: Updating existing deviation ID: ${deviationId}`);
-            await api.patch(`/external-deviations/${deviationId}`, payload);
-        } else {
-            console.log("DEBUG LOG: Sending JSON payload to create deviation:", payload);
-            // This call is now pure JSON. It will NOT trigger a 422 error.
-            const response = await api.post('/external-deviations/', payload);
-            currentId = response.data.id;
-            console.log("DEBUG LOG: Deviation created successfully. ID:", currentId);
-        }
-
-        // STEP 2: UPLOAD ATTACHMENTS (MULTIPART)
-        if (pendingFiles.length > 0 && currentId) {
-            console.log(`DEBUG LOG: Found ${pendingFiles.length} pending files. Starting uploads...`);
-            
-            for (const file of pendingFiles) {
-                const formData = new FormData();
-                formData.append("file", file);
-                
-                console.log(`DEBUG LOG: Uploading file: ${file.name} to deviation ${currentId}`);
-                try {
-                    const uploadRes = await api.post(`/external-deviations/${currentId}/attachments`, formData);
-                    console.log(`DEBUG LOG: File ${file.name} upload success:`, uploadRes.data);
-                } catch (fileErr: any) {
-                    console.error(`DEBUG LOG ERROR: File upload failed for ${file.name}:`, fileErr.response?.data || fileErr.message);
+            if (pendingFiles.length > 0 && currentId) {
+                for (const file of pendingFiles) {
+                    const formData = new FormData();
+                    formData.append("file", file);
+                    try {
+                        await api.post(`/external-deviations/${currentId}/attachments`, formData);
+                    } catch (fileErr: any) {
+                        console.error("File upload failed", fileErr);
+                    }
                 }
             }
-        }
 
-        alert("Saved successfully!"); 
-        onSuccess(); 
-        onClose();
-    } catch (err: any) { 
-        console.error("DEBUG LOG ERROR: Main process failed", err);
-        if (err.response) {
-            console.error("DEBUG LOG ERROR: Backend returned 422/500 detail:", err.response.data);
+            alert("Saved successfully!"); 
+            onSuccess(); 
+            onClose();
+        } catch (err: any) { 
+            setError(`Submit failed: ${err.response?.data?.detail?.[0]?.msg || "Error occurred"}`); 
+        } finally { 
+            setIsSubmitting(false); 
         }
-        setError(`Submit failed: ${err.response?.data?.detail?.[0]?.msg || "Check console for details"}`); 
-    } finally { 
-        setIsSubmitting(false); 
-        console.log("DEBUG LOG: --- Submission Finished ---");
-    }
-};
+    };
+
     const getFileFullUrl = (url: string) => {
         if (!url) return "#";
         if (url.startsWith('http')) return url;
@@ -258,59 +245,51 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
                 </div>
 
                 <div className="bg-blue-50/50 px-6 py-4 flex gap-6 border-b text-xs overflow-x-auto">
-  <div>
-    <label className="text-blue-400 font-bold uppercase block">Material Description</label>
-    <p className="font-semibold">{equipment.material_description || '---'}</p>
-  </div>
-
-  <div>
-    <label className="text-blue-400 font-bold uppercase block">Make</label>
-    <p className="font-semibold">{equipment.make || '---'}</p>
-  </div>
-
-  <div>
-    <label className="text-blue-400 font-bold uppercase block">Model</label>
-    <p className="font-semibold">{equipment.model || '---'}</p>
-  </div>
-
-  <div>
-    <label className="text-blue-400 font-bold uppercase block">Serial No</label>
-    <p className="font-semibold">{equipment.serial_no || '---'}</p>
-  </div>
-
-  <div>
-    <label className="text-blue-400 font-bold uppercase block">Range</label>
-    <p className="font-semibold">{equipment.range || '---'}</p>
-  </div>
-</div>
+                    <div><label className="text-blue-400 font-bold uppercase block">Material</label><p className="font-semibold">{equipment.material_description || '---'}</p></div>
+                    <div><label className="text-blue-400 font-bold uppercase block">Make</label><p className="font-semibold">{equipment.make || '---'}</p></div>
+                    <div><label className="text-blue-400 font-bold uppercase block">Model</label><p className="font-semibold">{equipment.model || '---'}</p></div>
+                    <div><label className="text-blue-400 font-bold uppercase block">Serial No</label><p className="font-semibold">{equipment.serial_no || '---'}</p></div>
+                    <div><label className="text-blue-400 font-bold uppercase block">Range</label><p className="font-semibold">{equipment.range || '---'}</p></div>
+                </div>
 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {isLoadingData ? <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" /></div> : (
                         <form onSubmit={handleSubmit} className="space-y-6">
                             {error && <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-md text-sm">{error}</div>}
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1">Deviation Type</label>
-                                    <select value={deviationType} onChange={(e) => setDeviationType(e.target.value as 'OOT' | 'NC')} className="w-full p-2 border border-gray-300 rounded-md">
+                                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Deviation Type</label>
+                                    <select value={deviationType} onChange={(e) => setDeviationType(e.target.value as 'OOT' | 'NC')} className="w-full p-2 border border-gray-300 rounded-md text-sm">
                                         <option value="OOT">OOT (Out of Tolerance)</option>
                                         <option value="NC">NC (Not-Calibrated)</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1">Tool Status</label>
-                                    <input type="text" value={toolStatus} onChange={(e) => setToolStatus(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md" />
+                                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Tool Status</label>
+                                    <input type="text" value={toolStatus} onChange={(e) => setToolStatus(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md text-sm" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Report Date</label>
+                                    <div className="relative">
+                                        <input 
+                                            type="date" 
+                                            value={reportDate} 
+                                            onChange={(e) => setReportDate(e.target.value)} 
+                                            className="w-full p-2 pl-8 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-100 outline-none" 
+                                        />
+                                        <Calendar className="absolute left-2 top-2.5 text-gray-400" size={14} />
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* --- UNIFIED PREVIEW: SAVED + PENDING --- */}
+                            {/* --- ATTACHMENTS PREVIEW --- */}
                             {(attachments.length > 0 || pendingFiles.length > 0) && (
                                 <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
                                     <label className="block text-xs font-bold text-blue-700 mb-2 flex items-center gap-2 uppercase tracking-wide">
                                         <Paperclip size={14}/> Evidence Preview ({attachments.length + pendingFiles.length})
                                     </label>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        {/* Saved Attachments */}
                                         {attachments.map(a => (
                                             <div key={a.id} className="flex justify-between items-center bg-white p-2 border border-blue-200 rounded shadow-sm">
                                                 <span className="truncate text-[11px] font-medium text-gray-700 w-32" title={a.file_name}>{a.file_name}</span>
@@ -320,10 +299,9 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
                                                 </div>
                                             </div>
                                         ))}
-                                        {/* Local Files selected but not yet saved */}
                                         {pendingFiles.map((f, i) => (
                                             <div key={i} className="flex justify-between items-center bg-orange-50 p-2 border border-orange-200 rounded italic">
-                                                <span className="truncate text-[11px] text-orange-700 w-32">{f.name} (Ready)</span>
+                                                <span className="truncate text-[11px] text-orange-700 w-32">{f.name}</span>
                                                 <button type="button" onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))} className="p-1 text-red-500"><X size={16}/></button>
                                             </div>
                                         ))}
@@ -415,9 +393,6 @@ const EquipmentItem: React.FC<EquipmentItemProps> = ({ equipment }) => {
                 api.get(`/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`),
                 api.get(`/staff/inwards/equipment-metadata/${equipment.inward_eqp_id}`)
             ]);
-
-            console.log(`DEBUG: Equipment ${equipment.nepl_id} attachments count:`, dev.data?.[0]?.attachments?.length);
-
             setMeta(m.data);
             setDetails({
                 res: docs.data.calibration_worksheet_file_url || null,
@@ -425,7 +400,7 @@ const EquipmentItem: React.FC<EquipmentItemProps> = ({ equipment }) => {
                 dev: dev.data && dev.data.length > 0,
                 attCount: dev.data?.[0]?.attachments?.length || 0
             });
-        } catch (e) { console.error("DEBUG: Equipment fetch error", e); } finally { setLoading(false); }
+        } catch (e) { console.error("Fetch error", e); } finally { setLoading(false); }
     };
 
     useEffect(() => { fetchAll(); }, [equipment.inward_eqp_id]);
@@ -447,7 +422,6 @@ const EquipmentItem: React.FC<EquipmentItemProps> = ({ equipment }) => {
                     <button onClick={() => setModalOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border rounded-md transition-all ${details?.dev ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100' : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100'}`}>
                         <AlertTriangle size={14}/> {details?.dev ? 'View Deviation' : 'Deviation'}
                     </button>
-                    
                 </div>
                 <DocumentButtonGroup buttonText="Certificates" docType="certificate" documentUrl={details?.cert ?? null} onUpload={(f) => handleUp("certificate", f)} onDelete={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/certificate`).then(fetchAll)} />
             </div>

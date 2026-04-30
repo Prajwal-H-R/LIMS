@@ -16,7 +16,7 @@ class ExternalDeviationAttachment(Base):
     )
 
     file_name = Column(String(255), nullable=False)
-    file_type = Column(String(50), nullable=True)
+    file_type = Column(String(255), nullable=True)
     file_url = Column(Text, nullable=False)
 
     uploaded_by = Column(
