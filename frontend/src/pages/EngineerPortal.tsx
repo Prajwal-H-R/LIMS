@@ -78,7 +78,7 @@ import CalibrationPage from "../components/CalibrationPage";
 import UncertaintyBudgetPage from '../components/UncertaintyBudgetPage';
 import { CertificatesPage } from "../components/CertificatesPage";
 import ProfilePage from "../components/ProfilePage";
-import ManualCalibrationPage from "../components/ManualCalibrationPage";
+import ManualCalibrationPage, { ManualCalibrationSrfDetailPage } from "../components/ManualCalibrationPage";
 
 // --- Interfaces ---
 interface EngineerPortalProps {
@@ -1180,6 +1180,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           <Route path="srfs" element={<SrfListPage />} />
           <Route path="srfs/:srfId" element={<SrfDetailPage />} />
           <Route path="jobs" element={<JobsManagementPage />} />
+          <Route path="manual-calibration/srf/:srfKey" element={<ManualCalibrationSrfDetailPage />} />
           <Route path="manual-calibration" element={<ManualCalibrationPage />} />
           <Route path="calibration/:inwardId/:equipmentId" element={<CalibrationPage />} />
           <Route path="uncertainty-budget/:inwardId/:equipmentId" element={<UncertaintyBudgetPage />} />

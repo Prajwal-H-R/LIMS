@@ -30,7 +30,7 @@ class EquipmentFlowConfig(EquipmentFlowConfigBase):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # ... (rest of the file is unchanged) ...
 # =============================================================================
@@ -59,7 +59,7 @@ class ManualSrfGroup(BaseModel):
     equipment_count: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # ✅ NEW SCHEMA for document details
 class ManualEquipmentDocument(BaseModel):
@@ -80,7 +80,7 @@ class ManualEquipmentDetail(BaseModel):
 
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SystemDrivenJob(BaseModel):
         inward_id: int
@@ -92,4 +92,4 @@ class SystemDrivenJob(BaseModel):
         in_progress_count: int
         completed_count: int
         class Config:
-            orm_mode = True
+            from_attributes = True

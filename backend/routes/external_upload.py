@@ -1,9 +1,8 @@
 import os
-import uuid
 import shutil
 import logging
-import traceback
 from pathlib import Path
+from urllib.parse import quote, unquote
 from fastapi import (
     APIRouter,
     Depends,
@@ -12,7 +11,6 @@ from fastapi import (
     File,
     UploadFile,
     Form,
-    Request
 )
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -26,6 +24,30 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+def _unlink_upload_file_if_safe(file_url: Optional[str]) -> None:
+    """Remove a file under UPLOAD_DIR if file_url points to /api/uploads/... inside this tree."""
+    if not file_url:
+        return
+    marker = "/api/uploads/"
+    if not file_url.startswith(marker):
+        return
+    rel = file_url[len(marker) :].lstrip("/")
+    parts = [unquote(p) for p in rel.split("/") if p]
+    if not parts:
+        return
+    candidate = UPLOAD_DIR.joinpath(*parts).resolve()
+    try:
+        candidate.relative_to(UPLOAD_DIR.resolve())
+    except ValueError:
+        logger.warning("Skipped unlink outside uploads dir: %s", file_url)
+        return
+    if candidate.is_file():
+        try:
+            candidate.unlink()
+        except OSError as e:
+            logger.warning("Could not remove upload file %s: %s", candidate, e)
+
 
 router = APIRouter(
     tags=["Manual Calibration Uploads"],
@@ -59,6 +81,13 @@ def handle_document_delete(
     """
     Deletes a specific document by setting its URL and name to NULL in the database.
     """
+    existing = service.get_upload_by_equipment_id(db, inward_eqp_id=inward_eqp_id)
+    if existing:
+        if doc_type == "result":
+            _unlink_upload_file_if_safe(existing.calibration_worksheet_file_url)
+        elif doc_type == "certificate":
+            _unlink_upload_file_if_safe(existing.certificate_file_url)
+
     updated_record = service.delete_document_for_equipment(db, inward_eqp_id, doc_type)
     
     if updated_record is None:
@@ -71,7 +100,6 @@ def handle_document_delete(
 # --- EXISTING POST ENDPOINT FOR UPLOADING ---
 @router.post("/manual-calibration/equipment/{inward_eqp_id}/upload", response_model=schemas.ExternalUpload)
 async def handle_document_upload(
-    request: Request,
     inward_eqp_id: int,
     db: Session = Depends(get_db),
     file: UploadFile = File(...),
@@ -88,11 +116,25 @@ async def handle_document_upload(
             detail=f"Invalid doc_type '{doc_type}'. Must be one of {allowed_doc_types}",
         )
 
+    # Store under equipment + doc type so the URL ends with the original basename (no UUID prefix)
+    # — browsers use the last path segment as the default download name for static files.
+    raw_name = os.path.basename(file.filename or "")
+    sanitized_filename = raw_name if raw_name and raw_name not in (".", "..") else "upload"
+
+    existing = service.get_upload_by_equipment_id(db, inward_eqp_id=inward_eqp_id)
+    if existing:
+        old_url = None
+        if doc_type == "result":
+            old_url = existing.calibration_worksheet_file_url
+        elif doc_type == "certificate":
+            old_url = existing.certificate_file_url
+        if old_url:
+            _unlink_upload_file_if_safe(old_url)
+
+    sub_dir = UPLOAD_DIR / "manual_calibration" / str(inward_eqp_id) / doc_type
     try:
-        unique_id = uuid.uuid4().hex
-        sanitized_filename = os.path.basename(file.filename)
-        saved_filename = f"{unique_id}_{sanitized_filename}"
-        file_path = UPLOAD_DIR / saved_filename
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        file_path = sub_dir / sanitized_filename
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
@@ -101,7 +143,10 @@ async def handle_document_upload(
     finally:
         file.file.close()
 
-    file_url = f"/api/uploads/{saved_filename}"     
+    rel_url_path = (
+        f"manual_calibration/{inward_eqp_id}/{doc_type}/{quote(sanitized_filename, safe='/')}"
+    )
+    file_url = f"/api/uploads/{rel_url_path}"
     
     try:
         db_upload_record = service.upsert_document_for_equipment(

@@ -15,6 +15,7 @@ from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 from backend.models.htw.htw_job import HTWJob
 from backend.models.htw.htw_repeatability import HTWRepeatability
+from backend.services.htw.htw_repeatability_services import sync_oot_deviation_records
 from backend.schemas.deviation_schemas import (
     CustomerDeviationItem,
     DeviationAttachmentOut,
@@ -293,6 +294,7 @@ def _collapse_manual_items(items: List[CustomerDeviationItem]) -> List[CustomerD
     )
 
 def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
+    sync_oot_deviation_records(db)
     _sync_legacy_deviation_statuses(db)
     
     all_items: List[CustomerDeviationItem] = []
@@ -356,6 +358,7 @@ def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
         reverse=True,
     )
 def list_deviations_for_customer(db: Session, customer_id: int) -> List[CustomerDeviationItem]:
+    sync_oot_deviation_records(db)
     _sync_legacy_deviation_statuses(db)
     
     all_items: List[CustomerDeviationItem] = []
@@ -413,7 +416,6 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
     )
 
 
-# MODIFIED: This function now merges data from both deviation tables for the staff view.
 def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
     _sync_legacy_deviation_statuses(db)
     
@@ -659,6 +661,7 @@ def _external_row_to_detail_out(db: Session, d: ExternalDeviation, eq: InwardEqu
     )
 
 def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
+    sync_oot_deviation_records(db)
     _sync_legacy_deviation_statuses(db)
 
     if deviation_id < 0:
@@ -702,6 +705,7 @@ def get_deviation_detail_for_customer(
     Handles fetching details for both internal (positive ID) and external (negative ID) deviations
     for a specific customer, ensuring data access is authorized.
     """
+    sync_oot_deviation_records(db)
     _sync_legacy_deviation_statuses(db)
 
     # --- Handle negative IDs for ExternalDeviations ---
@@ -797,7 +801,6 @@ def get_deviation_detail_for_customer(
 def update_engineer_remarks(
     db: Session, deviation_id: int, remarks: str
 ) -> Optional[DeviationDetailOut]:
-    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None
@@ -812,7 +815,6 @@ def update_engineer_remarks(
 
 
 def close_deviation(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
-    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None
@@ -827,7 +829,6 @@ def close_deviation(db: Session, deviation_id: int) -> Optional[DeviationDetailO
 
 
 def terminate_deviation_job(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
-    # NOTE: This function currently only works for positive deviation_ids (from the 'deviation' table).
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None

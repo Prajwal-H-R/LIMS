@@ -130,8 +130,9 @@ const CustomerDeviationDetailPage: React.FC = () => {
         <div className="space-y-5 text-sm">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Deviation ID</p>
-              <p className="text-xl font-bold text-slate-900 mt-1">#{detail.deviation_id}</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">DC Details</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1">No: {detail.customer_dc_no || "—"}</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1">Date: {formatDcDate(detail.customer_dc_date)}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Status</p>
@@ -166,14 +167,12 @@ const CustomerDeviationDetailPage: React.FC = () => {
             {((detail.oot_steps?.length || 0) > 0) && (
               <div className="mt-4 overflow-x-auto">
                 <p className="text-slate-600 text-xs font-semibold uppercase tracking-wide mb-2">
-                  OOT Steps (one decision for all)
+                  OOT Steps (single response applies to all)
                 </p>
                 <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr className="text-left text-slate-600">
                       <th className="px-3 py-2">Step %</th>
-                      <th className="px-3 py-2">Set Torque</th>
-                      <th className="px-3 py-2">Corrected Mean</th>
                       <th className="px-3 py-2">Deviation %</th>
                     </tr>
                   </thead>
@@ -181,8 +180,6 @@ const CustomerDeviationDetailPage: React.FC = () => {
                     {detail.oot_steps?.map((step, idx) => (
                       <tr key={`oot-step-${idx}`} className="border-t border-slate-100">
                         <td className="px-3 py-2 text-slate-800">{step.step_percent ?? "—"}</td>
-                        <td className="px-3 py-2 text-slate-700">{step.set_torque ?? "—"}</td>
-                        <td className="px-3 py-2 text-slate-700">{step.corrected_mean ?? "—"}</td>
                         <td className="px-3 py-2 font-medium text-red-700">{step.deviation_percent ?? "—"}</td>
                       </tr>
                     ))}

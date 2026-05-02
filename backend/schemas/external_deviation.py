@@ -46,4 +46,4 @@ class ExternalDeviation(ExternalDeviationBase):
     attachments: List[AttachmentRead] = []
 
     class Config:
-        orm_mode = True # This allows Pydantic to read data from ORM models
+        from_attributes = True # This allows Pydantic to read data from ORM models

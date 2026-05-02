@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { api } from "../api/config";
 import {
   ArrowLeft,
-  ChevronRight,
   ClipboardEdit,
   UploadCloud,
   Eye,
@@ -65,7 +64,7 @@ interface DocumentButtonGroupProps {
   onDelete: () => Promise<void>;
 }
 
-interface EquipmentDetailListProps { srfNo: string; }
+interface EquipmentDetailListProps { srfNo: string; listClassName?: string; }
 interface EquipmentItemProps { equipment: BasicEquipment }
 
 interface DeviationModalProps {
@@ -431,14 +430,84 @@ const EquipmentItem: React.FC<EquipmentItemProps> = ({ equipment }) => {
 };
 
 // --- LIST COMPONENT ---
-const EquipmentDetailList: React.FC<EquipmentDetailListProps> = ({ srfNo }) => {
+const EquipmentDetailList: React.FC<EquipmentDetailListProps> = ({ srfNo, listClassName }) => {
     const [list, setList] = useState<BasicEquipment[]>([]);
     const [loading, setLoading] = useState(true);
     useEffect(() => {
-        api.get(`/flow-configs/manual-calibration-groups/${srfNo}/equipment`).then(r => setList(r.data)).finally(() => setLoading(false));
+        const path = `/flow-configs/manual-calibration-groups/${encodeURIComponent(srfNo)}/equipment`;
+        api.get(path).then(r => setList(r.data)).finally(() => setLoading(false));
     }, [srfNo]);
     if (loading) return <div className="p-6 text-center"><Loader2 className="animate-spin mx-auto text-gray-400"/></div>;
-    return <div className="bg-gray-50 p-4 border-t space-y-3">{list.map(e => <EquipmentItem key={e.inward_eqp_id} equipment={e} />)}</div>;
+    return (
+        <div className={listClassName ?? "bg-gray-50 p-4 border-t space-y-3"}>
+            {list.map(e => <EquipmentItem key={e.inward_eqp_id} equipment={e} />)}
+        </div>
+    );
+};
+
+type ManualSrfLocationState = {
+    customer_name?: string;
+    equipment_count?: number;
+};
+
+/** Full-page equipment list for one SRF (opened from Manual Calibration list). */
+export const ManualCalibrationSrfDetailPage: React.FC = () => {
+    const { srfKey } = useParams<{ srfKey: string }>();
+    const navigate = useNavigate();
+    const location = useLocation();
+    const meta = (location.state || {}) as ManualSrfLocationState;
+
+    const srfNo = useMemo(() => {
+        if (!srfKey) return "";
+        try {
+            return decodeURIComponent(srfKey);
+        } catch {
+            return srfKey;
+        }
+    }, [srfKey]);
+
+    useEffect(() => {
+        if (!srfNo) navigate("/engineer/manual-calibration", { replace: true });
+    }, [srfNo, navigate]);
+
+    if (!srfNo) return null;
+
+    return (
+        <div className="min-h-screen bg-gray-50 p-8 font-sans">
+            <div className="max-w-6xl mx-auto space-y-6">
+                <div className="bg-white p-6 rounded-2xl border flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 shadow-sm">
+                    <div className="flex gap-4 items-center min-w-0">
+                        <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner shrink-0">
+                            <ClipboardEdit size={32} />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Service request</p>
+                            <h2 className="text-2xl font-black text-blue-700 tracking-tight truncate">{srfNo}</h2>
+                            <p className="text-sm text-gray-600 font-medium">
+                                {meta.customer_name ? <span className="font-semibold text-gray-800">{meta.customer_name}</span> : null}
+                                {meta.customer_name && meta.equipment_count != null ? " · " : null}
+                                {meta.equipment_count != null ? (
+                                    <span>{meta.equipment_count} equipment</span>
+                                ) : (
+                                    <span className="text-gray-500">Manual calibration equipment</span>
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => navigate("/engineer/manual-calibration")}
+                        className="shrink-0 px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl flex items-center gap-2 hover:bg-gray-50 transition-all font-bold text-sm shadow-sm self-start sm:self-auto"
+                    >
+                        <ArrowLeft size={18} /> Back to list
+                    </button>
+                </div>
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                    <EquipmentDetailList srfNo={srfNo} listClassName="p-4 md:p-6 bg-gray-50 space-y-3" />
+                </div>
+            </div>
+        </div>
+    );
 };
 
 // --- PAGE COMPONENT ---
@@ -446,7 +515,6 @@ const ManualCalibrationPage: React.FC = () => {
     const navigate = useNavigate();
     const [groups, setGroups] = useState<SrfGroupSummary[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeSrf, setActiveSrf] = useState<string | null>(null);
 
     useEffect(() => {
         api.get('/flow-configs/manual-calibration-groups').then(r => setGroups(r.data)).finally(() => setLoading(false));
@@ -458,19 +526,37 @@ const ManualCalibrationPage: React.FC = () => {
                 <div className="bg-white p-6 rounded-2xl border flex justify-between items-center shadow-sm">
                     <div className="flex gap-4 items-center">
                         <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner"><ClipboardEdit size={32}/></div>
-                        <div><h2 className="text-2xl font-black">Manual Calibration</h2><p className="text-gray-500 text-sm">Upload records and manage deviations</p></div>
+                        <div><h2 className="text-2xl font-black">Manual Calibration</h2><p className="text-gray-500 text-sm">Select an SRF to open equipment and uploads</p></div>
                     </div>
                     <button onClick={() => navigate("/engineer")} className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl flex items-center gap-2 hover:bg-gray-50 transition-all font-bold text-sm shadow-sm"><ArrowLeft size={18}/> Back</button>
                 </div>
                 <div className="space-y-4">
                     {loading ? <ManualCalibrationSkeleton /> : groups.map(g => (
-                        <div key={g.srf_no} className="bg-white rounded-2xl border border-gray-200 shadow-sm transition-all overflow-hidden">
-                            <div onClick={() => setActiveSrf(activeSrf === g.srf_no ? null : g.srf_no)} className="p-6 flex justify-between items-center cursor-pointer hover:bg-gray-50">
-                                <div><p className="font-black text-xl text-blue-700 tracking-tight">{g.srf_no}</p><p className="text-sm text-gray-600 font-bold">{g.customer_name} • {g.equipment_count} Items</p></div>
-                                <ChevronRight className={`transition-transform duration-300 ${activeSrf === g.srf_no ? 'rotate-90' : ''}`} />
+                        <button
+                            key={g.srf_no}
+                            type="button"
+                            onClick={() =>
+                                navigate(
+                                    `/engineer/manual-calibration/srf/${encodeURIComponent(g.srf_no)}`,
+                                    {
+                                        state: {
+                                            customer_name: g.customer_name,
+                                            equipment_count: g.equipment_count,
+                                        },
+                                    }
+                                )
+                            }
+                            className="w-full text-left bg-white rounded-2xl border border-gray-200 shadow-sm transition-all overflow-hidden p-6 flex justify-between items-center cursor-pointer hover:bg-gray-50 hover:border-blue-200 group"
+                        >
+                            <div className="min-w-0 pr-3">
+                                <p className="font-black text-xl text-blue-700 tracking-tight truncate">{g.srf_no}</p>
+                                <p className="text-sm text-gray-600 font-bold">{g.customer_name} • {g.equipment_count} Items</p>
                             </div>
-                            {activeSrf === g.srf_no && <EquipmentDetailList srfNo={g.srf_no} />}
-                        </div>
+                            <span className="inline-flex items-center gap-1.5 shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold shadow-sm group-hover:bg-indigo-700 transition-colors">
+                                <Eye className="h-4 w-4" />
+                                Open
+                            </span>
+                        </button>
                     ))}
                 </div>
             </div>

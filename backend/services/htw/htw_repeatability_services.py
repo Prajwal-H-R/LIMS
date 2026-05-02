@@ -1,4 +1,6 @@
 import math
+from typing import List
+
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, asc, func
 from datetime import datetime
@@ -370,6 +372,9 @@ def process_repeatability_calculation(db: Session, request: RepeatabilityCalcula
         })
 
     db.commit()
+
+    # Create/update Deviation rows for OOT jobs so staff/customer deviation lists stay in sync.
+    sync_oot_deviation_records(db)
 
     return {
         "job_id": request.job_id,
@@ -1048,11 +1053,14 @@ def get_stored_loading_point(db: Session, job_id: int):
     }
 
 
-def get_oot_deviations(db: Session, threshold: float = 4.0):
+def sync_oot_deviation_records(db: Session, threshold: float = 4.0) -> List[int]:
     """
-    Returns one OOT deviation row per job.
-    Automatically creates missing Deviation rows for OOT jobs and includes
-    all out-of-tolerance step records inside each item.
+    Ensures a Deviation row exists for every job that has repeatability with
+    |deviation_percent| > threshold (system OOT: created_by IS NULL, job_id set).
+
+    Call this after repeatability is saved and before listing deviations so OOT
+    items appear on the staff/customer deviation pages (not only via the legacy
+    GET /deviations/oot endpoint).
     """
     # Backfill old records so historical OPEN entries with customer decisions show correctly.
     legacy_rows = db.query(Deviation).filter(Deviation.customer_decision.isnot(None)).all()
@@ -1113,7 +1121,16 @@ def get_oot_deviations(db: Session, threshold: float = 4.0):
     if created_any:
         db.commit()
 
-    oot_job_ids = [r.job_id for r in oot_jobs]
+    return [r.job_id for r in oot_jobs]
+
+
+def get_oot_deviations(db: Session, threshold: float = 4.0):
+    """
+    Returns one OOT deviation row per job.
+    Automatically creates missing Deviation rows for OOT jobs and includes
+    all out-of-tolerance step records inside each item.
+    """
+    oot_job_ids = sync_oot_deviation_records(db, threshold=threshold)
     if not oot_job_ids:
         return {
             "section": "OOT - Out of Tolerance",
