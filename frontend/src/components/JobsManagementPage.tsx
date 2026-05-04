@@ -470,7 +470,7 @@ const JobsManagementPage: React.FC = () => {
                         <button onClick={() => handleTabChange("in_progress")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeDetailTab === "in_progress" ? "bg-white text-blue-700 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
                             <Activity className="h-4 w-4" /> In Progress <span className="ml-1 bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs">{counts.in_progress}</span>
                         </button>
-                        <button onClick={() => handleTabChange("completed")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeDetailTab === "completed" ? "bg-white text-green-700 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
+                        <button onClick={() => handleTabChange("completed")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeDetailTab === "completed" || "Completed - OOT" ? "bg-white text-green-700 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
                             <CheckCircle2 className="h-4 w-4" /> Completed <span className="ml-1 bg-green-100 text-green-800 px-2 py-0.5 rounded-full text-xs">{counts.completed}</span>
                         </button>
                         <button onClick={() => handleTabChange("terminated")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeDetailTab === "terminated" ? "bg-white text-red-700 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
