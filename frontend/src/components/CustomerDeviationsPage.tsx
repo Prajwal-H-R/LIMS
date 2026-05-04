@@ -194,8 +194,6 @@ const CustomerDeviationsPage: React.FC = () => {
                                 <thead className="bg-slate-50 border-b border-slate-200">
                                   <tr className="text-left text-slate-600">
                                     <th className="px-3 py-2 min-w-[220px]">Equipment</th>
-                                    <th className="px-3 py-2">Step %</th>
-                                    <th className="px-3 py-2">Deviation %</th>
                                     <th className="px-3 py-2 min-w-[220px]">Engineer remarks</th>
                                     <th className="px-3 py-2 min-w-[240px]">Your decision</th>
                                     <th className="px-3 py-2 w-[120px]">Action</th>
@@ -213,8 +211,6 @@ const CustomerDeviationsPage: React.FC = () => {
                                           {row.job_id != null ? <span className="text-slate-500">Job #{row.job_id}</span> : <span className="text-slate-400">Job —</span>}
                                         </div>
                                       </td>
-                                      <td className="px-3 py-3 text-slate-700">{row.step_percent ?? "—"}</td>
-                                      <td className="px-3 py-3 font-medium text-red-700">{row.deviation_percent ?? "—"}</td>
                                       <td className="px-3 py-3 text-slate-700 whitespace-pre-wrap">
                                         {row.engineer_remarks || "—"}
                                       </td>

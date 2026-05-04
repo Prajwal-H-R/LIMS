@@ -169,9 +169,12 @@ export const ENDPOINTS = {
   },
 
   // HTW Jobs
-  HTW_JOBS: {
+    HTW_JOBS: {
+    LIST: "/htw-jobs/",
     CREATE: "/htw-jobs/",
-    UPDATE: "/htw-jobs",
+    UPDATE: (jobId: number) => `/htw-jobs/${jobId}`,
+    // >>>>> NEW ENDPOINT DEFINITION <<<<<
+    FINISH: (jobId: number) => `/htw-jobs/${jobId}/finish`, 
     AUTO_SELECT_BASE: "/jobs"
   },
 

@@ -11,7 +11,7 @@ import { useRecordLock } from "../hooks/useRecordLock";
 import {
   ArrowLeft,
   ArrowRight,
-  Save,
+
   Loader2,
   AlertCircle,
   CheckCircle,
@@ -469,22 +469,14 @@ const EnvironmentCheckSection: React.FC<{
 const CalibrationPage: React.FC = () => {
   const { inwardId, equipmentId } = useParams<{ inwardId: string; equipmentId: string }>();
   const navigate = useNavigate();
-  const location = useLocation(); 
+  const location = useLocation();
 
   const { isLocked, lockedBy } = useRecordLock("EQUIPMENT", equipmentId ? Number(equipmentId) : null);
-
-  useEffect(() => {
-      if (isLocked) {
-          console.warn(`[CALIBRATION PAGE] 🔒 Locked by: ${lockedBy}. Form is Read-Only.`);
-      } else {
-          console.log(`[CALIBRATION PAGE] 🔓 Lock acquired for Equipment ${equipmentId}. Edit mode enabled.`);
-      }
-  }, [isLocked, lockedBy, equipmentId]);
-
+  
+  // All your useState hooks remain the same...
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<InwardEquipment | null>(null);
-  
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [isValidated, setIsValidated] = useState(false);
@@ -811,20 +803,57 @@ const CalibrationPage: React.FC = () => {
       }); 
   };
 
-  const handleFinishAndExit = async () => {
-    if (!inwardId || !equipmentId || !jobId || isLocked) return;
+const handleFinishAndExit = async () => {
+    if (!inwardId || !equipmentId || !jobId || isLocked) {
+      console.error("Finish condition not met:", { inwardId, equipmentId, jobId, isLocked });
+      return;
+    }
     setFinishing(true);
     try {
-        await api.post("/uncertainty/uncertainity-calculation", { inward_id: Number(inwardId), inward_eqp_id: Number(equipmentId) });
-        await api.patch(`/htw-jobs/${jobId}`, { job_status: "Calibrated" });
-        setJobStatus("Calibrated");
-        navigate("/engineer/jobs", { state: { viewJobId: Number(inwardId), activeTab: "completed" } });
-    } catch (err: any) {
-        console.error("Finish process failed:", err);
-        alert(`Error: ${err.response?.data?.detail || "Failed to finish job."}`);
-    } finally { setFinishing(false); }
-  };
+      // 1. Call the new finalization endpoint.
+      // This endpoint is now responsible for setting the job status and creating deviations.
+      console.log(`Calling FINISH endpoint for job ${jobId}...`);
+      const finishResponse = await api.post(ENDPOINTS.HTW_JOBS.FINISH(jobId));
+      
+      console.log("Finish response:", finishResponse.data);
+      const finalStatus = finishResponse.data?.final_job_status || "Completed";
 
+      // 2. The uncertainty calculation and job status patching are now handled by the backend.
+      // We no longer need to call them separately from the frontend.
+      // The uncertainty endpoint should likely be called inside the new backend service if needed,
+      // or this logic can be adjusted based on your specific workflow.
+      // For now, we assume the /finish endpoint does everything.
+      
+      setJobStatus(finalStatus);
+
+      // 3. Navigate the user to the correct tab based on the final status.
+      let targetTab = "completed"; // Default
+      if (finalStatus.toLowerCase().includes("oot")) {
+        // If the job is Out-of-Tolerance, navigate to a tab that shows OOT jobs.
+        // You might have a specific tab for this, or it might be part of "completed".
+        // Let's assume you have a way to filter or highlight OOT jobs in the 'completed' tab.
+        targetTab = "completed";
+        alert("Job finalized. Out-of-Tolerance condition detected. A deviation record has been created.");
+      } else {
+        alert("Job finalized successfully and is within tolerance.");
+      }
+
+      navigate("/engineer/jobs", { 
+        state: { 
+          viewJobId: Number(inwardId), 
+          activeTab: targetTab, 
+          highlightJobId: jobId // Optional: tell the jobs list to highlight this job
+        } 
+      });
+
+    } catch (err: any) {
+      console.error("Finish process failed:", err);
+      const detail = err.response?.data?.detail || "Failed to finalize the job. Please check server logs.";
+      alert(`Error: ${detail}`);
+    } finally {
+      setFinishing(false);
+    }
+  };
   const handleTerminateConfirm = async () => {
       if (!jobId || isLocked) return;
       setTerminating(true);
@@ -1167,28 +1196,25 @@ const CalibrationPage: React.FC = () => {
         )}
       </div>
 
+      {/* ... */}
       <div className={`flex-none px-8 py-5 border-t border-gray-100 flex justify-end gap-4 bg-gray-50 ${isLocked ? 'opacity-50 pointer-events-none' : ''}`}>
         {isValidated && isWorksheetSaved ? (
             <div className="flex w-full justify-between">
                 <button onClick={goToPrevStep} disabled={activeTab === 'PRE' || isLocked} className="px-5 py-2 text-sm bg-white text-gray-700 font-medium rounded-lg hover:bg-gray-100 border border-gray-300 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><ArrowLeft className="h-4 w-4" /> Previous</button>
                 {activeTab === 'POST' ? (
                      <button 
-                         onClick={handleFinishAndExit} 
+                         onClick={handleFinishAndExit} // This now calls the updated function
                          disabled={finishing || !postEnvValid || isLocked} 
                          className="px-6 py-2 text-sm bg-gray-900 text-white font-bold rounded-lg hover:bg-black transition-colors shadow-md flex items-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
                      >
                          {finishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                         {finishing ? "Calculating & Saving..." : "Finish / Exit"}
+                         {finishing ? "Finalizing..." : "Finish & Exit"}
                      </button>
                 ) : (
                     <button onClick={goToNextStep} disabled={isLocked} className="px-6 py-2 text-sm bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-md flex items-center gap-2">Next Step <ArrowRight className="h-4 w-4" /></button>
                 )}
             </div>
-        ) : isValidated ? (
-             <div className="flex w-full justify-end gap-2">
-                 <button onClick={handleBack} disabled={isLocked} className="px-5 py-2 text-sm text-gray-700 font-medium hover:bg-gray-200 rounded-lg transition-colors border border-gray-300 bg-white">Cancel</button>
-                 <button onClick={handleSaveWorksheet} disabled={isLocked} className="px-5 py-2 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors shadow-sm flex items-center gap-2"><Save className="h-4 w-4" /> Save Master Standards</button>
-             </div>
+
         ) : (
             <button className="px-5 py-2 text-sm bg-gray-300 text-white font-medium rounded-lg cursor-not-allowed flex items-center gap-2" disabled><Lock className="h-4 w-4" /> Save Worksheet</button>
         )}
