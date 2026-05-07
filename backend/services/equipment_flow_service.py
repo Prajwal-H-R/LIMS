@@ -91,7 +91,7 @@ def get_system_driven_srf_groups(db: Session) -> List[Any]:
         case(
             (
                 (HTWJob.job_id.is_not(None)) & # Condition 1: Job must exist
-                (HTWJob.job_status.notin_(['Calibrated', 'Completed', 'Terminated', 'Cancelled', 'Rejected'])), # Condition 2: Status is active
+                (HTWJob.job_status.notin_(['Calibrated', 'Completed', 'Terminated', 'Cancelled', 'Rejected', 'Completed - OOT'])), # Condition 2: Status is active
                 1
             ),
             else_=None
@@ -103,7 +103,7 @@ def get_system_driven_srf_groups(db: Session) -> List[Any]:
         case(
             (
                 (HTWJob.job_id.is_not(None)) & # Condition 1: Job must exist
-                (HTWJob.job_status.in_(['Calibrated', 'Completed'])), # Condition 2: Status is complete
+                (HTWJob.job_status.in_(['Calibrated', 'Completed' ,'Completed - OOT'])), # Condition 2: Status is complete
                 1
             ),
             else_=None

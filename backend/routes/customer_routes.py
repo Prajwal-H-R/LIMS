@@ -20,7 +20,7 @@ from backend.schemas.customer_schemas import (
     InwardForCustomer,
     AccountActivationRequest,
     CustomerDropdownResponse,
-    TrackingResponse  # <--- Imported this new schema
+    TrackingResponse 
 )
 from backend.schemas.srf_schemas import SrfApiResponse, SrfResponse
 from backend.schemas.certificate.certificate_schemas import CertificateResponse, CertificateRenderData, CustomerCertificateResponse
@@ -34,7 +34,10 @@ from backend.schemas.deviation_schemas import (
 )
 
 router = APIRouter(prefix="/portal", tags=["Customer Portal"])
+
+# Initialize detailed logging for this module
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def get_customer_user(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     """Ensure the user is a customer and has an associated customer_id."""
@@ -120,24 +123,17 @@ async def update_fir_status(
     Allows a customer to update FIR status.
     Valid statuses: 'approved', 'rejected', 'reviewed'.
     """
-    # 1. Fetch the inward record
     inward = db.query(models.Inward).filter(models.Inward.inward_id == inward_id).first()
 
-    # 2. Validation
     if not inward:
         raise HTTPException(status_code=404, detail="FIR not found")
     
     if inward.customer_id != current_user.customer_id:
         raise HTTPException(status_code=404, detail="FIR not found") 
 
-    # 3. Update Logic
-    # Clean input: trim whitespace and convert to lowercase
     status_input = request.status.strip().lower()
-    
     valid_statuses = ["created", "updated", "reviewed"]
     
-    print(f"DEBUG: Updating FIR {inward_id} status. Received: '{status_input}'. Allowed: {valid_statuses}") # Console Log for debugging
-
     if status_input not in valid_statuses:
         raise HTTPException(
             status_code=400, 
@@ -146,12 +142,8 @@ async def update_fir_status(
 
     inward.status = status_input
     
-    # Safely update remarks if the column exists on the model
-    # (This prevents 500 errors if the DB schema doesn't have a customer_remarks column on Inward table)
     if hasattr(inward, 'customer_remarks'):
         inward.customer_remarks = request.remarks
-    elif request.remarks:
-        print("WARNING: 'customer_remarks' field not found on Inward model. Remarks were not saved.")
 
     try:
         db.commit()
@@ -159,7 +151,6 @@ async def update_fir_status(
         return {"message": f"FIR marked as {status_input}", "inward_id": inward_id}
     except Exception as e:
         db.rollback()
-        print(f"DB Error during status update: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -174,8 +165,7 @@ async def submit_fir_remarks(
     return service.submit_customer_remarks(inward_id, request, current_user.customer_id)
 
 
-# --- DEVIATIONS (customer equipment only) ---
-
+# --- DEVIATIONS ---
 
 @router.get("/deviations", response_model=List[CustomerDeviationItem])
 async def list_customer_deviations(
@@ -220,29 +210,22 @@ async def update_deviation_customer_decision(
     return updated
 
 
-# --- TRACKING ENDPOINT ---
-# Added this new endpoint to handle secure tracking
+# --- TRACKING ---
 @router.get("/track", response_model=Optional[TrackingResponse])
 async def track_application_status(
     query: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_customer_user)
 ):
-    """
-    Track equipment status. 
-    Only returns data if the equipment belongs to the authenticated customer.
-    """
     service = CustomerPortalService(db)
     result = service.track_equipment_status(current_user.customer_id, query)
     
     if not result:
-        # We return 404 so the frontend knows to show "No records found"
         raise HTTPException(status_code=404, detail="No matching records found for this account.")
-        
     return result
 
 
-# --- DIRECT ACCESS & ACCOUNT ACTIVATION ENDPOINTS ---
+# --- DIRECT ACCESS ---
 
 @router.get("/direct-fir/{inward_id}", response_model=InwardForCustomer)
 async def get_fir_direct_access(
@@ -254,10 +237,7 @@ async def get_fir_direct_access(
     fir_details = service.get_fir_for_direct_access(inward_id, token)
     
     if not fir_details:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="FIR not found or invalid token."
-        )
+        raise HTTPException(status_code=404, detail="FIR not found or invalid token.")
     return fir_details
 
 @router.post("/direct-fir/{inward_id}/remarks")
@@ -288,26 +268,45 @@ async def get_customers_for_dropdown(
     return service.get_all_customers_for_dropdown()
 
 
-# --- CUSTOMER CERTIFICATES (issued only) ---
+# --- CUSTOMER CERTIFICATES (Updated with detailed Logging) ---
 
-@router.get("/certificates", response_model=List[CustomerCertificateResponse])
+@router.get("/certificates")
 async def get_customer_certificates(
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_customer_user)
 ):
-    """List all issued certificates for the authenticated customer."""
-    certs = cert_service.list_certificates_for_customer(db, current_user.customer_id)
-    inward_ids = [c.inward_id for c in certs if c.inward_id]
-    inwards = {i.inward_id: i for i in db.query(models.Inward).filter(models.Inward.inward_id.in_(inward_ids)).all()} if inward_ids else {}
-    result = []
-    for c in certs:
-        inward = inwards.get(c.inward_id) if c.inward_id else None
-        dc_no = inward.customer_dc_no if inward else None
-        result.append(CustomerCertificateResponse(
-            **CertificateResponse.model_validate(c).model_dump(),
-            dc_number=dc_no or ""
-        ))
-    return result
+    """
+    List all issued certificates for the authenticated customer.
+    Includes BOTH system certificates and external_uploads.
+    """
+    logger.info(f"[PORTAL_CERT_LOG] Requesting certificates for Customer ID: {current_user.customer_id}")
+    
+    try:
+        # Use the combined service logic
+        results = cert_service.list_certificates_with_external(
+            db, 
+            customer_id=current_user.customer_id, 
+            status="ISSUED"
+        )
+        
+        logger.info(f"[PORTAL_CERT_LOG] Service returned {len(results)} total records.")
+        
+        # Log how many of each type were found
+        system_count = sum(1 for x in results if not x.get("is_external"))
+        manual_count = sum(1 for x in results if x.get("is_external"))
+        
+        logger.info(f"[PORTAL_CERT_LOG] System Generated: {system_count}, Manual Uploads: {manual_count}")
+        
+        # Detailed log for manual uploads to ensure URLs are correctly fetched
+        for item in results:
+            if item.get("is_external"):
+                logger.info(f"[PORTAL_CERT_LOG] Found External Cert: {item.get('certificate_no')} - URL: {item.get('certificate_file_url')}")
+
+        return results
+
+    except Exception as e:
+        logger.error(f"[PORTAL_CERT_LOG] Error in get_customer_certificates: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while fetching certificates.")
 
 
 @router.get("/certificates/{certificate_id}/view", response_model=CertificateRenderData)
@@ -317,23 +316,25 @@ async def get_customer_certificate_view(
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_customer_user)
 ):
-    """
-    Get full certificate data for viewing/printing.
-    Returns template_data for rendering the certificate with logo, tables, etc.
-    Images (logos, QR code) are served via API URLs from certificate_assets.
-    """
+    """View logic for System Certificates (Note: External certs open URL directly on frontend)"""
+    logger.info(f"[PORTAL_CERT_LOG] Viewing certificate_id: {certificate_id}")
+    
     cert = cert_service.get_certificate_for_customer(db, certificate_id, current_user.customer_id)
     if not cert:
+        logger.warning(f"[PORTAL_CERT_LOG] Certificate {certificate_id} not found or permission denied for customer {current_user.customer_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Certificate not found or you do not have permission to view it."
         )
+        
     base_url = str(request.base_url).rstrip("/")
     template_data = cert_service.build_template_data(
         db, cert.job_id, certificate=cert, base_url=base_url, use_data_uris=False
     )
+    
     cal_str = cert.date_of_calibration.strftime("%d-%m-%Y") if cert.date_of_calibration else ""
     rec_str = cert.recommended_cal_due_date.strftime("%d-%m-%Y") if cert.recommended_cal_due_date else ""
+    
     return CertificateRenderData(
         certificate_id=cert.certificate_id,
         status=cert.status,
@@ -353,7 +354,9 @@ async def download_customer_certificate_pdf(
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_customer_user),
 ):
-    """Download certificate as PDF (customer: with header/footer)."""
+    """Download System Certificates as PDF."""
+    logger.info(f"[PORTAL_CERT_LOG] Downloading PDF for cert_id: {certificate_id}")
+    
     cert = cert_service.get_certificate_for_customer(db, certificate_id, current_user.customer_id)
     if not cert:
         raise HTTPException(
@@ -365,7 +368,9 @@ async def download_customer_certificate_pdf(
             pdf_service.generate_certificate_pdf, db, certificate_id, False
         )
     except (ValueError, RuntimeError) as e:
+        logger.error(f"[PORTAL_CERT_LOG] PDF Generation Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+        
     filename = cert_service.get_certificate_pdf_filename(db, certificate_id)
     return Response(
         content=pdf_bytes,
