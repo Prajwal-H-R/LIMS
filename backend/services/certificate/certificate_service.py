@@ -1,9 +1,8 @@
-# backend/services/certificate/certificate_service.py
- 
 from datetime import date, datetime, timedelta
 from typing import Optional, Dict, Any, List
 import secrets
-from sqlalchemy import text
+import logging  # Added for debugging
+from sqlalchemy import text, or_  # Added or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
  
@@ -17,13 +16,22 @@ from backend.models.htw.htw_uncertainty_budget import HTWUncertaintyBudget
 from backend.models.htw.htw_pressure_gauge_resolution import HTWPressureGaugeResolution
 from backend.services.htw import htw_repeatability_services as repeat_services
 from backend.services.htw.htw_const_coverage_factor_service import get_active_coverage_factor_k
- 
+from backend.models.external_upload import ExternalUpload
+
+# Set up logger
+logger = logging.getLogger(__name__)
  
 def _derive_certificate_no(nepl_id: str) -> str:
     """Derive certificate_no from NEPL ID. e.g. '25200-4' -> 'NEPL / C / 25200-4'"""
     if not nepl_id:
         return ""
     return f"NEPL / C / {nepl_id}"
+ 
+ 
+def job_status_allows_certificate_generation(job_status: Optional[str]) -> bool:
+    """True when calibration workflow is finished (in-tolerance, OOT, or generic Completed)."""
+    s = (job_status or "").strip().lower()
+    return s in ("calibrated", "completed - oot", "completed")
  
  
 def _build_equipment_dict(equipment: InwardEquipment) -> Dict[str, Any]:
@@ -255,7 +263,7 @@ def _map_uncertainty_budget(budgets: List) -> List[Dict]:
             "permissible_deviation_iso_6789": "+-4",
             "result": result,
         })
-
+ 
     # Ensure the table renders exactly 3 rows/entries as per template requirement.
     while len(out) < 3:
         out.append({
@@ -393,7 +401,7 @@ def build_template_data(
  
     budgets = db.query(HTWUncertaintyBudget).filter(HTWUncertaintyBudget.job_id == job_id).order_by(HTWUncertaintyBudget.step_percent).all()
     template_data["uncertainty_data"] = _map_uncertainty_budget(budgets)
-
+ 
     # If certificate persisted ISO 6789 conformity values, use them for deterministic rendering.
     if certificate:
         saved_perm = getattr(certificate, "permissible_deviation_iso_6789", None)
@@ -404,7 +412,7 @@ def build_template_data(
                     row["permissible_deviation_iso_6789"] = saved_perm[idx]
                 if idx < len(saved_results) and saved_results[idx] is not None:
                     row["result"] = saved_results[idx]
-
+ 
     # --- Lab Scope (lab_unique_number for text under right logo) ---
     try:
         # Use a minimal raw SQL query to avoid ORM mapping failures when optional
@@ -420,7 +428,7 @@ def build_template_data(
         db.rollback()
         # Keep certificate preview resilient even if lab_scope schema differs.
         pass
-
+ 
     # --- Environment Data ---
     try:
         # Import from the correct module path inside the htw package
@@ -462,10 +470,14 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
         raise HTTPException(status_code=404, detail="Job not found")
  
     job_status = (job.job_status or "").strip()
-    if job_status.lower() != "calibrated":
+    if not job_status_allows_certificate_generation(job_status):
         raise HTTPException(
             status_code=400,
-            detail=f"Certificate can only be generated when job status is Calibrated. Current status: {job_status or 'Not set'}.",
+            detail=(
+                "Certificate can only be generated when the calibration job is complete "
+                "(Calibrated, Completed - OOT, or Completed). "
+                f"Current status: {job_status or 'Not set'}."
+            ),
         )
  
     equipment = job.equipment_rel
@@ -473,13 +485,13 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
         raise HTTPException(status_code=400, detail="Job has no equipment")
  
     existing = db.query(HTWCertificate).filter(HTWCertificate.job_id == job_id).first()
-
+ 
     # Pre-compute ISO 6789 conformity values to persist into `htw_certificate`.
     budgets = db.query(HTWUncertaintyBudget).filter(HTWUncertaintyBudget.job_id == job_id).order_by(HTWUncertaintyBudget.step_percent).all()
     mapped_uncertainty_rows = _map_uncertainty_budget(budgets)
     permissible_arr = [row.get("permissible_deviation_iso_6789") for row in mapped_uncertainty_rows]
     results_arr = [row.get("result") for row in mapped_uncertainty_rows]
-
+ 
     if existing:
         if existing.status == "DRAFT":
             # If old rows exist before this feature, backfill the persisted values.
@@ -642,16 +654,16 @@ def issue_certificate(db: Session, certificate_id: int) -> HTWCertificate:
  
 def get_certificate_by_id(db: Session, certificate_id: int) -> Optional[HTWCertificate]:
     return db.query(HTWCertificate).filter(HTWCertificate.certificate_id == certificate_id).first()
-
-
+ 
+ 
 def _ensure_qr_eligible(cert: HTWCertificate) -> None:
     if cert.status not in ("APPROVED", "ISSUED"):
         raise HTTPException(
             status_code=400,
             detail=f"QR can only be generated for APPROVED or ISSUED certificates. Current: {cert.status}",
         )
-
-
+ 
+ 
 def upsert_certificate_qr(db: Session, certificate_id: int, qr_image_base64: str) -> HTWCertificate:
     cert = get_certificate_by_id(db, certificate_id)
     if not cert:
@@ -674,19 +686,19 @@ def upsert_certificate_qr(db: Session, certificate_id: int, qr_image_base64: str
     db.commit()
     db.refresh(cert)
     return cert
-
-
+ 
+ 
 def bulk_upsert_certificate_qr(db: Session, items: List[Dict[str, Any]]) -> List[HTWCertificate]:
     out: List[HTWCertificate] = []
     for item in items:
         out.append(upsert_certificate_qr(db, item["certificate_id"], item["qr_image_base64"]))
     return out
-
-
+ 
+ 
 def get_certificate_by_qr_token(db: Session, qr_token: str) -> Optional[HTWCertificate]:
     return db.query(HTWCertificate).filter(HTWCertificate.qr_token == qr_token).first()
-
-
+ 
+ 
 def get_calibration_status(cert: HTWCertificate) -> str:
     if not cert.recommended_cal_due_date:
         return "Due date not available"
@@ -694,8 +706,8 @@ def get_calibration_status(cert: HTWCertificate) -> str:
     if cert.recommended_cal_due_date < today:
         return "Calibration overdue"
     return "Calibration valid"
-
-
+ 
+ 
 def _sanitize_filename_part(value: str) -> str:
     """Replace characters invalid in filenames with underscore; collapse spaces."""
     if not value or not isinstance(value, str):
@@ -706,8 +718,8 @@ def _sanitize_filename_part(value: str) -> str:
         s = s.replace(c, "_")
     s = "_".join(s.split())  # collapse whitespace to single underscore
     return s or "Unknown"
-
-
+ 
+ 
 def get_certificate_pdf_filename(db: Session, certificate_id: int) -> str:
     """
     Return PDF filename as EquipmentType_Model_SerialNumber.pdf using the certificate's equipment.
@@ -730,8 +742,8 @@ def get_certificate_pdf_filename(db: Session, certificate_id: int) -> str:
         return f"{equipment_type}_{model}_{serial}.pdf"
     safe = (cert.certificate_no or f"cert_{certificate_id}").replace("/", "-").replace("\\", "-")
     return f"{safe}.pdf"
-
-
+ 
+ 
 def list_certificates(
     db: Session,
     job_id: Optional[int] = None,
@@ -823,7 +835,8 @@ def get_certificate_for_customer(db: Session, certificate_id: int, customer_id: 
 def list_srf_groups_with_eligible_equipment(db: Session) -> List[Dict[str, Any]]:
     """
     List SRFs (inwards) with all equipments eligible for certificate.
-    Eligible = equipment has a calibration job (htw_job).
+    Eligible = equipment has a calibration job (htw_job) in a finished state
+    (Calibrated, Completed - OOT, or Completed).
     For each equipment, includes certificate if it exists.
     """
     from sqlalchemy.orm import joinedload
@@ -845,7 +858,7 @@ def list_srf_groups_with_eligible_equipment(db: Session) -> List[Dict[str, Any]]
             job = job_by_eqp.get(eq.inward_eqp_id)
             if not job:
                 continue
-            if (job.job_status or "").strip().lower() != "calibrated":
+            if not job_status_allows_certificate_generation(job.job_status):
                 continue
             cert = cert_by_job.get(job.job_id) if job else None
             cal_date = job.date
@@ -889,4 +902,178 @@ def list_srf_groups_with_eligible_equipment(db: Session) -> List[Dict[str, Any]]
                 "equipments": eligible,
             })
     return result
- 
+
+def get_customer_portal_certificates(db: Session, customer_id: int):
+    logger.info(f"--- START get_customer_portal_certificates for customer_id: {customer_id} ---")
+    
+    # 1. Fetch System-Generated Certificates (ISSUED only)
+    system_certs = (
+        db.query(HTWCertificate)
+        .join(Inward, HTWCertificate.inward_id == Inward.inward_id)
+        .filter(Inward.customer_id == customer_id)
+        .filter(HTWCertificate.status == "ISSUED")
+        .all()
+    )
+    logger.info(f"System Certs Found: {len(system_certs)}")
+
+    # 2. Fetch Manually Uploaded Certificates
+    manual_uploads = (
+        db.query(ExternalUpload, InwardEquipment, Inward)
+        .join(InwardEquipment, ExternalUpload.inward_eqp_id == InwardEquipment.inward_eqp_id)
+        .join(Inward, InwardEquipment.inward_id == Inward.inward_id)
+        .filter(Inward.customer_id == customer_id)
+        .filter(ExternalUpload.certificate_file_url != None)
+        .all()
+    )
+    logger.info(f"Manual Uploads Found: {len(manual_uploads)}")
+
+    results = []
+    for cert in system_certs:
+        results.append({
+            "certificate_id": cert.certificate_id,
+            "job_id": cert.job_id,
+            "certificate_no": cert.certificate_no,
+            "date_of_calibration": cert.date_of_calibration,
+            "ulr_no": cert.ulr_no,
+            "recommended_cal_due_date": cert.recommended_cal_due_date,
+            "customer_dc_no": cert.inward_id,
+            "is_external": False,
+            "status": cert.status
+        })
+
+    for upload, eqp, inward in manual_uploads:
+        logger.info(f"Mapping Manual Upload: ID={upload.id}, EqpID={upload.inward_eqp_id}, URL={upload.certificate_file_url}")
+        results.append({
+            "certificate_id": f"ext_{upload.id}",
+            "job_id": inward.inward_id, 
+            "certificate_no": upload.certificate_file_name or "Manual Upload",
+            "date_of_calibration": eqp.created_at,
+            "ulr_no": "—",
+            "recommended_cal_due_date": None,
+            "customer_dc_no": inward.customer_dc_no or inward.inward_id,
+            "is_external": True,
+            "certificate_file_url": upload.certificate_file_url,
+            "certificate_file_name": upload.certificate_file_name,
+            "status": "ISSUED"
+        })
+
+    logger.info(f"Total Results for Portal: {len(results)}")
+    return results
+
+def get_portal_certificates_combined(db: Session, customer_id: int):
+    logger.info(f"--- START get_portal_certificates_combined for customer_id: {customer_id} ---")
+    
+    system_certs = (
+        db.query(HTWCertificate, Inward.customer_dc_no)
+        .join(Inward, HTWCertificate.inward_id == Inward.inward_id)
+        .filter(Inward.customer_id == customer_id)
+        .filter(HTWCertificate.status == "ISSUED")
+        .all()
+    )
+    logger.info(f"System Certs Found: {len(system_certs)}")
+
+    manual_uploads = (
+        db.query(ExternalUpload, InwardEquipment, Inward)
+        .join(InwardEquipment, ExternalUpload.inward_eqp_id == InwardEquipment.inward_eqp_id)
+        .join(Inward, InwardEquipment.inward_id == Inward.inward_id)
+        .filter(Inward.customer_id == customer_id)
+        .filter(ExternalUpload.certificate_file_url != None)
+        .all()
+    )
+    logger.info(f"Manual Uploads Found: {len(manual_uploads)}")
+
+    combined_results = []
+    for cert, dc_no in system_certs:
+        combined_results.append({
+            "certificate_id": cert.certificate_id,
+            "job_id": cert.job_id,
+            "inward_id": cert.inward_id,
+            "certificate_no": cert.certificate_no,
+            "date_of_calibration": cert.date_of_calibration.isoformat() if cert.date_of_calibration else None,
+            "ulr_no": cert.ulr_no,
+            "field_of_parameter": cert.field_of_parameter,
+            "recommended_cal_due_date": cert.recommended_cal_due_date.isoformat() if cert.recommended_cal_due_date else None,
+            "status": cert.status,
+            "customer_dc_no": dc_no or str(cert.inward_id),
+            "is_external": False
+        })
+
+    for upload, eqp, inward in manual_uploads:
+        logger.info(f"Mapping Manual Upload (Combined): ID={upload.id}, URL={upload.certificate_file_url}")
+        combined_results.append({
+            "certificate_id": f"ext_{upload.id}",
+            "job_id": inward.inward_id,
+            "inward_id": inward.inward_id,
+            "certificate_no": upload.certificate_file_name or "Manual Certificate",
+            "date_of_calibration": upload.created_at.isoformat(),
+            "ulr_no": "—",
+            "field_of_parameter": "—",
+            "recommended_cal_due_date": None,
+            "status": "ISSUED",
+            "customer_dc_no": inward.customer_dc_no or str(inward.inward_id),
+            "is_external": True,
+            "certificate_file_url": upload.certificate_file_url,
+            "certificate_file_name": upload.certificate_file_name
+        })
+
+    combined_results.sort(key=lambda x: x['date_of_calibration'] or '', reverse=True)
+    logger.info(f"Total Results: {len(combined_results)}")
+    return combined_results
+
+def list_certificates_with_external(db: Session, customer_id: Optional[int] = None, status: Optional[str] = None):
+    logger.info(f"--- START list_certificates_with_external (Cust: {customer_id}, Stat: {status}) ---")
+    
+    query = db.query(HTWCertificate, Inward.customer_dc_no).join(Inward, HTWCertificate.inward_id == Inward.inward_id)
+    if customer_id: query = query.filter(Inward.customer_id == customer_id)
+    if status: query = query.filter(HTWCertificate.status == status)
+    
+    system_certs = query.all()
+    logger.info(f"System Certs Query Count: {len(system_certs)}")
+
+    ext_query = db.query(ExternalUpload, InwardEquipment, Inward).join(
+        InwardEquipment, ExternalUpload.inward_eqp_id == InwardEquipment.inward_eqp_id
+    ).join(
+        Inward, InwardEquipment.inward_id == Inward.inward_id
+    ).filter(ExternalUpload.certificate_file_url != None)
+
+    if customer_id: ext_query = ext_query.filter(Inward.customer_id == customer_id)
+    
+    manual_certs = ext_query.all()
+    logger.info(f"Manual Certs Query Count: {len(manual_certs)}")
+
+    results = []
+    for cert, dc_no in system_certs:
+        results.append({
+            "certificate_id": cert.certificate_id,
+            "job_id": cert.job_id,
+            "inward_id": cert.inward_id,
+            "certificate_no": cert.certificate_no,
+            "date_of_calibration": cert.date_of_calibration,
+            "ulr_no": cert.ulr_no,
+            "field_of_parameter": cert.field_of_parameter,
+            "recommended_cal_due_date": cert.recommended_cal_due_date,
+            "status": cert.status,
+            "customer_dc_no": dc_no or str(cert.inward_id),
+            "is_external": False
+        })
+
+    for upload, eqp, inward in manual_certs:
+        logger.info(f"Mapping Manual (External): ID={upload.id}, URL={upload.certificate_file_url}")
+        results.append({
+            "certificate_id": f"ext_{upload.id}",
+            "job_id": inward.inward_id,
+            "inward_id": inward.inward_id,
+            "certificate_no": upload.certificate_file_name or "MANUAL-CERT",
+            "date_of_calibration": upload.created_at.date(), 
+            "ulr_no": "—",
+            "field_of_parameter": "—",
+            "recommended_cal_due_date": None,
+            "status": "ISSUED",
+            "customer_dc_no": inward.customer_dc_no or str(inward.inward_id),
+            "is_external": True,
+            "certificate_file_url": upload.certificate_file_url,
+            "certificate_file_name": upload.certificate_file_name
+        })
+
+    logger.info(f"Final Count Returning to Router: {len(results)}")
+    return results

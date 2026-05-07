@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { 
   Plus, Trash2, Eye, Save, FileText, Loader2, X, ArrowLeft, 
   Camera, Clock, Send, Wrench, AlertCircle, CheckCircle2, 
-  Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, Lock
+  Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, Lock,Settings
 } from 'lucide-react';
 import { InwardForm as InwardFormType, EquipmentDetail as BaseEquipmentDetail, InwardDetail } from '../types/inward';
 // import { EquipmentDetailsModal } from './EquipmentDetailsModal';
@@ -11,7 +11,7 @@ import { api, ENDPOINTS, BACKEND_ROOT_URL } from '../api/config';
 import { useAuth } from '../auth/AuthProvider';
 import { generateStandardInwardPDF } from '../utils/InwardPDFHelper'; 
 import { useRecordLock } from '../hooks/useRecordLock'; 
-
+import { HTWManufacturerSpecsManager } from './AdminComponents/HTWManufacturerSpecsManager';
 // --- TYPE DEFINITIONS ---
 
 interface ExtendedInwardFormType extends InwardFormType {
@@ -163,7 +163,8 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
   const [newMaterialInput, setNewMaterialInput] = useState("");
   const [activeRowForNewMaterial, setActiveRowForNewMaterial] = useState<number | null>(null);
-  
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false); 
+  const [showSpecsManager, setShowSpecsManager] = useState(false);
   // Manufacturer dropdown state
   const [makeOptions, setMakeOptions] = useState<string[]>([]);
   const [modelCache, setModelCache] = useState<Record<string, string[]>>({});
@@ -1063,34 +1064,44 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       submissionData.append('customer_id', formData.customer_id.toString());
       submissionData.append('customer_details', formData.customer_details);
 
-      const formatItemForPayload = (item: EquipmentDetail, idx: number) => {
-        const isOutsource = item.calibration_by === 'Outsource';
-        let statusToSend = item.status || 'created';
-        if (isEditMode) statusToSend = 'updated';
+      const formatItemForPayload = (item: EquipmentDetail, idx: number, shouldMarkAsUpdated: boolean) => {
+  const isOutsource = item.calibration_by === 'Outsource';
+  
+  // LOGIC: 
+  // 1. If shouldMarkAsUpdated is true (visible rows in edit mode), status is 'updated'
+  // 2. If it's a new inward (not edit mode), status is 'created'
+  // 3. Otherwise, preserve the existing status (for hidden rows)
+  let statusToSend = item.status || 'created';
+  
+  if (isEditMode && shouldMarkAsUpdated) {
+    statusToSend = 'updated';
+  } else if (!isEditMode) {
+    statusToSend = 'created';
+  }
 
-        return {
-            inward_eqp_id: item.id, 
-            nepl_id: `${formData.srf_no}-${idx + 1}`,
-            material_desc: item.material_desc, 
-            make: item.make,
-            model: item.model,
-            range: item.range || "",
-            serial_no: item.serial_no || "",
-            qty: Number(item.qty), 
-            calibration_by: item.calibration_by,
-            visual_inspection_notes: item.inspe_status,
-            engineer_remarks: item.engineer_remarks || "",
-            accessories_included: item.accessories_included || "",
-            supplier: isOutsource ? ((item as any).supplier || "") : null, 
-            in_dc: isOutsource ? ((item as any).in_dc || "") : null,
-            out_dc: isOutsource ? ((item as any).out_dc || "") : null,
-            existing_photo_urls: (item.existingPhotoUrls || []).filter((url): url is string => Boolean(url?.trim())),
-            status: statusToSend
-        };
-      };
+  return {
+    inward_eqp_id: item.id, 
+    nepl_id: item.nepl_id || `${formData.srf_no}-${idx + 1}`,
+    material_desc: item.material_desc, 
+    make: item.make,
+    model: item.model,
+    range: item.range || "",
+    serial_no: item.serial_no || "",
+    qty: Number(item.qty), 
+    calibration_by: item.calibration_by,
+    visual_inspection_notes: item.inspe_status,
+    engineer_remarks: item.engineer_remarks || "",
+    accessories_included: item.accessories_included || "",
+    supplier: isOutsource ? ((item as any).supplier || "") : null, 
+    in_dc: isOutsource ? ((item as any).in_dc || "") : null,
+    out_dc: isOutsource ? ((item as any).out_dc || "") : null,
+    existing_photo_urls: (item.existingPhotoUrls || []).filter((url): url is string => Boolean(url?.trim())),
+    status: statusToSend // Uses the calculated status
+  };
+};
 
       // Map visible items
-      const visiblePayload = equipmentList.map((eq, idx) => formatItemForPayload(eq, idx));
+      const visiblePayload = equipmentList.map((eq, idx) => formatItemForPayload(eq, idx, true));
       
       // Map hidden items (from hiddenEquipmentsRef)
       const hiddenPayload = hiddenEquipmentsRef.current.map((eq, idx) => {
@@ -1098,7 +1109,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
           // For simplicity in this fix, reusing the formatter, though index might clash if not careful.
           // In real app, you might want to preserve their original NEPL IDs or append.
           // Assuming strict append logic for now:
-          return formatItemForPayload(eq, equipmentList.length + idx);
+          return formatItemForPayload(eq, equipmentList.length + idx, false);
       });
       
       const fullPayload = [...visiblePayload, ...hiddenPayload];
@@ -1419,7 +1430,16 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       </div>
     );
   }
-
+  if (showSpecsManager) {
+    return (
+      <div className="animate-in fade-in duration-300">
+        <HTWManufacturerSpecsManager onBack={() => {
+            fetchMakes(); // Refresh the list when coming back
+            setShowSpecsManager(false);
+        }} />
+      </div>
+    );
+  }
   return (
     <div className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-gray-100 relative overflow-hidden">
       
@@ -1539,6 +1559,31 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         <div className="mb-6">
            <div className="flex justify-between items-center mb-4">
              <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2"><Wrench size={24} className="text-blue-600" />Equipment Details</h2>
+             <div className="relative">
+    <button
+      type="button"
+      onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
+      className="p-2 text-gray-600 bg-gray-100 border border-gray-200 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+    >
+      <Settings size={20} />
+    </button>
+    
+    {showSettingsDropdown && (
+      <>
+        <div className="fixed inset-0 z-[90]" onClick={() => setShowSettingsDropdown(false)}></div>
+        <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-xl z-[100] py-1">
+          <button
+            type="button"
+            onClick={() => { setShowSettingsDropdown(false); setShowSpecsManager(true); }}
+            className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-md flex items-center gap-2 font-medium transition-colors"
+          >
+            <Settings size={16} className="text-blue-500" />
+            <span>Add/Update Manufacturer Specs</span>
+          </button>
+        </div>
+      </>
+    )}
+  </div>
            </div>
            <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
               <table className="w-full text-sm border-collapse min-w-[2500px]">

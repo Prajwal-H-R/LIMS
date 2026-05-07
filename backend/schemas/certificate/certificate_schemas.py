@@ -127,3 +127,10 @@ class CertificateRenderData(BaseModel):
     authorised_signatory: Optional[str] = None
     # Full template payload
     template_data: Dict[str, Any] = Field(default_factory=dict)
+
+class CertificateWithContext(BaseModel):
+    certificate_id: Any  # Changed to Any because external uses strings "ext_1"
+    # ... existing fields ...
+    is_external: bool = False
+    certificate_file_url: Optional[str] = None
+    certificate_file_name: Optional[str] = None

@@ -818,11 +818,10 @@ const handleFinishAndExit = async () => {
       console.log("Finish response:", finishResponse.data);
       const finalStatus = finishResponse.data?.final_job_status || "Completed";
 
-      // 2. The uncertainty calculation and job status patching are now handled by the backend.
-      // We no longer need to call them separately from the frontend.
-      // The uncertainty endpoint should likely be called inside the new backend service if needed,
-      // or this logic can be adjusted based on your specific workflow.
-      // For now, we assume the /finish endpoint does everything.
+    await api.post("/uncertainty/uncertainity-calculation", {
+          inward_id: Number(inwardId),
+          inward_eqp_id: Number(equipmentId)
+      });
       
       setJobStatus(finalStatus);
 

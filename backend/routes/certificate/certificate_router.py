@@ -121,8 +121,6 @@ def view_certificate_by_qr(
     cert = cert_service.get_certificate_by_qr_token(db, qr_token)
     if not cert:
         raise HTTPException(status_code=404, detail="QR code not found")
-    if cert.status not in ("APPROVED", "ISSUED"):
-        raise HTTPException(status_code=400, detail="Certificate is not available for QR view")
 
     base_url = str(request.base_url).rstrip("/")
     template_data = cert_service.build_template_data(
@@ -151,8 +149,7 @@ def view_certificate_by_id_for_qr(
     cert = cert_service.get_certificate_by_id(db, certificate_id)
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    if cert.status not in ("APPROVED", "ISSUED"):
-        raise HTTPException(status_code=400, detail="Certificate is not available for QR view")
+
 
     base_url = str(request.base_url).rstrip("/")
     template_data = cert_service.build_template_data(
@@ -181,8 +178,7 @@ def view_certificate_page_by_id_for_qr(
     cert = cert_service.get_certificate_by_id(db, certificate_id)
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    if cert.status not in ("APPROVED", "ISSUED"):
-        raise HTTPException(status_code=400, detail="Certificate is not available for QR view")
+
 
     base_url = str(request.base_url).rstrip("/")
     cal_str = cert.date_of_calibration.strftime("%d-%m-%Y") if cert.date_of_calibration else "-"
@@ -247,17 +243,32 @@ def list_srf_groups_with_eligible_equipment(
     return cert_service.list_srf_groups_with_eligible_equipment(db)
 
 
-@router.get("/", response_model=List[CertificateWithContext])
+@router.get("/") # Removed the strict response_model to allow the combined dict structure
 def list_certificates(
-    job_id: Optional[int] = Query(None, description="Filter by job ID"),
-    inward_id: Optional[int] = Query(None, description="Filter by inward ID"),
-    status: Optional[str] = Query(None, description="Filter by status (DRAFT, CREATED, REWORK, APPROVED, ISSUED)"),
+    job_id: Optional[int] = Query(None),
+    inward_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: UserResponse = Depends(check_staff_role),
+    current_user: UserResponse = Depends(get_current_user), # Use get_current_user to allow customers
 ):
-    """List certificates with optional filters. Includes srf_no, nepl_id, material_description for SRF grouping."""
-    certs = cert_service.list_certificates_with_context(db, job_id=job_id, inward_id=inward_id, status=status)
-    return certs
+    """
+    List certificates. 
+    If user is a customer, only show their Issued and External certificates.
+    If user is staff, show according to filters.
+    """
+    customer_id = None
+    # If the logged in user is a customer, we MUST filter by their ID
+    if current_user.role.lower() == "customer":
+        customer_id = current_user.customer_id
+        # Force status to ISSUED for customers
+        status = "ISSUED"
+
+    # Call the new logic that combines both tables
+    return cert_service.list_certificates_with_external(
+        db, 
+        customer_id=customer_id, 
+        status=status
+    )
 
 
 @router.post("/download-bulk-pdf")
@@ -276,11 +287,7 @@ def download_bulk_certificate_pdf(
             cert = cert_service.get_certificate_by_id(db, cert_id)
             if not cert:
                 raise HTTPException(status_code=404, detail=f"Certificate ID {cert_id} not found")
-            if cert.status not in ("APPROVED", "ISSUED"):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Certificate {cert_id} has status {cert.status}. Only APPROVED or ISSUED can be bulk-downloaded.",
-                )
+            
             try:
                 pdf_bytes = pdf_service.generate_certificate_pdf(
                     db, cert_id, no_header_footer=payload.no_header_footer
@@ -320,8 +327,7 @@ def download_certificate_pdf(
     cert = cert_service.get_certificate_by_id(db, certificate_id)
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    if cert.status not in ("APPROVED", "ISSUED"):
-        raise HTTPException(status_code=403, detail="Certificate PDF is available only for APPROVED/ISSUED certificates")
+
     filename = cert_service.get_certificate_pdf_filename(db, certificate_id)
     disposition = "inline" if inline else "attachment"
     return Response(

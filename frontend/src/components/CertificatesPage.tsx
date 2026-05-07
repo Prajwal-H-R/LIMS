@@ -86,6 +86,12 @@ interface HtwJob {
   job_status?: string;
 }
 
+/** Align with backend `job_status_allows_certificate_generation`: finished cal jobs including OOT. */
+function jobStatusAllowsCertificateGeneration(jobStatus: string | null | undefined): boolean {
+  const v = (jobStatus || "").trim().toLowerCase();
+  return v === "calibrated" || v === "completed - oot" || v === "completed";
+}
+
 // --- Constants ---
 
 const STATUS_KEYS = ["DRAFT", "CREATED", "REWORK", "APPROVED", "ISSUED"] as const;
@@ -468,7 +474,7 @@ useEffect(() => {
         )
       );
       const available = jobList.filter(
-        (j) => !certJobIds.has(j.job_id) && (j.job_status || "").toLowerCase() === "calibrated"
+        (j) => !certJobIds.has(j.job_id) && jobStatusAllowsCertificateGeneration(j.job_status)
       );
       setJobs(available);
       if (available.length > 0) {

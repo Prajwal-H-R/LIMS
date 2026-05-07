@@ -1,11 +1,11 @@
 from datetime import date
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Optional
 from sqlalchemy import (
     Column, Integer, String, Date, TIMESTAMP, 
     ForeignKey, func, Boolean
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship, Mapped
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from backend.db import Base
 
@@ -29,7 +29,7 @@ class Inward(Base):
     srf_no = Column(String(100), nullable=False, unique=True, index=True)
     
     material_inward_date = Column(Date, nullable=False)
-    customer_dc_no = Column(String(255))
+    customer_dc_no: Mapped[Optional[str]] = mapped_column(String)
     customer_dc_date = Column(String(255))
     customer_details = Column(String(255))
     received_by = Column(String)
