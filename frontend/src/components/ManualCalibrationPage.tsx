@@ -13,12 +13,13 @@ import {
   X,
   Plus,
   FilePlus,
-CheckCircle2,
+  CheckCircle2,
   Calendar,
   Search,
   Package,
   FileText,
   User,
+  Download,
 } from "lucide-react";
 
 // --- Interfaces ---
@@ -58,25 +59,26 @@ interface ExternalDeviationData {
   attachments?: DeviationAttachment[];
 }
 
-// --- UTILITY: VIEW OR DOWNLOAD (With Prefix Stripping) ---
-const handleViewOrDownload = async (fileUrl: string, originalName: string) => {
-    if (!fileUrl) return;
-    const isExcel = /\.(xlsx|xls|csv)$/i.test(originalName);
-    if (isExcel) {
-        try {
-            const response = await fetch(fileUrl);
-            const blob = await response.blob();
-            const blobUrl = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = originalName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(blobUrl);
-        } catch (error) { window.open(fileUrl, '_blank'); }
-    } else {
-        window.open(fileUrl, '_blank', 'noopener,noreferrer');
+// --- UTILITY: VIEW & DOWNLOAD LOGIC ---
+const handleView = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+};
+
+const handleDownload = async (fileUrl: string, originalName: string) => {
+    try {
+        const response = await fetch(fileUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = originalName; // Strips prefix using original name from DB
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error("Download failed", error);
+        window.open(fileUrl, '_blank');
     }
 };
 
@@ -142,7 +144,6 @@ const DeviationModal: React.FC<{ isOpen: boolean; isEditMode: boolean; onClose: 
             let currentId = deviationId;
             if (isEditMode && deviationId) { await api.patch(`/external-deviations/${deviationId}`, payload); } 
             else { const res = await api.post('/external-deviations/', payload); currentId = res.data.id; }
-            
             if (pendingFiles.length > 0 && currentId) {
                 for (const file of pendingFiles) {
                     const formData = new FormData();
@@ -151,7 +152,7 @@ const DeviationModal: React.FC<{ isOpen: boolean; isEditMode: boolean; onClose: 
                 }
             }
             alert("Saved successfully!"); onSuccess(); onClose();
-        } catch (err) { alert("Failed to save deviation"); } finally { setIsSubmitting(false); }
+        } catch (err) { alert("Failed to save"); } finally { setIsSubmitting(false); }
     };
 
     const getFileFullUrl = (url: string) => url.startsWith('http') ? url : `${api.defaults.baseURL?.split('/api')[0]}${url}`;
@@ -161,84 +162,55 @@ const DeviationModal: React.FC<{ isOpen: boolean; isEditMode: boolean; onClose: 
     return (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="flex justify-between items-center p-6 border-b">
+                <div className="flex justify-between items-center p-6 border-b bg-white">
                     <div className="flex items-center gap-3">
                         <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl"><AlertTriangle size={20}/></div>
                         <h3 className="text-xl font-bold text-gray-900">{isEditMode ? 'View/Edit' : 'Log'} Deviation</h3>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
                 </div>
-
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {isLoadingData ? <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" /></div> : (
                         <div className="space-y-6">
-                            <div className="grid grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NEPL ID</p><p className="font-medium text-blue-600 mt-1">{equipment.nepl_id}</p></div>
-                                <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</p><p className="font-medium text-gray-900 mt-1 truncate">{equipment.material_description}</p></div>
-                            </div>
-
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Type</label>
-                                    <select value={deviationType} onChange={(e) => setDeviationType(e.target.value as 'OOT' | 'NC')} className="w-full p-2.5 bg-white border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Type</label>
+                                    <select value={deviationType} onChange={(e) => setDeviationType(e.target.value as 'OOT' | 'NC')} className="w-full p-2.5 bg-white border border-gray-300 rounded-lg text-sm">
                                         <option value="OOT">OOT</option><option value="NC">NC</option>
                                     </select>
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tool Status</label>
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tool Status</label>
                                     <input type="text" value={toolStatus} onChange={(e) => setToolStatus(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg text-sm" />
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Report Date</label>
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Date</label>
                                     <input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg text-sm" />
                                 </div>
                             </div>
-
-                            {deviationType === 'OOT' && (
-                                <div className="space-y-3 p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Step vs Deviation</label>
-                                    {steps.map((s, i) => (
-                                        <div key={i} className="flex gap-2">
-                                            <input placeholder="Step %" value={s.step} onChange={e => {const n=[...steps]; n[i].step=e.target.value; setSteps(n)}} className="flex-1 p-2 border border-gray-300 rounded-lg text-sm" />
-                                            <input placeholder="Value" value={s.value} onChange={e => {const n=[...steps]; n[i].value=e.target.value; setSteps(n)}} className="flex-1 p-2 border border-gray-300 rounded-lg text-sm" />
-                                            <button onClick={() => setSteps(steps.filter((_, idx) => idx !== i))} className="text-red-500 p-2 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
-                                        </div>
-                                    ))}
-                                    <button onClick={() => setSteps([...steps, {step:'', value:''}])} className="text-xs font-bold text-blue-600 hover:underline">+ Add Row</button>
-                                </div>
-                            )}
-
-
-
                             <div className="space-y-3">
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Evidence Attachments</label>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase">Attachments</label>
                                 <div className="grid gap-2">
                                     {attachments.map(a => (
                                         <div key={a.id} className="flex justify-between items-center bg-gray-50 p-3 border border-gray-200 rounded-xl">
                                             <span className="text-xs font-medium text-gray-700 truncate w-3/4">{a.file_name}</span>
-                                            <button onClick={() => handleViewOrDownload(getFileFullUrl(a.file_url), a.file_name)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg"><Eye size={18}/></button>
-                                        </div>
-                                    ))}
-                                    {pendingFiles.map((f, i) => (
-                                        <div key={i} className="flex justify-between items-center bg-orange-50 p-3 border border-orange-100 rounded-xl text-xs text-orange-700 italic">
-                                            <span>{f.name} (Pending)</span>
-                                            <button onClick={() => setPendingFiles(pendingFiles.filter((_, idx) => idx !== i))}><X size={16}/></button>
+                                            <div className="flex gap-1">
+                                                <button onClick={() => handleView(getFileFullUrl(a.file_url))} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg"><Eye size={16}/></button>
+                                                <button onClick={() => handleDownload(getFileFullUrl(a.file_url), a.file_name)} className="p-2 text-green-600 hover:bg-green-100 rounded-lg"><Download size={16}/></button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
                                 <input type="file" ref={fileInputRef} className="hidden" onChange={e => e.target.files && setPendingFiles([...pendingFiles, e.target.files[0]])} />
                                 <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-50 hover:border-blue-300 transition-all">+ Add File</button>
                             </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Remarks</label><textarea value={engineerRemarks} onChange={e => setEngineerRemarks(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl text-sm h-24" /></div>
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Decision</label><textarea value={customerDecision} onChange={e => setCustomerDecision(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl text-sm h-24" /></div>
+                            </div>
                         </div>
                     )}
-                                                <div className="grid grid-cols-2 gap-4">
-                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Engineer Remarks</label><textarea value={engineerRemarks} onChange={e => setEngineerRemarks(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl text-sm h-24 focus:ring-2 focus:ring-blue-500" /></div>
-                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Customer Decision</label><textarea value={customerDecision} onChange={e => setCustomerDecision(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl text-sm h-24 focus:ring-2 focus:ring-blue-500" /></div>
-                            </div>
                 </div>
                 <div className="p-6 border-t bg-gray-50 flex justify-end gap-3">
-                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900">Cancel</button>
-                    <button onClick={handleSubmit} disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 disabled:bg-blue-300 transition-all flex items-center gap-2">
+                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600">Cancel</button>
+                    <button onClick={handleSubmit} disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 transition-all flex items-center gap-2">
                         {isSubmitting ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16}/>} Save Deviation
                     </button>
                 </div>
@@ -252,21 +224,22 @@ const ActionButtonGroup: React.FC<{ text: string; url: string | null; name: stri
     const fRef = useRef<HTMLInputElement>(null);
     const [upLoading, setUpLoading] = useState(false);
     return (
-        <div className="inline-flex rounded-lg shadow-sm border border-gray-200 bg-white overflow-hidden h-9">
+        <div className="inline-flex rounded-lg shadow-sm border border-gray-200 bg-white overflow-hidden h-10">
             <div className="px-3 py-1.5 text-[10px] font-semibold bg-gray-50 text-gray-500 border-r border-gray-200 flex items-center uppercase tracking-wider">{text}</div>
             <input type="file" ref={fRef} className="hidden" onChange={async (e) => {if(e.target.files?.[0]){ setUpLoading(true); await onUp(e.target.files[0]); setUpLoading(false); }}} />
-            <button onClick={() => fRef.current?.click()} className="p-2 hover:bg-blue-50 text-blue-600">{upLoading ? <Loader2 size={16} className="animate-spin"/> : <UploadCloud size={16}/>}</button>
+            <button onClick={() => fRef.current?.click()} className="p-2.5 hover:bg-blue-50 text-blue-600 transition-colors" title="Upload">{upLoading ? <Loader2 size={16} className="animate-spin"/> : <UploadCloud size={16}/>}</button>
             {url && (
                 <>
-                    <button onClick={() => name && handleViewOrDownload(url, name)} className="p-2 border-l border-gray-100 hover:bg-blue-50 text-gray-600"><Eye size={16}/></button>
-                    <button onClick={onDel} className="p-2 border-l border-gray-100 hover:bg-red-50 text-red-500"><Trash2 size={16}/></button>
+                    <button onClick={() => handleView(url)} className="p-2.5 border-l border-gray-100 hover:bg-blue-50 text-gray-600 transition-colors" title="View"><Eye size={16}/></button>
+                    <button onClick={() => name && handleDownload(url, name)} className="p-2.5 border-l border-gray-100 hover:bg-green-50 text-green-600 transition-colors" title="Download Original"><Download size={16}/></button>
+                    <button onClick={onDel} className="p-2.5 border-l border-gray-100 hover:bg-red-50 text-red-500 transition-colors" title="Delete"><Trash2 size={16}/></button>
                 </>
             )}
         </div>
     );
 };
 
-// --- EQUIPMENT ITEM (TABLE ROW) ---
+// --- EQUIPMENT ITEM ---
 const EquipmentItem: React.FC<{ equipment: BasicEquipment }> = ({ equipment }) => {
     const [docs, setDocs] = useState<any>(null);
     const [loading, setLoading] = useState(true);
@@ -281,9 +254,9 @@ const EquipmentItem: React.FC<{ equipment: BasicEquipment }> = ({ equipment }) =
             ]);
             setDocs({
                 res: d.data.calibration_worksheet_file_url ? `${api.defaults.baseURL?.split('/api')[0]}${d.data.calibration_worksheet_file_url}` : null,
-                resN: d.data.calibration_worksheet_file_name,
+                resN: d.data.calibration_worksheet_file_name || null,
                 cert: d.data.certificate_file_url ? `${api.defaults.baseURL?.split('/api')[0]}${d.data.certificate_file_url}` : null,
-                certN: d.data.certificate_file_name,
+                certN: d.data.certificate_file_name || null,
                 dev: dv.data?.length > 0
             });
         } finally { setLoading(false); }
@@ -291,19 +264,25 @@ const EquipmentItem: React.FC<{ equipment: BasicEquipment }> = ({ equipment }) =
 
     useEffect(() => { fetchAll(); }, [equipment.inward_eqp_id]);
 
+    const handleUp = async (type: string, file: File) => {
+        const f = new FormData(); f.append("file", file); f.append("doc_type", type);
+        await api.post(`/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`, f);
+        fetchAll();
+    };
+
     if (loading) return <tr><td colSpan={3} className="h-16 animate-pulse bg-white"></td></tr>;
 
     return (
         <tr className="hover:bg-gray-50 transition-colors border-b border-gray-100">
             <td className="px-6 py-4 font-medium text-blue-600 text-sm">{equipment.nepl_id}</td>
-            <td className="px-6 py-4 text-gray-900 text-sm">{equipment.material_description}</td>
+            <td className="px-6 py-4 text-gray-900 text-sm font-medium">{equipment.material_description}</td>
             <td className="px-6 py-4">
                 <div className="flex gap-3 items-center">
-                    <ActionButtonGroup text="Worksheet" url={docs?.res} name={docs?.resN} onUp={(f) => {const fd=new FormData(); fd.append("file",f); fd.append("doc_type","result"); api.post(`/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`,fd).then(fetchAll)}} onDel={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/result`).then(fetchAll)} />
-                    <button onClick={() => setModalOpen(true)} className={`h-9 px-3 text-[10px] font-semibold border rounded-lg flex items-center gap-1.5 uppercase transition-all tracking-tight ${docs?.dev ? 'bg-red-50 text-red-600 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+                    <ActionButtonGroup text="Worksheet" url={docs?.res} name={docs?.resN} onUp={(f) => handleUp("result", f)} onDel={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/result`).then(fetchAll)} />
+                    <button onClick={() => setModalOpen(true)} className={`h-10 px-3 text-[10px] font-semibold border rounded-lg flex items-center gap-1.5 uppercase transition-all tracking-tight ${docs?.dev ? 'bg-red-50 text-red-600 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
                         <AlertTriangle size={14}/> {docs?.dev ? 'View Deviation' : 'Log Deviation'}
                     </button>
-                    <ActionButtonGroup text="Cert" url={docs?.cert} name={docs?.certN} onUp={(f) => {const fd=new FormData(); fd.append("file",f); fd.append("doc_type","certificate"); api.post(`/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`,fd).then(fetchAll)}} onDel={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/certificate`).then(fetchAll)} />
+                    <ActionButtonGroup text="Cert" url={docs?.cert} name={docs?.certN} onUp={(f) => handleUp("certificate", f)} onDel={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/certificate`).then(fetchAll)} />
                 </div>
             </td>
             <DeviationModal isOpen={modalOpen} isEditMode={docs?.dev} onClose={() => setModalOpen(false)} equipment={equipment} onSuccess={fetchAll} />
@@ -311,7 +290,7 @@ const EquipmentItem: React.FC<{ equipment: BasicEquipment }> = ({ equipment }) =
     );
 };
 
-// --- SUB-PAGE (DETAIL LIST) ---
+// --- SUB-PAGE ---
 const EquipmentDetailList: React.FC<{ group: SrfGroupSummary; onBack: () => void }> = ({ group, onBack }) => {
     const [list, setList] = useState<BasicEquipment[]>([]);
     const [loading, setLoading] = useState(true);
@@ -324,24 +303,13 @@ const EquipmentDetailList: React.FC<{ group: SrfGroupSummary; onBack: () => void
         <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
                 <div><h1 className="text-2xl font-bold text-gray-900 tracking-tight">Job Details</h1><p className="text-gray-500 text-sm mt-1">SRF: <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-700 border border-gray-200">{group.srf_no}</span></p></div>
-                <button onClick={onBack} className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm focus:outline-none"><ArrowLeft size={16} /><span>Back to List</span></button>
+                <button onClick={onBack} className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm"><ArrowLeft size={16} /><span>Back to List</span></button>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3">
-                    <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><User size={20}/></div>
-                    <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</p><p className="font-medium text-gray-900 mt-1">{group.customer_name}</p></div>
-                </div>
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3">
-                    <div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl"><Calendar size={20}/></div>
-                    <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Inward Date</p><p className="font-medium text-gray-900 mt-1">{new Date(group.received_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div>
-                </div>
-                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3">
-                    <div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl"><Package size={20}/></div>
-                    <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Equipments</p><p className="font-medium text-gray-900 mt-1">{group.equipment_count} Items</p></div>
-                </div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3"><div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><User size={20}/></div><div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</p><p className="font-medium text-gray-900 mt-1">{group.customer_name}</p></div></div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3"><div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl"><Calendar size={20}/></div><div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Received</p><p className="font-medium text-gray-900 mt-1">{new Date(group.received_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div></div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3"><div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl"><Package size={20}/></div><div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Items</p><p className="font-medium text-gray-900 mt-1">{group.equipment_count} Equipments</p></div></div>
             </div>
-
             <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
                 <table className="w-full text-left">
                     <thead><tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200"><th className="px-6 py-4 font-semibold">NEPL ID</th><th className="px-6 py-4 font-semibold">Description</th><th className="px-6 py-4 font-semibold">Actions & Evidence</th></tr></thead>
@@ -378,13 +346,12 @@ const ManualCalibrationPage: React.FC = () => {
                         <button onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm transition-all shadow-sm"><ArrowLeft size={16}/><span>Back to Dashboard</span></button>
                     </div>
                 )}
-
                 {loading ? <ManualCalibrationSkeleton /> : selectedGroup ? (
                     <EquipmentDetailList group={selectedGroup} onBack={() => setSelectedGroup(null)} />
                 ) : (
                     <div className="space-y-4">
                         <div className="bg-white p-5 border border-gray-200 rounded-2xl shadow-sm">
-                            <div className="relative max-w-md w-full"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-gray-400" /></div><input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search by SRF or Customer..." className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" /></div>
+                            <div className="relative max-w-md w-full"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-gray-400" /></div><input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search SRF or Customer..." className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" /></div>
                         </div>
                         <div className="space-y-3">
                             {filtered.map(g => (
@@ -394,13 +361,12 @@ const ManualCalibrationPage: React.FC = () => {
                                         <div>
                                             <p className="font-semibold text-lg text-gray-800">SRF No: {g.srf_no}</p>
                                             <p className="text-sm text-gray-600 mt-1">Customer: <span className="font-medium text-gray-900">{g.customer_name}</span> — Items: <span className="font-medium text-gray-700">{g.equipment_count}</span></p>
-                                            <p className="text-xs text-gray-400 font-medium flex items-center gap-1 mt-1"><Calendar size={12}/> {new Date(g.received_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                            <p className="text-xs text-gray-400 font-medium flex items-center gap-1 mt-1 uppercase tracking-tighter"><Calendar size={12}/> Received: {new Date(g.received_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                                         </div>
                                     </div>
                                     <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-all transform group-hover:translate-x-1" />
                                 </div>
                             ))}
-                            {filtered.length === 0 && <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200 text-gray-400 font-medium">No results found</div>}
                         </div>
                     </div>
                 )}

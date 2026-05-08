@@ -31,17 +31,6 @@ import { api, ENDPOINTS } from "../api/config";
 //  TYPES                                                               //
 // ================================================================== //
 
-/**
- * Timeline step visual states sent by the backend.
- *
- * completed   → all previous steps done          → blue filled circle
- * current     → active / in-progress step        → blue pulsing circle
- * pending     → not yet reached                  → grey circle
- * terminated  → HTW job was terminated           → red circle   (XCircle)
- * deviated    → active deviation raised          → amber circle (AlertTriangle)
- * oot         → completed out-of-tolerance       → orange circle (Gauge)
- * onhold      → job on hold, no deviation        → amber circle (PauseCircle)
- */
 type TimelineStatus =
   | "completed"
   | "current"
@@ -104,12 +93,6 @@ interface StatusFlags {
   isInward:     boolean;
 }
 
-/**
- * Single source of truth for classifying a display_status string.
- *
- * Priority order (highest wins — each flag excludes lower-priority ones):
- *   terminated > oot > deviated > onhold > dispatched > ready > completed > progress > inward
- */
 const classifyStatus = (displayStatus: string): StatusFlags => {
   const s = displayStatus.toLowerCase();
 
@@ -175,12 +158,6 @@ const getAccentColour = (displayStatus: string): string => {
 //  ICON HELPERS                                                        //
 // ================================================================== //
 
-/**
- * Maps backend `icon` key strings → Lucide icon components.
- *
- * Backend may send:
- *   box | file | settings | check | badge | truck | gauge | x | alert | pause
- */
 const TimelineIcon: React.FC<{ iconName: string; className?: string }> = ({
   iconName,
   className = "h-5 w-5",
@@ -289,8 +266,11 @@ const getStepConfig = (stepStatus: TimelineStatus): StepConfig => {
 };
 
 /**
- * Override styling for certificate steps when display_status corresponds
- * to that step being active — applied only when step.status === "current".
+ * Override styling for special steps when display_status corresponds
+ * to that step being active.
+ *
+ * ✅ OOT override: when on Calibration Completed step but display
+ *    indicates Out Of Tolerance, render orange Gauge.
  *
  * Certificate Ready      → green
  * Certificate Dispatched → purple
@@ -301,6 +281,18 @@ const getCertStepOverride = (
 ): StepConfig | null => {
   const ds = displayStatus.toLowerCase();
   const sl = stepLabel.toLowerCase();
+
+  // ✅ OOT override on the Completed step
+  if (
+    (sl.includes("calibration completed") || sl.includes("completed")) &&
+    (ds.includes("out of tolerance") || ds.includes("oot"))
+  ) {
+    return {
+      circle: "bg-orange-500 border-orange-500 text-white shadow-md shadow-orange-200 scale-110",
+      icon:   <Gauge className="h-5 w-5" />,
+      label:  "text-orange-700 font-bold",
+    };
+  }
 
   if (
     sl.includes("certificate ready") &&
@@ -335,6 +327,7 @@ const TimelineStepNode: React.FC<{
 }> = ({ step, displayStatus }) => {
   let cfg = getStepConfig(step.status);
 
+  // Apply override for certificate / OOT steps when current
   if (step.status === "current") {
     const override = getCertStepOverride(step.label, displayStatus);
     if (override) cfg = override;
@@ -342,7 +335,6 @@ const TimelineStepNode: React.FC<{
 
   return (
     <div className="relative z-10 flex flex-col items-center min-w-0 flex-1">
-      {/* Circle */}
       <div
         className={`
           w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center
@@ -352,7 +344,6 @@ const TimelineStepNode: React.FC<{
         {cfg.icon}
       </div>
 
-      {/* Label + date */}
       <div className="mt-3 text-center px-0.5 md:px-1">
         <p className={`text-[10px] md:text-xs leading-tight ${cfg.label}`}>
           {step.label}
@@ -547,13 +538,7 @@ const DetailView: React.FC<{
   const accentColour = getAccentColour(item.display_status);
   const c            = classifyStatus(item.display_status);
 
-  /**
-   * ✅ TRUNCATE timeline when terminated.
-   *
-   * When a job is terminated, the calibration is permanently stopped —
-   * the customer should NOT see remaining steps faded out as if they
-   * could still be completed.
-   */
+  // Truncate timeline at terminated step
   const visibleTimeline = React.useMemo(() => {
     if (c.isTerminated) {
       const terminatedIdx = item.timeline.findIndex(
@@ -566,12 +551,7 @@ const DetailView: React.FC<{
     return item.timeline;
   }, [item.timeline, c.isTerminated]);
 
-  /**
-   * Progress percentage for the connector fill line.
-   *
-   * For terminated state: fill = 100% of the truncated track.
-   * For other states: standard "non-pending steps minus 1" logic.
-   */
+  // Progress fill percentage
   const progressPct = React.useMemo(() => {
     if (c.isTerminated) return 100;
     const nonPendingCount = visibleTimeline.filter(
@@ -585,18 +565,7 @@ const DetailView: React.FC<{
       : 0;
   }, [visibleTimeline, c.isTerminated]);
 
-  /**
-   * ✅ Inset percentage = half of one step's width.
-   *
-   * Each step is `flex-1`, so each occupies `100 / N` % of the container.
-   * The first circle's centre sits at `(100/N)/2` % from the left edge,
-   * and the last circle's centre sits the same distance from the right.
-   *
-   * Using these values for the track's left/right insets ensures the
-   * connector line starts at the FIRST circle's centre and ends at
-   * the LAST circle's centre — no extra line bleeding past the
-   * outermost nodes.
-   */
+  // Inset = half of one step's width (track aligns with first/last circle centres)
   const insetPct = visibleTimeline.length > 0
     ? (100 / visibleTimeline.length) / 2
     : 0;
@@ -604,7 +573,6 @@ const DetailView: React.FC<{
   return (
     <div className="animate-in slide-in-from-right-4 fade-in duration-300 space-y-6">
 
-      {/* ── Back button ─────────────────────────────────────────────── */}
       <button
         onClick={onBack}
         className="flex items-center gap-2 text-slate-500 hover:text-blue-600
@@ -614,7 +582,6 @@ const DetailView: React.FC<{
         Back to Results
       </button>
 
-      {/* ── Alert banner ─────────────────────────────────────────────── */}
       {item.alert_message && (
         <AlertBanner
           message={item.alert_message}
@@ -622,16 +589,13 @@ const DetailView: React.FC<{
         />
       )}
 
-      {/* ── Header card ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200
                       overflow-hidden">
 
-        {/* Coloured accent strip — colour reflects current status */}
         <div className={`h-1.5 w-full ${accentColour}`} />
 
         <div className="p-5 md:p-8">
 
-          {/* Title row */}
           <div className="flex flex-col sm:flex-row sm:items-start
                           sm:justify-between gap-4 mb-8">
             <div>
@@ -662,7 +626,6 @@ const DetailView: React.FC<{
               </p>
             </div>
 
-            {/* Meta chips */}
             <div className="flex flex-wrap gap-2 shrink-0">
               <span className="inline-flex items-center gap-1.5 bg-slate-100
                                text-slate-600 text-xs font-semibold px-3 py-1.5
@@ -682,15 +645,8 @@ const DetailView: React.FC<{
             </div>
           </div>
 
-          {/* ── Horizontal timeline ──────────────────────────────────── */}
+          {/* Horizontal timeline */}
           <div className="relative overflow-x-auto">
-            {/*
-              ✅ Track lines now span ONLY between the first and last
-              circle centres. No extra line extending past the outermost
-              nodes.
-            */}
-
-            {/* Grey base track */}
             <div
               className="absolute top-5 md:top-6 h-1 bg-slate-100 rounded-full"
               style={{
@@ -699,7 +655,6 @@ const DetailView: React.FC<{
               }}
             />
 
-            {/* Coloured progress fill */}
             <div
               className={`absolute top-5 md:top-6 h-1 rounded-full
                           transition-all duration-1000 ${accentColour}`}
@@ -722,12 +677,10 @@ const DetailView: React.FC<{
             </div>
           </div>
 
-          {/* Timeline legend */}
           <TimelineLegend displayStatus={item.display_status} />
         </div>
       </div>
 
-      {/* ── Info grid ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         {[
           { label: "Customer", value: item.customer_name },
@@ -753,7 +706,6 @@ const DetailView: React.FC<{
         ))}
       </div>
 
-      {/* ── Activity Log ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200
                       p-5 md:p-8">
         <div className="flex items-center gap-2 mb-6">
@@ -813,7 +765,6 @@ const ListView: React.FC<{
   <div className="bg-white rounded-2xl shadow-sm border border-slate-200
                   overflow-hidden animate-in fade-in duration-300">
 
-    {/* Header */}
     <div className="px-5 md:px-6 py-4 border-b border-slate-100 bg-slate-50/60
                     flex flex-col sm:flex-row sm:items-center
                     sm:justify-between gap-2">
@@ -832,7 +783,6 @@ const ListView: React.FC<{
       </span>
     </div>
 
-    {/* Scrollable table */}
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 border-b border-slate-200">
@@ -977,7 +927,6 @@ const SearchBar: React.FC<{
   <div className="bg-white rounded-2xl shadow-xl overflow-hidden
                   border border-slate-100 mb-8">
 
-    {/* Hero strip */}
     <div className="bg-gradient-to-r from-blue-700 to-blue-500 p-6 md:p-8
                     relative overflow-hidden">
       <div className="absolute -top-24 -right-24 w-72 h-72 bg-white
@@ -1016,7 +965,6 @@ const SearchBar: React.FC<{
       </div>
     </div>
 
-    {/* Search form */}
     <div className="p-5 md:p-8">
       <form onSubmit={onSubmit} className="flex gap-3">
         <div className="flex-1 relative">
@@ -1051,7 +999,6 @@ const SearchBar: React.FC<{
         </button>
       </form>
 
-      {/* Hint chips */}
       <div className="flex flex-wrap gap-2 mt-4">
         {["Search by SRF No", "Search by DC No", "Search by NEPL ID"].map(
           (hint) => (
@@ -1118,7 +1065,6 @@ const TrackStatusPage: React.FC = () => {
         );
         setSearchResult(response.data);
 
-        // Auto-open detail view when exactly one NEPL ID match is returned
         if (
           response.data.found_via === "NEPL ID" &&
           response.data.equipments.length === 1
@@ -1147,7 +1093,6 @@ const TrackStatusPage: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto mt-6 px-4 pb-16">
 
-      {/* Search bar — hidden when detail view is open */}
       {!selectedItem && (
         <SearchBar
           searchQuery={searchQuery}
@@ -1157,7 +1102,6 @@ const TrackStatusPage: React.FC = () => {
         />
       )}
 
-      {/* Content area */}
       {loading ? (
         <LoadingSkeleton />
       ) : selectedItem ? (

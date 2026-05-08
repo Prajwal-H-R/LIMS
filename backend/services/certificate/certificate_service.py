@@ -1029,33 +1029,33 @@ def get_portal_certificates_combined(db: Session, customer_id: int):
     return combined_results
 
 def list_certificates_with_external(
-    db: Session, 
-    customer_id: Optional[int] = None, 
+    db: Session,
+    customer_id: Optional[int] = None,
     status: Optional[str] = None,
     exclude_external: bool = False
 ):
-    # 1. Update the query to include Inward.srf_no, InwardEquipment.nepl_id, and material_description
     query = db.query(
-        HTWCertificate, 
-        Inward.customer_dc_no, 
-        Inward.srf_no,  # Added
-        InwardEquipment.nepl_id,  # Added
-        InwardEquipment.material_description  # Added
+        HTWCertificate,
+        Inward.customer_dc_no,
+        Inward.srf_no,
+        InwardEquipment.nepl_id,
+        InwardEquipment.material_description
     ).join(
         Inward, HTWCertificate.inward_id == Inward.inward_id
     ).join(
         InwardEquipment, HTWCertificate.inward_eqp_id == InwardEquipment.inward_eqp_id
     )
-    
-    if customer_id: 
+
+    if customer_id:
         query = query.filter(Inward.customer_id == customer_id)
-    if status: 
+
+    if status:
         query = query.filter(HTWCertificate.status == status)
-    
+
     system_certs = query.all()
 
     results = []
-    # 2. Update the loop to unpack the new fields
+
     for cert, dc_no, srf_no, nepl_id, mat_desc in system_certs:
         results.append({
             "certificate_id": cert.certificate_id,
@@ -1068,24 +1068,54 @@ def list_certificates_with_external(
             "recommended_cal_due_date": cert.recommended_cal_due_date,
             "status": cert.status,
             "customer_dc_no": dc_no or str(cert.inward_id),
-            "srf_no": str(srf_no) if srf_no else None, # ADDED THIS KEY
-            "nepl_id": nepl_id, # ADDED THIS KEY
-            "material_description": mat_desc, # ADDED THIS KEY
+            "srf_no": str(srf_no) if srf_no else None,
+            "nepl_id": nepl_id,
+            "material_description": mat_desc,
             "is_external": False
         })
 
-    # ... keep the manual/external upload logic below as is ...
-    # (Ensure the external loop also has a "srf_no" key)
-    
     if not exclude_external:
-        # ... (your existing ext_query logic) ...
+        manual_cert_query = (
+            db.query(ExternalUpload, InwardEquipment, Inward)
+            .join(
+                InwardEquipment,
+                ExternalUpload.inward_eqp_id == InwardEquipment.inward_eqp_id
+            )
+            .join(
+                Inward,
+                InwardEquipment.inward_id == Inward.inward_id
+            )
+        )
+
+        if customer_id:
+            manual_cert_query = manual_cert_query.filter(
+                Inward.customer_id == customer_id
+            )
+
+        manual_cert_query = manual_cert_query.filter(
+            ExternalUpload.certificate_file_url.isnot(None)
+        )
+
+        manual_cert = manual_cert_query.all()
+
         for upload, eqp, inward in manual_cert:
             results.append({
                 "certificate_id": f"ext_{upload.id}",
-                # ... existing fields ...
-                "srf_no": str(inward.srf_no) if inward.srf_no else None, # ADD THIS HERE TOO
+                "job_id": inward.inward_id,
+                "inward_id": inward.inward_id,
+                "certificate_no": upload.certificate_file_name or "Manual Certificate",
+                "date_of_calibration": upload.created_at,
+                "ulr_no": "—",
+                "field_of_parameter": "—",
+                "recommended_cal_due_date": None,
+                "status": "ISSUED",
+                "customer_dc_no": inward.customer_dc_no or str(inward.inward_id),
+                "srf_no": str(inward.srf_no) if inward.srf_no else None,
+                "nepl_id": eqp.nepl_id,
+                "material_description": eqp.material_description,
                 "is_external": True,
-                # ...
+                "certificate_file_url": upload.certificate_file_url,
+                "certificate_file_name": upload.certificate_file_name,
             })
-            
+
     return results
