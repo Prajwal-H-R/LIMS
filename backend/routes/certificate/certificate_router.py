@@ -243,31 +243,45 @@ def list_srf_groups_with_eligible_equipment(
     return cert_service.list_srf_groups_with_eligible_equipment(db)
 
 
-@router.get("/") # Removed the strict response_model to allow the combined dict structure
+@router.get("/", response_model=List[CertificateWithContext])
 def list_certificates(
     job_id: Optional[int] = Query(None),
     inward_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: UserResponse = Depends(get_current_user), # Use get_current_user to allow customers
+    current_user: UserResponse = Depends(get_current_user),
 ):
     """
     List certificates. 
-    If user is a customer, only show their Issued and External certificates.
-    If user is staff, show according to filters.
+    - If Customer: Only see Issued + External certificates.
+    - If Staff/Engineer: See all certificates (including External).
+    - If Admin: See system certificates only (Hide External).
     """
     customer_id = None
-    # If the logged in user is a customer, we MUST filter by their ID
-    if current_user.role.lower() == "customer":
-        customer_id = current_user.customer_id
-        # Force status to ISSUED for customers
-        status = "ISSUED"
+    exclude_external = False
+    
+    user_role = current_user.role.lower()
 
-    # Call the new logic that combines both tables
+    # logic for Customer
+    if user_role == "customer":
+        customer_id = current_user.customer_id
+        status = "ISSUED"
+        exclude_external = False # Customers SHOULD see manual uploads
+        
+    # logic for Admin (Requirement: hide in admin portal)
+    elif user_role == "admin":
+        exclude_external = True # Admin SHUOLD NOT see manual uploads
+        
+    # logic for Engineer/Staff
+    else:
+        exclude_external = False # Engineers SHOULD see manual uploads
+
+    # Call the service with the new flag
     return cert_service.list_certificates_with_external(
         db, 
         customer_id=customer_id, 
-        status=status
+        status=status,
+        exclude_external=exclude_external
     )
 
 

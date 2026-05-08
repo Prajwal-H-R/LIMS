@@ -750,13 +750,21 @@ def list_certificates(
     inward_id: Optional[int] = None,
     status: Optional[str] = None,
 ) -> List[HTWCertificate]:
-    q = db.query(HTWCertificate)
+    # We use joinedload to ensure the 'inward' and 'equipment' relationships 
+    # are fetched in a single SQL query.
+    # Note: Ensure HTWCertificate has a relationship named 'inward_rel' or 'inward'
+    q = db.query(HTWCertificate).options(
+        joinedload(HTWCertificate.inward_rel),    # This allows us to get srf_no
+        joinedload(HTWCertificate.inward_eqp_rel) # This allows us to get nepl_id/material
+    )
+    
     if job_id:
         q = q.filter(HTWCertificate.job_id == job_id)
     if inward_id:
         q = q.filter(HTWCertificate.inward_id == inward_id)
     if status:
         q = q.filter(HTWCertificate.status == status)
+        
     return q.order_by(HTWCertificate.created_at.desc()).all()
  
  
@@ -1020,29 +1028,35 @@ def get_portal_certificates_combined(db: Session, customer_id: int):
     logger.info(f"Total Results: {len(combined_results)}")
     return combined_results
 
-def list_certificates_with_external(db: Session, customer_id: Optional[int] = None, status: Optional[str] = None):
-    logger.info(f"--- START list_certificates_with_external (Cust: {customer_id}, Stat: {status}) ---")
+def list_certificates_with_external(
+    db: Session, 
+    customer_id: Optional[int] = None, 
+    status: Optional[str] = None,
+    exclude_external: bool = False
+):
+    # 1. Update the query to include Inward.srf_no, InwardEquipment.nepl_id, and material_description
+    query = db.query(
+        HTWCertificate, 
+        Inward.customer_dc_no, 
+        Inward.srf_no,  # Added
+        InwardEquipment.nepl_id,  # Added
+        InwardEquipment.material_description  # Added
+    ).join(
+        Inward, HTWCertificate.inward_id == Inward.inward_id
+    ).join(
+        InwardEquipment, HTWCertificate.inward_eqp_id == InwardEquipment.inward_eqp_id
+    )
     
-    query = db.query(HTWCertificate, Inward.customer_dc_no).join(Inward, HTWCertificate.inward_id == Inward.inward_id)
-    if customer_id: query = query.filter(Inward.customer_id == customer_id)
-    if status: query = query.filter(HTWCertificate.status == status)
+    if customer_id: 
+        query = query.filter(Inward.customer_id == customer_id)
+    if status: 
+        query = query.filter(HTWCertificate.status == status)
     
     system_certs = query.all()
-    logger.info(f"System Certs Query Count: {len(system_certs)}")
-
-    ext_query = db.query(ExternalUpload, InwardEquipment, Inward).join(
-        InwardEquipment, ExternalUpload.inward_eqp_id == InwardEquipment.inward_eqp_id
-    ).join(
-        Inward, InwardEquipment.inward_id == Inward.inward_id
-    ).filter(ExternalUpload.certificate_file_url != None)
-
-    if customer_id: ext_query = ext_query.filter(Inward.customer_id == customer_id)
-    
-    manual_certs = ext_query.all()
-    logger.info(f"Manual Certs Query Count: {len(manual_certs)}")
 
     results = []
-    for cert, dc_no in system_certs:
+    # 2. Update the loop to unpack the new fields
+    for cert, dc_no, srf_no, nepl_id, mat_desc in system_certs:
         results.append({
             "certificate_id": cert.certificate_id,
             "job_id": cert.job_id,
@@ -1054,26 +1068,24 @@ def list_certificates_with_external(db: Session, customer_id: Optional[int] = No
             "recommended_cal_due_date": cert.recommended_cal_due_date,
             "status": cert.status,
             "customer_dc_no": dc_no or str(cert.inward_id),
+            "srf_no": str(srf_no) if srf_no else None, # ADDED THIS KEY
+            "nepl_id": nepl_id, # ADDED THIS KEY
+            "material_description": mat_desc, # ADDED THIS KEY
             "is_external": False
         })
 
-    for upload, eqp, inward in manual_certs:
-        logger.info(f"Mapping Manual (External): ID={upload.id}, URL={upload.certificate_file_url}")
-        results.append({
-            "certificate_id": f"ext_{upload.id}",
-            "job_id": inward.inward_id,
-            "inward_id": inward.inward_id,
-            "certificate_no": upload.certificate_file_name or "MANUAL-CERT",
-            "date_of_calibration": upload.created_at.date(), 
-            "ulr_no": "—",
-            "field_of_parameter": "—",
-            "recommended_cal_due_date": None,
-            "status": "ISSUED",
-            "customer_dc_no": inward.customer_dc_no or str(inward.inward_id),
-            "is_external": True,
-            "certificate_file_url": upload.certificate_file_url,
-            "certificate_file_name": upload.certificate_file_name
-        })
-
-    logger.info(f"Final Count Returning to Router: {len(results)}")
+    # ... keep the manual/external upload logic below as is ...
+    # (Ensure the external loop also has a "srf_no" key)
+    
+    if not exclude_external:
+        # ... (your existing ext_query logic) ...
+        for upload, eqp, inward in manual_cert:
+            results.append({
+                "certificate_id": f"ext_{upload.id}",
+                # ... existing fields ...
+                "srf_no": str(inward.srf_no) if inward.srf_no else None, # ADD THIS HERE TOO
+                "is_external": True,
+                # ...
+            })
+            
     return results

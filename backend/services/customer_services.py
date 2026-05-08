@@ -66,6 +66,7 @@ class JobStatus:
     COMPLETED_SET  = {COMPLETED, CALIBRATED, CLOSED}
     ON_HOLD_SET    = {ON_HOLD, "hold", "onhold"}
     TERMINATED_SET = {TERMINATED}
+    OOT_SET        = {COMPLETED_OOT, "oot", "out_of_tolerance"}
 
 
 class DeviationStatus:
@@ -180,7 +181,13 @@ class CustomerPortalService:
             (equipment.material_description or "").lower(),
             (equipment.calibration_by or "").lower(),
         ]))
-        return any(kw in haystack for kw in self.HTW_KEYWORDS)
+        is_htw = any(kw in haystack for kw in self.HTW_KEYWORDS)
+        logger.debug(
+            "[HTW-DETECT] eqp_id=%s material=%r calibration_by=%r is_htw=%s",
+            getattr(equipment, "inward_eqp_id", None),
+            equipment.material_description, equipment.calibration_by, is_htw,
+        )
+        return is_htw
 
     # ---------------------------------------------------------------- #
     #  DEVIATION STATE HELPERS                                           #
@@ -494,7 +501,24 @@ class CustomerPortalService:
         has_active_deviation: bool,
         deviation_was_closed: bool,
     ) -> Dict[str, Any]:
+        """
+        HTW timeline: 6 steps.
 
+        Step indices:
+          0 = Received
+          1 = Inward
+          2 = Calibration In Progress   (label is OVERWRITTEN dynamically)
+          3 = Calibration Completed
+          4 = Certificate Ready
+          5 = Certificate Dispatched
+
+        IMPORTANT: Step #2's label is mutated based on job state so the
+        active step's text reflects reality (e.g. "Terminated",
+        "Deviation Raised", "On Hold") instead of always saying
+        "Calibration In Progress".
+        """
+
+        # ── Default step labels ───────────────────────────────────────
         steps = [
             {"label": "Received",                "icon": "box"},
             {"label": "Inward",                  "icon": "file"},
@@ -532,66 +556,107 @@ class CustomerPortalService:
         display_status = "Inward Generated"
         alert_message: Optional[str] = None
 
-        # ── Job logic ─────────────────────────────────────────────────
+        eqp_id = getattr(equipment, "inward_eqp_id", None)
+
+        # ── Job logic ──────────────────────────────────────────────────
         if job:
-            raw  = (job.job_status or "").strip().lower()
-            norm = raw.replace(" ", "_").replace("-", "_")
+            raw    = (job.job_status or "").strip().lower()
+            norm   = raw.replace(" ", "_").replace("-", "_")
             job_ts = _safe_strftime(job.created_at, "%Y-%m-%d %H:%M", now_str)
 
+            logger.info(
+                "[HTW-TIMELINE] eqp_id=%s job_id=%s raw_status=%r normalised=%r",
+                eqp_id, getattr(job, "job_id", None), raw, norm,
+            )
+
+            # ── 1. TERMINATED ─────────────────────────────────────────
             if norm in JobStatus.TERMINATED_SET:
-                current_step   = 2
-                display_status = "Terminated"
-                alert_message  = (
+                current_step          = 2
+                steps[2]["label"]     = "Terminated"          # ✅ relabel
+                steps[2]["icon"]      = "x"
+                display_status        = "Terminated"
+                alert_message         = (
                     "The calibration job for this equipment has been terminated. "
                     "Please contact the lab for further assistance."
+                )
+                logger.info(
+                    "[HTW-TIMELINE] eqp_id=%s STATE=TERMINATED step=%d label=%r",
+                    eqp_id, current_step, steps[2]["label"],
                 )
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job #{job.job_id} was assigned.",
+                    "description": f"Callibration was assigned to engineer",
                     "type":        "info",
                 })
                 activity_log.append({
                     "date":        now_str,
                     "title":       "Calibration Terminated",
-                    "description": "The calibration process was terminated. Please contact the lab.",
+                    "description": (
+                        "The calibration process was terminated. "
+                        "Please contact the lab."
+                    ),
                     "type":        "error",
                 })
 
+            # ── 2. ON HOLD ────────────────────────────────────────────
             elif norm in JobStatus.ON_HOLD_SET:
                 current_step = 2
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job #{job.job_id} was assigned.",
+                    "description": f"Job was assigned.",
                     "type":        "info",
                 })
 
                 if has_active_deviation:
-                    display_status = "Deviation Raised"
-                    alert_message  = (
+                    steps[2]["label"] = "Deviation Raised"   # ✅ relabel
+                    steps[2]["icon"]  = "alert"
+                    display_status    = "Deviation Raised"
+                    alert_message     = (
                         "A deviation has been raised for this equipment and it is "
                         "currently on hold. Our team will contact you shortly."
+                    )
+                    logger.info(
+                        "[HTW-TIMELINE] eqp_id=%s STATE=DEVIATION step=%d label=%r",
+                        eqp_id, current_step, steps[2]["label"],
                     )
                     activity_log.append({
                         "date":        now_str,
                         "title":       "Deviation Raised – Equipment On Hold",
-                        "description": "Equipment is on hold due to an active deviation. Awaiting decision.",
+                        "description": (
+                            "Equipment is on hold due to an active deviation. "
+                            "Awaiting decision."
+                        ),
                         "type":        "warning",
                     })
                 elif deviation_was_closed:
+                    # Deviation resolved, calibration resumed
                     display_status = "Calibration In Progress"
+                    logger.info(
+                        "[HTW-TIMELINE] eqp_id=%s STATE=DEVIATION_RESOLVED step=%d",
+                        eqp_id, current_step,
+                    )
                     activity_log.append({
                         "date":        now_str,
                         "title":       "Deviation Resolved – Calibration Resuming",
-                        "description": "The deviation has been closed. Calibration is resuming.",
+                        "description": (
+                            "The deviation has been closed. "
+                            "Calibration is resuming."
+                        ),
                         "type":        "success",
                     })
                 else:
-                    display_status = "Calibration On Hold"
-                    alert_message  = (
+                    steps[2]["label"] = "On Hold"            # ✅ relabel
+                    steps[2]["icon"]  = "pause"
+                    display_status    = "Calibration On Hold"
+                    alert_message     = (
                         "This equipment's calibration is currently on hold. "
                         "Please contact the lab for more information."
+                    )
+                    logger.info(
+                        "[HTW-TIMELINE] eqp_id=%s STATE=ON_HOLD step=%d label=%r",
+                        eqp_id, current_step, steps[2]["label"],
                     )
                     activity_log.append({
                         "date":        now_str,
@@ -600,33 +665,52 @@ class CustomerPortalService:
                         "type":        "warning",
                     })
 
-            elif norm == JobStatus.COMPLETED_OOT:
-                current_step   = 3
-                display_status = "Calibration Completed (OOT)"
-                alert_message  = (
-                    "Calibration was completed but the instrument is Out Of Tolerance. "
-                    "Please review the results."
+            # ── 3. COMPLETED OOT ✅ (must be checked BEFORE COMPLETED_SET) ──
+            elif norm in JobStatus.OOT_SET:
+                current_step          = 3                    # ✅ moved to step 3
+                steps[3]["label"]     = "Completed (OOT)"    # ✅ relabel step 3
+                steps[3]["icon"]      = "gauge"
+                display_status        = "Calibration Completed – Out Of Tolerance"
+                alert_message         = (
+                    "⚠️ Calibration has been completed, however the instrument "
+                    "readings are Out Of Tolerance (OOT). The results fall outside "
+                    "the acceptable calibration range. Please review the calibration "
+                    "report carefully and contact the lab to discuss next steps such "
+                    "as repair, adjustment, or retirement of this instrument."
+                )
+                logger.info(
+                    "[HTW-TIMELINE] eqp_id=%s STATE=OOT step=%d display=%r",
+                    eqp_id, current_step, display_status,
                 )
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job #{job.job_id} was assigned.",
+                    "description": f"Job was assigned to technician.",
                     "type":        "info",
                 })
                 activity_log.append({
                     "date":        now_str,
-                    "title":       "Calibration Completed – Out Of Tolerance",
-                    "description": "Final readings recorded. Instrument is out of tolerance.",
+                    "title":       "Calibration Completed – Out Of Tolerance ⚠️",
+                    "description": (
+                        "Calibration process completed. Final readings recorded. "
+                        "Instrument is Out Of Tolerance (OOT) — values exceed "
+                        "acceptable calibration limits."
+                    ),
                     "type":        "warning",
                 })
 
+            # ── 4. COMPLETED (normal) ─────────────────────────────────
             elif norm in JobStatus.COMPLETED_SET:
                 current_step   = 3
                 display_status = "Calibration Completed"
+                logger.info(
+                    "[HTW-TIMELINE] eqp_id=%s STATE=COMPLETED step=%d",
+                    eqp_id, current_step,
+                )
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job #{job.job_id} was assigned.",
+                    "description": "Job was assigned.",
                     "type":        "info",
                 })
                 activity_log.append({
@@ -636,24 +720,38 @@ class CustomerPortalService:
                     "type":        "success",
                 })
 
+            # ── 5. ACTIVE (created / in_progress / any other raw value) ──
             elif norm in JobStatus.ACTIVE_SET or raw:
                 current_step   = 2
                 display_status = "Calibration In Progress"
+                logger.info(
+                    "[HTW-TIMELINE] eqp_id=%s STATE=IN_PROGRESS step=%d",
+                    eqp_id, current_step,
+                )
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job #{job.job_id} assigned to technician.",
+                    "description": "Job assigned to technician.",
                     "type":        "info",
                 })
+        else:
+            logger.info(
+                "[HTW-TIMELINE] eqp_id=%s STATE=NO_JOB step=%d",
+                eqp_id, current_step,
+            )
 
-        # ── Certificate logic ─────────────────────────────────────────
+        # ── Certificate logic ──────────────────────────────────────────
         if cert:
             cert_status = (cert.status or "").strip().lower()
+            logger.info(
+                "[HTW-TIMELINE] eqp_id=%s cert_id=%s cert_status=%r",
+                eqp_id, getattr(cert, "certificate_id", None), cert_status,
+            )
 
             if cert_status in CertStatus.DISPATCHED_SET:
                 current_step   = 5
                 display_status = "Certificate Dispatched"
-                alert_message  = None
+                alert_message  = None  # clears any prior alert
                 issued_date    = _safe_strftime(
                     getattr(cert, "issued_at", None), "%Y-%m-%d %H:%M", now_str
                 )
@@ -670,7 +768,7 @@ class CustomerPortalService:
             elif cert_status in CertStatus.READY_SET:
                 current_step   = 4
                 display_status = "Certificate Ready"
-                alert_message  = None
+                alert_message  = None  # clears any prior alert
                 approved_date  = _safe_strftime(
                     getattr(cert, "approved_at", None), "%Y-%m-%d %H:%M", now_str
                 )
@@ -684,13 +782,20 @@ class CustomerPortalService:
                     "type": "success",
                 })
 
+        logger.info(
+            "[HTW-TIMELINE] eqp_id=%s FINAL current_step=%d display_status=%r "
+            "alert=%s step_labels=%s",
+            eqp_id, current_step, display_status,
+            bool(alert_message), [s["label"] for s in steps],
+        )
+
         return self._assemble_timeline(
             steps, current_step, display_status,
             received_date, inward_date, activity_log, alert_message,
         )
 
     # ---------------------------------------------------------------- #
-    #  NON-HTW TIMELINE                                                  #
+    #  NON-HTW / EXTERNAL TIMELINE                                       #
     # ---------------------------------------------------------------- #
 
     def _build_external_timeline(
@@ -702,12 +807,23 @@ class CustomerPortalService:
         has_active_deviation: bool,
         deviation_resolved:   bool,
     ) -> Dict[str, Any]:
+        """
+        Non-HTW (external lab) timeline: 4 steps.
+
+        ✅ NO MORE "Certificate Ready" step — goes straight to "Dispatched"
+        once external_uploads.certificate_file_url is populated.
+
+        Step indices:
+          0 = Received
+          1 = Inward
+          2 = Calibration In Progress   (label OVERWRITTEN dynamically)
+          3 = Certificate Dispatched
+        """
 
         steps = [
             {"label": "Received",                "icon": "box"},
             {"label": "Inward",                  "icon": "file"},
             {"label": "Calibration In Progress", "icon": "settings"},
-            {"label": "Certificate Ready",       "icon": "badge"},
             {"label": "Certificate Dispatched",  "icon": "truck"},
         ]
 
@@ -739,6 +855,8 @@ class CustomerPortalService:
         display_status = "Inward Generated"
         alert_message: Optional[str] = None
 
+        eqp_id = getattr(equipment, "inward_eqp_id", None)
+
         upload_ts = _safe_strftime(
             getattr(ext_upload, "updated_at", None),
             "%Y-%m-%d %H:%M", now_str,
@@ -753,6 +871,14 @@ class CustomerPortalService:
             and getattr(ext_upload, "certificate_file_url", None)
         )
 
+        logger.info(
+            "[EXT-TIMELINE] eqp_id=%s has_calibration_doc=%s "
+            "has_certificate_doc=%s active_dev=%s dev_resolved=%s",
+            eqp_id, has_calibration_doc, has_certificate_doc,
+            has_active_deviation, deviation_resolved,
+        )
+
+        # ── Step 2: Calibration In Progress (worksheet uploaded) ─────
         if has_calibration_doc:
             current_step   = 2
             display_status = "Calibration In Progress"
@@ -763,12 +889,19 @@ class CustomerPortalService:
                 "type":        "info",
             })
 
+        # ── Step 2 OVERRIDE: Deviation states ────────────────────────
         if has_active_deviation:
-            current_step   = 2
-            display_status = "Deviation Raised"
-            alert_message  = (
+            current_step      = 2
+            steps[2]["label"] = "Deviation Raised"      # ✅ relabel
+            steps[2]["icon"]  = "alert"
+            display_status    = "Deviation Raised"
+            alert_message     = (
                 "A deviation has been raised for this equipment. "
                 "Our team will contact you shortly regarding the next steps."
+            )
+            logger.info(
+                "[EXT-TIMELINE] eqp_id=%s STATE=DEVIATION step=%d label=%r",
+                eqp_id, current_step, steps[2]["label"],
             )
             activity_log.append({
                 "date":        now_str,
@@ -790,25 +923,38 @@ class CustomerPortalService:
                 "type": "success",
             })
 
+        # ── Step 3: Certificate Dispatched ✅ (skips "Ready" entirely) ──
+        # For non-HTW, the moment external_uploads.certificate_file_url
+        # is populated, the certificate is considered DISPATCHED to the
+        # customer. There is no intermediate "Ready" state.
         if has_certificate_doc:
             current_step   = 3
-            display_status = "Certificate Ready"
+            display_status = "Certificate Dispatched"
             alert_message  = None
+            logger.info(
+                "[EXT-TIMELINE] eqp_id=%s STATE=DISPATCHED (cert file uploaded) step=%d",
+                eqp_id, current_step,
+            )
             activity_log.append({
                 "date":        upload_ts,
-                "title":       "Certificate Ready",
+                "title":       "Certificate Dispatched",
                 "description": (
-                    "The calibration certificate document has been "
-                    "uploaded by the lab and is ready."
+                    "The calibration certificate has been uploaded by "
+                    "the lab and is available."
                 ),
                 "type": "success",
             })
 
+        # ── HTWCertificate override (rare for external, but supported) ──
         if cert:
             cert_status = (cert.status or "").strip().lower()
+            logger.info(
+                "[EXT-TIMELINE] eqp_id=%s cert_id=%s cert_status=%r",
+                eqp_id, getattr(cert, "certificate_id", None), cert_status,
+            )
 
             if cert_status in CertStatus.DISPATCHED_SET:
-                current_step   = 4
+                current_step   = 3
                 display_status = "Certificate Dispatched"
                 alert_message  = None
                 issued_date    = _safe_strftime(
@@ -823,6 +969,13 @@ class CustomerPortalService:
                     ),
                     "type": "success",
                 })
+
+        logger.info(
+            "[EXT-TIMELINE] eqp_id=%s FINAL current_step=%d display_status=%r "
+            "alert=%s step_labels=%s",
+            eqp_id, current_step, display_status,
+            bool(alert_message), [s["label"] for s in steps],
+        )
 
         return self._assemble_timeline(
             steps, current_step, display_status,
@@ -850,14 +1003,15 @@ class CustomerPortalService:
             if idx < current_step:
                 step_status = "completed"
             elif idx == current_step:
+                # Order matters — most-specific checks first
                 if "terminated" in ds:
                     step_status = "terminated"
+                elif "out of tolerance" in ds or "oot" in ds:
+                    step_status = "oot"
                 elif "deviation" in ds:
                     step_status = "deviated"
                 elif "on hold" in ds or "on_hold" in ds:
                     step_status = "onhold"
-                elif "oot" in ds or "out of tolerance" in ds:
-                    step_status = "oot"
                 else:
                     step_status = "current"
             else:
@@ -875,6 +1029,12 @@ class CustomerPortalService:
                 "date":   step_date,
                 "icon":   step["icon"],
             })
+
+        logger.debug(
+            "[ASSEMBLE] current_step=%d display=%r timeline=%s",
+            current_step, display_status,
+            [(t["label"], t["status"]) for t in timeline],
+        )
 
         return {
             "display_status": display_status,
@@ -919,6 +1079,9 @@ class CustomerPortalService:
         self, customer_id: int, query_str: str
     ) -> Optional[Dict[str, Any]]:
         clean_query = query_str.strip()
+        logger.info(
+            "[TRACK] customer_id=%s query=%r", customer_id, clean_query,
+        )
 
         # ── Strategy 1: SRF No or DC No ──────────────────────────────
         inward_result = self.db.scalars(
@@ -958,7 +1121,13 @@ class CustomerPortalService:
                 filter_nepl_id   = eq_match.nepl_id
                 found_via        = "NEPL ID"
             else:
+                logger.info("[TRACK] No match for query=%r", clean_query)
                 return None
+
+        logger.info(
+            "[TRACK] Resolved inward_id=%s nepl_filter=%s via=%s",
+            target_inward_id, filter_nepl_id, found_via,
+        )
 
         # ── Main query ────────────────────────────────────────────────
         main_query = (
@@ -978,9 +1147,13 @@ class CustomerPortalService:
         ).all()
 
         if not rows:
+            logger.warning(
+                "[TRACK] No equipment rows for inward_id=%s", target_inward_id,
+            )
             return None
 
         eqp_ids = [row[0].inward_eqp_id for row in rows]
+        logger.info("[TRACK] Found %d equipment rows: %s", len(eqp_ids), eqp_ids)
 
         # ── Batch 1: ExternalUploads ──────────────────────────────────
         ext_upload_map: Dict[int, Any] = {
@@ -991,6 +1164,10 @@ class CustomerPortalService:
                 )
             ).scalars().unique().all()
         }
+        logger.info(
+            "[TRACK] ExternalUploads found: %d / %d",
+            len(ext_upload_map), len(eqp_ids),
+        )
 
         # ── Batch 2: ExternalDeviation IDs ───────────────────────────
         ext_deviation_eqp_ids: set = set(
@@ -1000,6 +1177,9 @@ class CustomerPortalService:
                 .distinct()
             ).scalars().all()
         )
+        logger.info(
+            "[TRACK] External deviations on eqp_ids: %s", ext_deviation_eqp_ids,
+        )
 
         # ── Batch 3: HTW Deviation records ───────────────────────────
         htw_dev_map: Dict[int, List[Any]] = {i: [] for i in eqp_ids}
@@ -1007,10 +1187,12 @@ class CustomerPortalService:
             select(Deviation).where(Deviation.inward_eqp_id.in_(eqp_ids))
         ).scalars().unique().all():
             htw_dev_map[dev.inward_eqp_id].append(dev)
+        logger.info(
+            "[TRACK] HTW deviation counts: %s",
+            {k: len(v) for k, v in htw_dev_map.items() if v},
+        )
 
         # ── Batch 4: Certificates ─────────────────────────────────────
-        # Fetch ALL certs first then filter in Python to avoid
-        # DB-level case-sensitivity issues with status comparison.
         cert_map: Dict[int, HTWCertificate] = {}
         try:
             all_certs = self.db.execute(
@@ -1021,9 +1203,8 @@ class CustomerPortalService:
 
             wanted_statuses: set = (
                 CertStatus.READY_SET | CertStatus.DISPATCHED_SET
-            )  # {"approved", "issued"}
+            )
 
-            # Sort descending by certificate_id so highest ID is processed first
             cert_rows = [
                 c for c in sorted(
                     all_certs,
@@ -1051,6 +1232,11 @@ class CustomerPortalService:
                     if new_prio > old_prio:
                         cert_map[eqp_id] = c
 
+            logger.info(
+                "[TRACK] HTW certs picked: %s",
+                {k: (v.certificate_id, v.status) for k, v in cert_map.items()},
+            )
+
         except Exception as e:
             logger.error(
                 "Exception fetching certificates for eqp_ids=%s: %s",
@@ -1069,6 +1255,13 @@ class CustomerPortalService:
                 htw_devs = htw_dev_map.get(eq.inward_eqp_id, [])
                 has_active_dev, dev_was_closed = self._check_htw_deviation_state(
                     htw_devs
+                )
+                logger.info(
+                    "[TRACK] eqp_id=%s HTW path: has_active_dev=%s dev_closed=%s "
+                    "job_status=%r cert=%s",
+                    eq.inward_eqp_id, has_active_dev, dev_was_closed,
+                    getattr(job, "job_status", None),
+                    getattr(cert, "status", None) if cert else None,
                 )
                 result = self._determine_timeline_and_status(
                     equipment=eq,
@@ -1092,6 +1285,12 @@ class CustomerPortalService:
                         has_deviation_record=has_ext_dev_record,
                         has_certificate_uploaded=has_cert_doc,
                     )
+                )
+                logger.info(
+                    "[TRACK] eqp_id=%s EXT path: has_dev_rec=%s has_cert_doc=%s "
+                    "active_ext_dev=%s ext_dev_resolved=%s",
+                    eq.inward_eqp_id, has_ext_dev_record, has_cert_doc,
+                    has_active_ext_dev, ext_dev_resolved,
                 )
                 result = self._determine_timeline_and_status(
                     equipment=eq,
@@ -1120,6 +1319,10 @@ class CustomerPortalService:
                 entry["alert_message"] = result["alert_message"]
 
             formatted_equipments.append(entry)
+
+        logger.info(
+            "[TRACK] Returning %d equipment entries", len(formatted_equipments),
+        )
 
         return {
             "search_query": clean_query,

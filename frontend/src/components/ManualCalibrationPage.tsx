@@ -13,11 +13,15 @@ import {
   X,
   Plus,
   FilePlus,
-  Paperclip,
+CheckCircle2,
   Calendar,
+  Search,
+  Package,
+  FileText,
+  User,
 } from "lucide-react";
 
-// --- TypeScript Interfaces ---
+// --- Interfaces ---
 interface SrfGroupSummary {
   srf_no: string;
   customer_name: string;
@@ -37,8 +41,8 @@ interface BasicEquipment {
 
 interface DeviationAttachment {
   id: number;
-  file_name: string;
-  file_url: string;
+  file_name: string; 
+  file_url: string;  
   created_at: string;
 }
 
@@ -50,308 +54,192 @@ interface ExternalDeviationData {
   step_per_deviation: Record<string, any>;
   engineer_remarks?: string;
   customer_decision?: string;
-  report?: string; // Maps to the Date column in your model
+  report?: string; 
   attachments?: DeviationAttachment[];
 }
 
-type DocType = "result" | "certificate";
-
-// --- Props Interfaces ---
-interface DocumentButtonGroupProps {
-  buttonText: string;
-  docType: DocType;
-  documentUrl: string | null;
-  onUpload: (file: File) => Promise<void>;
-  onDelete: () => Promise<void>;
-}
-
-interface EquipmentDetailListProps { srfNo: string; }
-interface EquipmentItemProps { equipment: BasicEquipment }
-
-interface DeviationModalProps {
-  isOpen: boolean;
-  isEditMode: boolean;
-  onClose: () => void;
-  equipment: BasicEquipment;
-  onSuccess: () => void;
-}
+// --- UTILITY: VIEW OR DOWNLOAD (With Prefix Stripping) ---
+const handleViewOrDownload = async (fileUrl: string, originalName: string) => {
+    if (!fileUrl) return;
+    const isExcel = /\.(xlsx|xls|csv)$/i.test(originalName);
+    if (isExcel) {
+        try {
+            const response = await fetch(fileUrl);
+            const blob = await response.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = originalName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(blobUrl);
+        } catch (error) { window.open(fileUrl, '_blank'); }
+    } else {
+        window.open(fileUrl, '_blank', 'noopener,noreferrer');
+    }
+};
 
 const ManualCalibrationSkeleton: React.FC = () => (
-    <div className="space-y-3 animate-pulse">
-        {[1, 2, 3].map(i => (
-            <div key={i} className="flex items-center justify-between p-5 bg-white border border-gray-200 rounded-xl">
-                <div className="w-full">
-                    <div className="h-7 w-32 bg-gray-300 rounded mb-2"></div>
-                    <div className="h-4 w-48 bg-gray-200 rounded"></div>
-                </div>
-                <div className="h-6 w-6 bg-gray-200 rounded-full"></div>
-            </div>
+    <div className="space-y-4">
+        {[1, 2, 3, 4].map(i => (
+            <div key={i} className="h-24 bg-white border border-gray-200 rounded-xl animate-pulse"></div>
         ))}
     </div>
 );
 
 // --- DEVIATION MODAL COMPONENT ---
-const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onClose, equipment, onSuccess }) => {
+const DeviationModal: React.FC<{ isOpen: boolean; isEditMode: boolean; onClose: () => void; equipment: BasicEquipment; onSuccess: () => void; }> = ({ isOpen, isEditMode, onClose, equipment, onSuccess }) => {
     const [deviationId, setDeviationId] = useState<number | null>(null);
     const [deviationType, setDeviationType] = useState<'OOT' | 'NC'>('OOT');
     const [toolStatus, setToolStatus] = useState('');
-    const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split('T')[0]); // Default to Today
+    const [reportDate, setReportDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [steps, setSteps] = useState([{ step: '', value: '' }]);
     const [engineerRemarks, setEngineerRemarks] = useState('');
     const [customerDecision, setCustomerDecision] = useState('');
-    
     const [attachments, setAttachments] = useState<DeviationAttachment[]>([]);
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-    
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLoadingData, setIsLoadingData] = useState(false);
-    const [isUploadingSingle, setIsUploadingSingle] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const resetForm = () => {
-        setDeviationId(null); 
-        setDeviationType('OOT'); 
-        setToolStatus('');
-        setReportDate(new Date().toISOString().split('T')[0]);
-        setSteps([{ step: '', value: '' }]); 
-        setEngineerRemarks('');
-        setCustomerDecision(''); 
-        setAttachments([]); 
-        setPendingFiles([]); 
-        setError(null);
-    }
-    
     useEffect(() => {
-        if (!isOpen) { setTimeout(resetForm, 300); return; }
-
-        const fetchDeviationData = async () => {
-            if (!isEditMode) return;
-            setIsLoadingData(true);
-            try {
-                const response = await api.get<ExternalDeviationData[]>(`/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`);
-                
-                if (response.data && response.data.length > 0) {
-                    const data = response.data[0];
-                    setDeviationId(data.id);
-                    setDeviationType(data.deviation_type);
-                    setToolStatus(data.tool_status || '');
-                    setReportDate(data.report || new Date().toISOString().split('T')[0]);
-                    setEngineerRemarks(data.engineer_remarks || '');
-                    setCustomerDecision(data.customer_decision || '');
-                    setAttachments(data.attachments || []); 
-                    
-                    const stepsArray = Object.entries(data.step_per_deviation || {}).map(([step, value]) => ({ step, value: String(value) }));
-                    setSteps(stepsArray.length > 0 ? stepsArray : [{ step: '', value: '' }]);
-                }
-            } catch (err) { 
-                setError("Failed to fetch deviation details."); 
-            } finally { setIsLoadingData(false); }
-        };
-        fetchDeviationData();
+        if (!isOpen) return;
+        if (!isEditMode) {
+            setDeviationId(null); setDeviationType('OOT'); setToolStatus(''); setEngineerRemarks(''); setCustomerDecision(''); setAttachments([]); setPendingFiles([]); setSteps([{ step: '', value: '' }]);
+            return;
+        }
+        setIsLoadingData(true);
+        api.get<ExternalDeviationData[]>(`/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`)
+           .then(res => {
+               if(res.data?.[0]) {
+                   const d = res.data[0];
+                   setDeviationId(d.id);
+                   setDeviationType(d.deviation_type);
+                   setToolStatus(d.tool_status || '');
+                   setReportDate(d.report || new Date().toISOString().split('T')[0]);
+                   setEngineerRemarks(d.engineer_remarks || '');
+                   setCustomerDecision(d.customer_decision || '');
+                   setAttachments(d.attachments || []);
+                   const s = Object.entries(d.step_per_deviation || {}).map(([step, value]) => ({ step, value: String(value) }));
+                   setSteps(s.length > 0 ? s : [{ step: '', value: '' }]);
+               }
+           }).finally(() => setIsLoadingData(false));
     }, [isOpen, isEditMode, equipment.inward_eqp_id]);
 
-    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        if (isEditMode && deviationId) {
-            setIsUploadingSingle(true);
-            const formData = new FormData();
-            formData.append("file", file);
-            try {
-                const response = await api.post(`/external-deviations/${deviationId}/attachments`, formData);
-                setAttachments(prev => [...prev, response.data]);
-            } catch (err) { alert("Upload failed."); } finally { setIsUploadingSingle(false); }
-        } else {
-            setPendingFiles(prev => [...prev, file]);
-        }
-        if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-
-    const handleDeleteAttachment = async (id: number) => {
-        if (!window.confirm("Are you sure you want to delete this document?")) return;
-        try {
-            await api.delete(`/external-deviations/attachments/${id}`);
-            setAttachments(prev => prev.filter(a => a.id !== id));
-        } catch (err) { alert("Delete failed."); }
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError(null); 
+    const handleSubmit = async () => {
         setIsSubmitting(true);
-        
         const payload = {
             inward_eqp_id: equipment.inward_eqp_id,
             deviation_type: deviationType,
             tool_status: toolStatus,
-            report: reportDate, // Sending the report date to backend
-            step_per_deviation: deviationType === 'OOT' ? steps.reduce((acc, curr) => { 
-                if(curr.step) acc[curr.step] = curr.value; return acc; 
-            }, {} as Record<string, string>) : {},
+            report: reportDate,
+            step_per_deviation: deviationType === 'OOT' ? steps.reduce((acc, curr) => { if(curr.step) acc[curr.step] = curr.value; return acc; }, {} as any) : {},
             engineer_remarks: engineerRemarks,
             customer_decision: customerDecision,
         };
-
         try {
             let currentId = deviationId;
-
-            if (isEditMode && deviationId) {
-                await api.patch(`/external-deviations/${deviationId}`, payload);
-            } else {
-                const response = await api.post('/external-deviations/', payload);
-                currentId = response.data.id;
-            }
-
+            if (isEditMode && deviationId) { await api.patch(`/external-deviations/${deviationId}`, payload); } 
+            else { const res = await api.post('/external-deviations/', payload); currentId = res.data.id; }
+            
             if (pendingFiles.length > 0 && currentId) {
                 for (const file of pendingFiles) {
                     const formData = new FormData();
                     formData.append("file", file);
-                    try {
-                        await api.post(`/external-deviations/${currentId}/attachments`, formData);
-                    } catch (fileErr: any) {
-                        console.error("File upload failed", fileErr);
-                    }
+                    await api.post(`/external-deviations/${currentId}/attachments`, formData);
                 }
             }
-
-            alert("Saved successfully!"); 
-            onSuccess(); 
-            onClose();
-        } catch (err: any) { 
-            setError(`Submit failed: ${err.response?.data?.detail?.[0]?.msg || "Error occurred"}`); 
-        } finally { 
-            setIsSubmitting(false); 
-        }
+            alert("Saved successfully!"); onSuccess(); onClose();
+        } catch (err) { alert("Failed to save deviation"); } finally { setIsSubmitting(false); }
     };
 
-    const getFileFullUrl = (url: string) => {
-        if (!url) return "#";
-        if (url.startsWith('http')) return url;
-        const host = api.defaults.baseURL?.split('/api')[0] || '';
-        return `${host}${url}`; 
-    };
+    const getFileFullUrl = (url: string) => url.startsWith('http') ? url : `${api.defaults.baseURL?.split('/api')[0]}${url}`;
 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-[100] flex justify-center items-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col overflow-hidden">
-                <div className="flex justify-between items-center p-4 border-b bg-white">
-                    <h3 className="text-lg font-bold text-gray-800">{isEditMode ? 'View/Edit' : 'Log'} Deviation: <span className="text-blue-600 font-mono">{equipment.nepl_id}</span></h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
-                </div>
-
-                <div className="bg-blue-50/50 px-6 py-4 flex gap-6 border-b text-xs overflow-x-auto">
-                    <div><label className="text-blue-400 font-bold uppercase block">Material</label><p className="font-semibold">{equipment.material_description || '---'}</p></div>
-                    <div><label className="text-blue-400 font-bold uppercase block">Make</label><p className="font-semibold">{equipment.make || '---'}</p></div>
-                    <div><label className="text-blue-400 font-bold uppercase block">Model</label><p className="font-semibold">{equipment.model || '---'}</p></div>
-                    <div><label className="text-blue-400 font-bold uppercase block">Serial No</label><p className="font-semibold">{equipment.serial_no || '---'}</p></div>
-                    <div><label className="text-blue-400 font-bold uppercase block">Range</label><p className="font-semibold">{equipment.range || '---'}</p></div>
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="flex justify-between items-center p-6 border-b">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl"><AlertTriangle size={20}/></div>
+                        <h3 className="text-xl font-bold text-gray-900">{isEditMode ? 'View/Edit' : 'Log'} Deviation</h3>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {isLoadingData ? <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" /></div> : (
-                        <form onSubmit={handleSubmit} className="space-y-6">
-                            {error && <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-md text-sm">{error}</div>}
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NEPL ID</p><p className="font-medium text-blue-600 mt-1">{equipment.nepl_id}</p></div>
+                                <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</p><p className="font-medium text-gray-900 mt-1 truncate">{equipment.material_description}</p></div>
+                            </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Deviation Type</label>
-                                    <select value={deviationType} onChange={(e) => setDeviationType(e.target.value as 'OOT' | 'NC')} className="w-full p-2 border border-gray-300 rounded-md text-sm">
-                                        <option value="OOT">OOT (Out of Tolerance)</option>
-                                        <option value="NC">NC (Not-Calibrated)</option>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Type</label>
+                                    <select value={deviationType} onChange={(e) => setDeviationType(e.target.value as 'OOT' | 'NC')} className="w-full p-2.5 bg-white border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option value="OOT">OOT</option><option value="NC">NC</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Tool Status</label>
-                                    <input type="text" value={toolStatus} onChange={(e) => setToolStatus(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md text-sm" />
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tool Status</label>
+                                    <input type="text" value={toolStatus} onChange={(e) => setToolStatus(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg text-sm" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Report Date</label>
-                                    <div className="relative">
-                                        <input 
-                                            type="date" 
-                                            value={reportDate} 
-                                            onChange={(e) => setReportDate(e.target.value)} 
-                                            className="w-full p-2 pl-8 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-100 outline-none" 
-                                        />
-                                        <Calendar className="absolute left-2 top-2.5 text-gray-400" size={14} />
-                                    </div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Report Date</label>
+                                    <input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg text-sm" />
                                 </div>
                             </div>
 
-                            {/* --- ATTACHMENTS PREVIEW --- */}
-                            {(attachments.length > 0 || pendingFiles.length > 0) && (
-                                <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
-                                    <label className="block text-xs font-bold text-blue-700 mb-2 flex items-center gap-2 uppercase tracking-wide">
-                                        <Paperclip size={14}/> Evidence Preview ({attachments.length + pendingFiles.length})
-                                    </label>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        {attachments.map(a => (
-                                            <div key={a.id} className="flex justify-between items-center bg-white p-2 border border-blue-200 rounded shadow-sm">
-                                                <span className="truncate text-[11px] font-medium text-gray-700 w-32" title={a.file_name}>{a.file_name}</span>
-                                                <div className="flex gap-1">
-                                                    <a href={getFileFullUrl(a.file_url)} target="_blank" rel="noreferrer" className="p-1 text-blue-600 hover:bg-blue-50 rounded"><Eye size={16}/></a>
-                                                    <button type="button" onClick={() => handleDeleteAttachment(a.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={16}/></button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {pendingFiles.map((f, i) => (
-                                            <div key={i} className="flex justify-between items-center bg-orange-50 p-2 border border-orange-200 rounded italic">
-                                                <span className="truncate text-[11px] text-orange-700 w-32">{f.name}</span>
-                                                <button type="button" onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))} className="p-1 text-red-500"><X size={16}/></button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {deviationType === 'OOT' ? (
-                                <div className="space-y-3 p-4 bg-gray-50 border rounded-lg">
-                                    <label className="block text-xs font-bold text-gray-700 uppercase">Step vs. Deviation Values</label>
+                            {deviationType === 'OOT' && (
+                                <div className="space-y-3 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Step vs Deviation</label>
                                     {steps.map((s, i) => (
                                         <div key={i} className="flex gap-2">
-                                            <input placeholder="Step %" value={s.step} onChange={e => {const n=[...steps]; n[i].step=e.target.value; setSteps(n)}} className="flex-1 p-2 border rounded-md text-sm" />
-                                            <input placeholder="Deviation" value={s.value} onChange={e => {const n=[...steps]; n[i].value=e.target.value; setSteps(n)}} className="flex-1 p-2 border rounded-md text-sm" />
-                                            <button type="button" onClick={() => setSteps(steps.filter((_, idx) => idx !== i))} className="text-red-500 p-2"><Trash2 size={16}/></button>
+                                            <input placeholder="Step %" value={s.step} onChange={e => {const n=[...steps]; n[i].step=e.target.value; setSteps(n)}} className="flex-1 p-2 border border-gray-300 rounded-lg text-sm" />
+                                            <input placeholder="Value" value={s.value} onChange={e => {const n=[...steps]; n[i].value=e.target.value; setSteps(n)}} className="flex-1 p-2 border border-gray-300 rounded-lg text-sm" />
+                                            <button onClick={() => setSteps(steps.filter((_, idx) => idx !== i))} className="text-red-500 p-2 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
                                         </div>
                                     ))}
-                                    <button type="button" onClick={() => setSteps([...steps, {step:'', value:''}])} className="text-xs text-blue-600 font-bold">+ Add Step</button>
-                                </div>
-                            ) : (
-                                <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
-                                    <label className="block text-xs font-bold text-orange-800 mb-3 flex items-center gap-2 uppercase tracking-wide">
-                                        <UploadCloud size={16}/> Evidence Upload
-                                    </label>
-                                    <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-                                    <button 
-                                        type="button" 
-                                        disabled={isUploadingSingle}
-                                        onClick={() => fileInputRef.current?.click()} 
-                                        className="w-full py-3 border-2 border-dashed border-orange-300 rounded-xl text-orange-700 text-xs font-bold hover:bg-orange-100 flex items-center justify-center gap-2 transition-colors"
-                                    >
-                                        {isUploadingSingle ? <Loader2 className="animate-spin" size={18}/> : <FilePlus size={18}/>}
-                                        {isUploadingSingle ? 'Uploading...' : 'Add Document'}
-                                    </button>
+                                    <button onClick={() => setSteps([...steps, {step:'', value:''}])} className="text-xs font-bold text-blue-600 hover:underline">+ Add Row</button>
                                 </div>
                             )}
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <textarea placeholder="Engineer Remarks" value={engineerRemarks} onChange={e => setEngineerRemarks(e.target.value)} className="p-2 border border-gray-300 rounded-md text-sm h-24" />
-                                <textarea placeholder="Customer Decision" value={customerDecision} onChange={e => setCustomerDecision(e.target.value)} className="p-2 border border-gray-300 rounded-md text-sm h-24" />
-                            </div>
-                        </form>
-                    )}
-                </div>
 
-                <div className="p-4 border-t bg-gray-50 flex justify-end gap-3 rounded-b-xl">
-                    <button onClick={onClose} className="px-5 py-2 text-sm text-gray-600 font-semibold">Close</button>
-                    <button onClick={handleSubmit} disabled={isSubmitting} className="px-8 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 shadow-lg hover:bg-blue-700 transition-all active:scale-95 disabled:bg-blue-300">
-                        {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18}/>}
-                        {isSubmitting ? 'Saving...' : 'Save Deviation'}
+
+                            <div className="space-y-3">
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Evidence Attachments</label>
+                                <div className="grid gap-2">
+                                    {attachments.map(a => (
+                                        <div key={a.id} className="flex justify-between items-center bg-gray-50 p-3 border border-gray-200 rounded-xl">
+                                            <span className="text-xs font-medium text-gray-700 truncate w-3/4">{a.file_name}</span>
+                                            <button onClick={() => handleViewOrDownload(getFileFullUrl(a.file_url), a.file_name)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg"><Eye size={18}/></button>
+                                        </div>
+                                    ))}
+                                    {pendingFiles.map((f, i) => (
+                                        <div key={i} className="flex justify-between items-center bg-orange-50 p-3 border border-orange-100 rounded-xl text-xs text-orange-700 italic">
+                                            <span>{f.name} (Pending)</span>
+                                            <button onClick={() => setPendingFiles(pendingFiles.filter((_, idx) => idx !== i))}><X size={16}/></button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <input type="file" ref={fileInputRef} className="hidden" onChange={e => e.target.files && setPendingFiles([...pendingFiles, e.target.files[0]])} />
+                                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-50 hover:border-blue-300 transition-all">+ Add File</button>
+                            </div>
+                        </div>
+                    )}
+                                                <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Engineer Remarks</label><textarea value={engineerRemarks} onChange={e => setEngineerRemarks(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl text-sm h-24 focus:ring-2 focus:ring-blue-500" /></div>
+                                <div><label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Customer Decision</label><textarea value={customerDecision} onChange={e => setCustomerDecision(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl text-sm h-24 focus:ring-2 focus:ring-blue-500" /></div>
+                            </div>
+                </div>
+                <div className="p-6 border-t bg-gray-50 flex justify-end gap-3">
+                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900">Cancel</button>
+                    <button onClick={handleSubmit} disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 disabled:bg-blue-300 transition-all flex items-center gap-2">
+                        {isSubmitting ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16}/>} Save Deviation
                     </button>
                 </div>
             </div>
@@ -359,120 +247,163 @@ const DeviationModal: React.FC<DeviationModalProps> = ({ isOpen, isEditMode, onC
     );
 };
 
-// --- BUTTON GROUP COMPONENT ---
-const DocumentButtonGroup: React.FC<DocumentButtonGroupProps> = ({ buttonText, documentUrl, onUpload, onDelete }) => {
-    const fileRef = useRef<HTMLInputElement>(null);
-    const [loading, setLoading] = useState(false);
+// --- ACTION BUTTON GROUP ---
+const ActionButtonGroup: React.FC<{ text: string; url: string | null; name: string | null; onUp: (f: File) => void; onDel: () => void; }> = ({ text, url, name, onUp, onDel }) => {
+    const fRef = useRef<HTMLInputElement>(null);
+    const [upLoading, setUpLoading] = useState(false);
     return (
-        <div className="inline-flex rounded-md shadow-sm border border-blue-200">
-            <div className="px-3 py-1.5 text-xs font-semibold bg-blue-50 text-blue-700 rounded-l-md border-r border-blue-200">{buttonText}</div>
-            <input type="file" ref={fileRef} onChange={async (e) => {if(e.target.files?.[0]){setLoading(true); await onUpload(e.target.files[0]); setLoading(false);}}} className="hidden" />
-            <button onClick={() => fileRef.current?.click()} className="p-1.5 hover:bg-gray-50">{loading ? <Loader2 className="h-4 w-4 animate-spin"/> : <UploadCloud className="h-4 w-4 text-blue-600"/>}</button>
-            {documentUrl && (
+        <div className="inline-flex rounded-lg shadow-sm border border-gray-200 bg-white overflow-hidden h-9">
+            <div className="px-3 py-1.5 text-[10px] font-semibold bg-gray-50 text-gray-500 border-r border-gray-200 flex items-center uppercase tracking-wider">{text}</div>
+            <input type="file" ref={fRef} className="hidden" onChange={async (e) => {if(e.target.files?.[0]){ setUpLoading(true); await onUp(e.target.files[0]); setUpLoading(false); }}} />
+            <button onClick={() => fRef.current?.click()} className="p-2 hover:bg-blue-50 text-blue-600">{upLoading ? <Loader2 size={16} className="animate-spin"/> : <UploadCloud size={16}/>}</button>
+            {url && (
                 <>
-                    <a href={documentUrl} target="_blank" rel="noreferrer" className="p-1.5 border-l hover:bg-gray-50"><Eye className="h-4 w-4 text-gray-600"/></a>
-                    <button onClick={onDelete} className="p-1.5 border-l hover:bg-gray-50"><Trash2 className="h-4 w-4 text-red-500"/></button>
+                    <button onClick={() => name && handleViewOrDownload(url, name)} className="p-2 border-l border-gray-100 hover:bg-blue-50 text-gray-600"><Eye size={16}/></button>
+                    <button onClick={onDel} className="p-2 border-l border-gray-100 hover:bg-red-50 text-red-500"><Trash2 size={16}/></button>
                 </>
             )}
         </div>
     );
 };
 
-// --- EQUIPMENT ITEM COMPONENT ---
-const EquipmentItem: React.FC<EquipmentItemProps> = ({ equipment }) => {
-    const [details, setDetails] = useState<{ res: string | null; cert: string | null; dev: boolean; attCount: number } | null>(null);
-    const [meta, setMeta] = useState<BasicEquipment>(equipment);
+// --- EQUIPMENT ITEM (TABLE ROW) ---
+const EquipmentItem: React.FC<{ equipment: BasicEquipment }> = ({ equipment }) => {
+    const [docs, setDocs] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
 
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [docs, dev, m] = await Promise.all([
+            const [d, dv] = await Promise.all([
                 api.get(`/manual-calibration/equipment/${equipment.inward_eqp_id}/documents`).catch(() => ({data:{}})),
-                api.get(`/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`),
-                api.get(`/staff/inwards/equipment-metadata/${equipment.inward_eqp_id}`)
+                api.get(`/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`)
             ]);
-            setMeta(m.data);
-            setDetails({
-                res: docs.data.calibration_worksheet_file_url || null,
-                cert: docs.data.certificate_file_url || null,
-                dev: dev.data && dev.data.length > 0,
-                attCount: dev.data?.[0]?.attachments?.length || 0
+            setDocs({
+                res: d.data.calibration_worksheet_file_url ? `${api.defaults.baseURL?.split('/api')[0]}${d.data.calibration_worksheet_file_url}` : null,
+                resN: d.data.calibration_worksheet_file_name,
+                cert: d.data.certificate_file_url ? `${api.defaults.baseURL?.split('/api')[0]}${d.data.certificate_file_url}` : null,
+                certN: d.data.certificate_file_name,
+                dev: dv.data?.length > 0
             });
-        } catch (e) { console.error("Fetch error", e); } finally { setLoading(false); }
+        } finally { setLoading(false); }
     };
 
     useEffect(() => { fetchAll(); }, [equipment.inward_eqp_id]);
 
-    const handleUp = async (type: "result" | "certificate", file: File) => {
-        const f = new FormData(); f.append("file", file); f.append("doc_type", type);
-        await api.post(`/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`, f);
-        fetchAll();
-    };
-
-    if (loading) return <div className="p-4 bg-white border rounded-lg h-[72px] flex justify-center items-center"><Loader2 className="animate-spin text-gray-300"/></div>;
+    if (loading) return <tr><td colSpan={3} className="h-16 animate-pulse bg-white"></td></tr>;
 
     return (
-        <div className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm flex justify-between items-center group hover:border-blue-300 transition-colors">
-            <div><p className="font-bold text-gray-800">{meta.nepl_id}</p><p className="text-sm text-gray-500">{meta.material_description}</p></div>
-            <div className="flex gap-3 items-center">
-                <DocumentButtonGroup buttonText="Calibration Results" docType="result" documentUrl={details?.res ?? null} onUpload={(f) => handleUp("result", f)} onDelete={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/result`).then(fetchAll)} />
-                <div className="flex items-center gap-1">
-                    <button onClick={() => setModalOpen(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border rounded-md transition-all ${details?.dev ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100' : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100'}`}>
-                        <AlertTriangle size={14}/> {details?.dev ? 'View Deviation' : 'Deviation'}
+        <tr className="hover:bg-gray-50 transition-colors border-b border-gray-100">
+            <td className="px-6 py-4 font-medium text-blue-600 text-sm">{equipment.nepl_id}</td>
+            <td className="px-6 py-4 text-gray-900 text-sm">{equipment.material_description}</td>
+            <td className="px-6 py-4">
+                <div className="flex gap-3 items-center">
+                    <ActionButtonGroup text="Worksheet" url={docs?.res} name={docs?.resN} onUp={(f) => {const fd=new FormData(); fd.append("file",f); fd.append("doc_type","result"); api.post(`/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`,fd).then(fetchAll)}} onDel={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/result`).then(fetchAll)} />
+                    <button onClick={() => setModalOpen(true)} className={`h-9 px-3 text-[10px] font-semibold border rounded-lg flex items-center gap-1.5 uppercase transition-all tracking-tight ${docs?.dev ? 'bg-red-50 text-red-600 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+                        <AlertTriangle size={14}/> {docs?.dev ? 'View Deviation' : 'Log Deviation'}
                     </button>
+                    <ActionButtonGroup text="Cert" url={docs?.cert} name={docs?.certN} onUp={(f) => {const fd=new FormData(); fd.append("file",f); fd.append("doc_type","certificate"); api.post(`/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`,fd).then(fetchAll)}} onDel={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/certificate`).then(fetchAll)} />
                 </div>
-                <DocumentButtonGroup buttonText="Certificates" docType="certificate" documentUrl={details?.cert ?? null} onUpload={(f) => handleUp("certificate", f)} onDelete={() => api.delete(`/manual-calibration/equipment/${equipment.inward_eqp_id}/document/certificate`).then(fetchAll)} />
+            </td>
+            <DeviationModal isOpen={modalOpen} isEditMode={docs?.dev} onClose={() => setModalOpen(false)} equipment={equipment} onSuccess={fetchAll} />
+        </tr>
+    );
+};
+
+// --- SUB-PAGE (DETAIL LIST) ---
+const EquipmentDetailList: React.FC<{ group: SrfGroupSummary; onBack: () => void }> = ({ group, onBack }) => {
+    const [list, setList] = useState<BasicEquipment[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        api.get(`/flow-configs/manual-calibration-groups/${group.srf_no}/equipment`).then(r => setList(r.data)).finally(() => setLoading(false));
+    }, [group.srf_no]);
+
+    return (
+        <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
+                <div><h1 className="text-2xl font-bold text-gray-900 tracking-tight">Job Details</h1><p className="text-gray-500 text-sm mt-1">SRF: <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-700 border border-gray-200">{group.srf_no}</span></p></div>
+                <button onClick={onBack} className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm focus:outline-none"><ArrowLeft size={16} /><span>Back to List</span></button>
             </div>
-            <DeviationModal isOpen={modalOpen} isEditMode={details?.dev ?? false} onClose={() => setModalOpen(false)} equipment={meta} onSuccess={fetchAll} />
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3">
+                    <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><User size={20}/></div>
+                    <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</p><p className="font-medium text-gray-900 mt-1">{group.customer_name}</p></div>
+                </div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3">
+                    <div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl"><Calendar size={20}/></div>
+                    <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Inward Date</p><p className="font-medium text-gray-900 mt-1">{new Date(group.received_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div>
+                </div>
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex items-start gap-3">
+                    <div className="p-2.5 bg-purple-50 text-purple-600 rounded-xl"><Package size={20}/></div>
+                    <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Equipments</p><p className="font-medium text-gray-900 mt-1">{group.equipment_count} Items</p></div>
+                </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                <table className="w-full text-left">
+                    <thead><tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200"><th className="px-6 py-4 font-semibold">NEPL ID</th><th className="px-6 py-4 font-semibold">Description</th><th className="px-6 py-4 font-semibold">Actions & Evidence</th></tr></thead>
+                    <tbody className="divide-y divide-gray-100">{loading ? <tr><td colSpan={3} className="text-center p-10"><Loader2 className="animate-spin inline text-blue-600"/></td></tr> : list.map(e => <EquipmentItem key={e.inward_eqp_id} equipment={e} />)}</tbody>
+                </table>
+            </div>
         </div>
     );
 };
 
-// --- LIST COMPONENT ---
-const EquipmentDetailList: React.FC<EquipmentDetailListProps> = ({ srfNo }) => {
-    const [list, setList] = useState<BasicEquipment[]>([]);
-    const [loading, setLoading] = useState(true);
-    useEffect(() => {
-        api.get(`/flow-configs/manual-calibration-groups/${srfNo}/equipment`).then(r => setList(r.data)).finally(() => setLoading(false));
-    }, [srfNo]);
-    if (loading) return <div className="p-6 text-center"><Loader2 className="animate-spin mx-auto text-gray-400"/></div>;
-    return <div className="bg-gray-50 p-4 border-t space-y-3">{list.map(e => <EquipmentItem key={e.inward_eqp_id} equipment={e} />)}</div>;
-};
-
-// --- PAGE COMPONENT ---
+// --- MAIN PAGE ---
 const ManualCalibrationPage: React.FC = () => {
     const navigate = useNavigate();
     const [groups, setGroups] = useState<SrfGroupSummary[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeSrf, setActiveSrf] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [selectedGroup, setSelectedGroup] = useState<SrfGroupSummary | null>(null);
 
     useEffect(() => {
         api.get('/flow-configs/manual-calibration-groups').then(r => setGroups(r.data)).finally(() => setLoading(false));
     }, []);
 
+    const filtered = groups.filter(g => g.srf_no.toLowerCase().includes(searchTerm.toLowerCase()) || g.customer_name.toLowerCase().includes(searchTerm.toLowerCase()));
+
     return (
-        <div className="min-h-screen bg-gray-50 p-8 font-sans">
+        <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8 font-sans">
             <div className="max-w-6xl mx-auto space-y-6">
-                <div className="bg-white p-6 rounded-2xl border flex justify-between items-center shadow-sm">
-                    <div className="flex gap-4 items-center">
-                        <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl shadow-inner"><ClipboardEdit size={32}/></div>
-                        <div><h2 className="text-2xl font-black">Manual Calibration</h2><p className="text-gray-500 text-sm">Upload records and manage deviations</p></div>
-                    </div>
-                    <button onClick={() => navigate("/engineer")} className="px-5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl flex items-center gap-2 hover:bg-gray-50 transition-all font-bold text-sm shadow-sm"><ArrowLeft size={18}/> Back</button>
-                </div>
-                <div className="space-y-4">
-                    {loading ? <ManualCalibrationSkeleton /> : groups.map(g => (
-                        <div key={g.srf_no} className="bg-white rounded-2xl border border-gray-200 shadow-sm transition-all overflow-hidden">
-                            <div onClick={() => setActiveSrf(activeSrf === g.srf_no ? null : g.srf_no)} className="p-6 flex justify-between items-center cursor-pointer hover:bg-gray-50">
-                                <div><p className="font-black text-xl text-blue-700 tracking-tight">{g.srf_no}</p><p className="text-sm text-gray-600 font-bold">{g.customer_name} • {g.equipment_count} Items</p></div>
-                                <ChevronRight className={`transition-transform duration-300 ${activeSrf === g.srf_no ? 'rotate-90' : ''}`} />
-                            </div>
-                            {activeSrf === g.srf_no && <EquipmentDetailList srfNo={g.srf_no} />}
+                {!selectedGroup && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in duration-500">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-100"><ClipboardEdit size={28}/></div>
+                            <div><h2 className="text-2xl font-bold text-gray-900 tracking-tight">Manual Calibration</h2><p className="text-gray-500 text-sm mt-1">Manage OOT/NC and upload certificates</p></div>
                         </div>
-                    ))}
-                </div>
+                        <button onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm transition-all shadow-sm"><ArrowLeft size={16}/><span>Back to Dashboard</span></button>
+                    </div>
+                )}
+
+                {loading ? <ManualCalibrationSkeleton /> : selectedGroup ? (
+                    <EquipmentDetailList group={selectedGroup} onBack={() => setSelectedGroup(null)} />
+                ) : (
+                    <div className="space-y-4">
+                        <div className="bg-white p-5 border border-gray-200 rounded-2xl shadow-sm">
+                            <div className="relative max-w-md w-full"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-gray-400" /></div><input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search by SRF or Customer..." className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-shadow" /></div>
+                        </div>
+                        <div className="space-y-3">
+                            {filtered.map(g => (
+                                <div key={g.srf_no} onClick={() => setSelectedGroup(g)} className="flex items-center justify-between p-5 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer">
+                                    <div className="flex items-start gap-4">
+                                        <div className="mt-1 p-2.5 bg-gray-100 text-gray-400 group-hover:bg-blue-100 group-hover:text-blue-600 rounded-full transition-colors"><FileText size={20}/></div>
+                                        <div>
+                                            <p className="font-semibold text-lg text-gray-800">SRF No: {g.srf_no}</p>
+                                            <p className="text-sm text-gray-600 mt-1">Customer: <span className="font-medium text-gray-900">{g.customer_name}</span> — Items: <span className="font-medium text-gray-700">{g.equipment_count}</span></p>
+                                            <p className="text-xs text-gray-400 font-medium flex items-center gap-1 mt-1"><Calendar size={12}/> {new Date(g.received_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                        </div>
+                                    </div>
+                                    <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-all transform group-hover:translate-x-1" />
+                                </div>
+                            ))}
+                            {filtered.length === 0 && <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200 text-gray-400 font-medium">No results found</div>}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

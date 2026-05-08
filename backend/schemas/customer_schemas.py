@@ -16,13 +16,13 @@ class EquipmentRemarkUpdate(BaseModel):
     """Schema for a single equipment remark update."""
     inward_eqp_id: int
     customer_remark: Optional[str] = ""
-    customer_remarks: Optional[str] = None  # alias support
-    status: Optional[str] = None
-
+    # Optional: allow passing specific status if needed, though backend logic handles it
+    status: Optional[str] = None 
 
 class RemarksSubmissionRequest(BaseModel):
     """Schema for submitting a list of remarks for an inward."""
     remarks: List[EquipmentRemarkUpdate]
+    # Optional: allow passing overall status update (e.g. to 'reviewed')
     status: Optional[str] = None
 
 
@@ -171,3 +171,6 @@ class TrackingResponse(BaseModel):
     equipments: List[TrackingEquipmentItem]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+

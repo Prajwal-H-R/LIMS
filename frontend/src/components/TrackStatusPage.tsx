@@ -37,7 +37,7 @@ import { api, ENDPOINTS } from "../api/config";
  * completed   → all previous steps done          → blue filled circle
  * current     → active / in-progress step        → blue pulsing circle
  * pending     → not yet reached                  → grey circle
- * terminated  → HTW job was terminated           → red circle  (XCircle)
+ * terminated  → HTW job was terminated           → red circle   (XCircle)
  * deviated    → active deviation raised          → amber circle (AlertTriangle)
  * oot         → completed out-of-tolerance       → orange circle (Gauge)
  * onhold      → job on hold, no deviation        → amber circle (PauseCircle)
@@ -107,34 +107,27 @@ interface StatusFlags {
 /**
  * Single source of truth for classifying a display_status string.
  *
- * Priority order (highest wins):
+ * Priority order (highest wins — each flag excludes lower-priority ones):
  *   terminated > oot > deviated > onhold > dispatched > ready > completed > progress > inward
- *
- * HTW certificate mapping (from backend):
- *   HTWCertificate.status = 'approved' → display_status = "Certificate Ready"
- *   HTWCertificate.status = 'issued'   → display_status = "Certificate Dispatched"
  */
 const classifyStatus = (displayStatus: string): StatusFlags => {
   const s = displayStatus.toLowerCase();
 
   const isTerminated = s.includes("terminated");
-  const isOOT        = s.includes("oot") || s.includes("out of tolerance");
-  const isDeviated   = !isTerminated && !isOOT &&
-                       (s.includes("deviation") || s.includes("deviated"));
-  const isOnHold     = !isTerminated && !isOOT && !isDeviated &&
-                       (s.includes("on hold") || s.includes("on_hold"));
-
-  // "Certificate Dispatched" — HTW: cert.status='issued', Non-HTW: cert.status='issued'
+  const isOOT        = !isTerminated && (
+    s.includes("out of tolerance") || s.includes("oot")
+  );
+  const isDeviated   = !isTerminated && !isOOT && (
+    s.includes("deviation") || s.includes("deviated")
+  );
+  const isOnHold     = !isTerminated && !isOOT && !isDeviated && (
+    s.includes("on hold") || s.includes("on_hold")
+  );
   const isDispatched = s.includes("dispatched");
-
-  // "Certificate Ready"
-  //   HTW:     cert.status = 'approved'
-  //   Non-HTW: external_uploads.certificate_file_url populated
-  const isReady = s.includes("ready") && !isDispatched;
-
-  const isCompleted = s.includes("completed") && !isOOT && !isDispatched;
-  const isProgress  = s.includes("progress") && !isDeviated && !isOnHold;
-  const isInward    = s.includes("inward");
+  const isReady      = !isDispatched && s.includes("ready");
+  const isCompleted  = !isOOT && !isDispatched && s.includes("completed");
+  const isProgress   = !isDeviated && !isOnHold && s.includes("progress");
+  const isInward     = s.includes("inward");
 
   return {
     isTerminated,
@@ -153,12 +146,6 @@ const classifyStatus = (displayStatus: string): StatusFlags => {
 //  COLOUR HELPERS                                                      //
 // ================================================================== //
 
-/**
- * Tailwind classes for the status badge pill in list and detail views.
- *
- * Certificate Ready      → green  (HTW: cert approved / Non-HTW: cert file uploaded)
- * Certificate Dispatched → purple (HTW + Non-HTW: cert issued)
- */
 const getStatusBadgeClasses = (displayStatus: string): string => {
   const c = classifyStatus(displayStatus);
   if (c.isTerminated) return "bg-red-100    text-red-700    border-red-200";
@@ -172,14 +159,6 @@ const getStatusBadgeClasses = (displayStatus: string): string => {
   return                     "bg-slate-100  text-slate-600  border-slate-200";
 };
 
-/**
- * Tailwind bg-* accent colour used for:
- *   - coloured strip at top of detail card
- *   - progress connector fill in the timeline track
- *
- * Certificate Ready      → green
- * Certificate Dispatched → purple
- */
 const getAccentColour = (displayStatus: string): string => {
   const c = classifyStatus(displayStatus);
   if (c.isTerminated) return "bg-red-500";
@@ -199,26 +178,28 @@ const getAccentColour = (displayStatus: string): string => {
 /**
  * Maps backend `icon` key strings → Lucide icon components.
  *
- * Keys the backend currently sends:
- *   box | file | settings | check | badge | truck | gauge
+ * Backend may send:
+ *   box | file | settings | check | badge | truck | gauge | x | alert | pause
  */
 const TimelineIcon: React.FC<{ iconName: string; className?: string }> = ({
   iconName,
   className = "h-5 w-5",
 }) => {
   switch (iconName) {
-    case "box":      return <Box          className={className} />;
-    case "file":     return <FileText     className={className} />;
-    case "settings": return <Settings     className={className} />;
-    case "check":    return <CheckCircle2 className={className} />;
-    case "badge":    return <BadgeCheck   className={className} />;
-    case "truck":    return <Truck        className={className} />;
-    case "gauge":    return <Gauge        className={className} />;
-    default:         return <Activity     className={className} />;
+    case "box":      return <Box           className={className} />;
+    case "file":     return <FileText      className={className} />;
+    case "settings": return <Settings      className={className} />;
+    case "check":    return <CheckCircle2  className={className} />;
+    case "badge":    return <BadgeCheck    className={className} />;
+    case "truck":    return <Truck         className={className} />;
+    case "gauge":    return <Gauge         className={className} />;
+    case "x":        return <XCircle       className={className} />;
+    case "alert":    return <AlertTriangle className={className} />;
+    case "pause":    return <PauseCircle   className={className} />;
+    default:         return <Activity      className={className} />;
   }
 };
 
-/** Coloured dot icon for each activity log entry type */
 const ActivityIcon: React.FC<{ type?: ActivityLogType }> = ({ type = "info" }) => {
   const base = "w-8 h-8 rounded-full flex items-center justify-center shrink-0";
   switch (type) {
@@ -259,19 +240,6 @@ interface StepConfig {
   label:  string;
 }
 
-/**
- * Visual configuration for each timeline step status.
- * Defined at module scope — not recreated on each render.
- *
- * Special states for HTW certificate steps:
- *   "Certificate Ready"      (step label) → rendered as "current" with green accent
- *                                           when display_status = "Certificate Ready"
- *   "Certificate Dispatched" (step label) → rendered as "current" with purple accent
- *                                           when display_status = "Certificate Dispatched"
- *
- * The step status itself ("completed" / "current" / "pending") is determined
- * by the backend via _assemble_timeline(); the frontend only needs to render it.
- */
 const getStepConfig = (stepStatus: TimelineStatus): StepConfig => {
   switch (stepStatus) {
     case "completed":
@@ -321,23 +289,21 @@ const getStepConfig = (stepStatus: TimelineStatus): StepConfig => {
 };
 
 /**
- * Returns special override styling for certificate steps when
- * the overall display_status corresponds to that step being active.
+ * Override styling for certificate steps when display_status corresponds
+ * to that step being active — applied only when step.status === "current".
  *
- * This lets "Certificate Ready" show green and "Certificate Dispatched"
- * show purple even though their step.status is "current" (normally blue).
- *
- * Only applied when step.status === "current".
+ * Certificate Ready      → green
+ * Certificate Dispatched → purple
  */
 const getCertStepOverride = (
   stepLabel:     string,
   displayStatus: string,
 ): StepConfig | null => {
   const ds = displayStatus.toLowerCase();
+  const sl = stepLabel.toLowerCase();
 
-  // Certificate Ready step — green when it is the active step
   if (
-    stepLabel.toLowerCase().includes("certificate ready") &&
+    sl.includes("certificate ready") &&
     ds.includes("ready") &&
     !ds.includes("dispatched")
   ) {
@@ -348,9 +314,8 @@ const getCertStepOverride = (
     };
   }
 
-  // Certificate Dispatched step — purple when it is the active step
   if (
-    stepLabel.toLowerCase().includes("certificate dispatched") &&
+    sl.includes("certificate dispatched") &&
     ds.includes("dispatched")
   ) {
     return {
@@ -368,10 +333,8 @@ const TimelineStepNode: React.FC<{
   isLast:        boolean;
   displayStatus: string;
 }> = ({ step, displayStatus }) => {
-  // Base config from step status
   let cfg = getStepConfig(step.status);
 
-  // Override for certificate steps when they are "current"
   if (step.status === "current") {
     const override = getCertStepOverride(step.label, displayStatus);
     if (override) cfg = override;
@@ -408,17 +371,6 @@ const TimelineStepNode: React.FC<{
 //  ALERT BANNER                                                        //
 // ================================================================== //
 
-/**
- * Contextual alert banner rendered above the timeline card whenever
- * the backend provides an alert_message.
- *
- * Variants:
- *   terminated → red  (XCircle)
- *   oot        → orange (Gauge)
- *   deviated   → amber (AlertTriangle)
- *   onhold     → amber (PauseCircle)
- *   default    → blue  (Info)
- */
 const AlertBanner: React.FC<{
   message:       string;
   displayStatus: string;
@@ -492,14 +444,6 @@ const AlertBanner: React.FC<{
 //  TIMELINE LEGEND                                                     //
 // ================================================================== //
 
-/**
- * One-line plain-English explanation shown below the timeline track.
- * Only rendered for special/terminal states and certificate states.
- * Returns null for ordinary in-progress states.
- *
- * Certificate Ready      → green legend  (HTW: cert approved)
- * Certificate Dispatched → purple legend (HTW + Non-HTW: cert issued)
- */
 const TimelineLegend: React.FC<{ displayStatus: string }> = ({
   displayStatus,
 }) => {
@@ -526,8 +470,9 @@ const TimelineLegend: React.FC<{ displayStatus: string }> = ({
         <Gauge className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
           <strong>Out Of Tolerance</strong> — Calibration was completed but the
-          instrument's readings are outside acceptable limits. The certificate
-          team is reviewing the results.
+          instrument's readings are outside acceptable limits. Please review the
+          report and contact the lab to discuss next steps (repair / adjustment /
+          retirement).
         </span>
       </div>
     );
@@ -567,8 +512,8 @@ const TimelineLegend: React.FC<{ displayStatus: string }> = ({
         <Truck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
           <strong>Certificate Dispatched</strong> — Your calibration certificate
-          has been issued and dispatched. Please check your registered address
-          or contact the lab for courier details.
+          has been issued and dispatched. Please check your registered address or
+          contact the lab for courier details.
         </span>
       </div>
     );
@@ -600,16 +545,61 @@ const DetailView: React.FC<{
   onBack: () => void;
 }> = ({ item, onBack }) => {
   const accentColour = getAccentColour(item.display_status);
+  const c            = classifyStatus(item.display_status);
 
-  // Progress percentage for the connector fill line.
-  // Counts all non-pending steps (completed + any active special state).
-  const nonPendingCount = item.timeline.filter(
-    (s) => s.status !== "pending"
-  ).length;
-  const progressPct =
-    item.timeline.length > 1
-      ? ((nonPendingCount - 1) / (item.timeline.length - 1)) * 100
+  /**
+   * ✅ TRUNCATE timeline when terminated.
+   *
+   * When a job is terminated, the calibration is permanently stopped —
+   * the customer should NOT see remaining steps faded out as if they
+   * could still be completed.
+   */
+  const visibleTimeline = React.useMemo(() => {
+    if (c.isTerminated) {
+      const terminatedIdx = item.timeline.findIndex(
+        (s) => s.status === "terminated"
+      );
+      if (terminatedIdx >= 0) {
+        return item.timeline.slice(0, terminatedIdx + 1);
+      }
+    }
+    return item.timeline;
+  }, [item.timeline, c.isTerminated]);
+
+  /**
+   * Progress percentage for the connector fill line.
+   *
+   * For terminated state: fill = 100% of the truncated track.
+   * For other states: standard "non-pending steps minus 1" logic.
+   */
+  const progressPct = React.useMemo(() => {
+    if (c.isTerminated) return 100;
+    const nonPendingCount = visibleTimeline.filter(
+      (s) => s.status !== "pending"
+    ).length;
+    return visibleTimeline.length > 1
+      ? Math.min(
+          100,
+          ((nonPendingCount - 1) / (visibleTimeline.length - 1)) * 100
+        )
       : 0;
+  }, [visibleTimeline, c.isTerminated]);
+
+  /**
+   * ✅ Inset percentage = half of one step's width.
+   *
+   * Each step is `flex-1`, so each occupies `100 / N` % of the container.
+   * The first circle's centre sits at `(100/N)/2` % from the left edge,
+   * and the last circle's centre sits the same distance from the right.
+   *
+   * Using these values for the track's left/right insets ensures the
+   * connector line starts at the FIRST circle's centre and ends at
+   * the LAST circle's centre — no extra line bleeding past the
+   * outermost nodes.
+   */
+  const insetPct = visibleTimeline.length > 0
+    ? (100 / visibleTimeline.length) / 2
+    : 0;
 
   return (
     <div className="animate-in slide-in-from-right-4 fade-in duration-300 space-y-6">
@@ -694,26 +684,38 @@ const DetailView: React.FC<{
 
           {/* ── Horizontal timeline ──────────────────────────────────── */}
           <div className="relative overflow-x-auto">
-            {/* Full-width grey track */}
-            <div className="absolute top-5 md:top-6 left-5 md:left-6
-                            right-5 md:right-6 h-1 bg-slate-100 rounded-full" />
+            {/*
+              ✅ Track lines now span ONLY between the first and last
+              circle centres. No extra line extending past the outermost
+              nodes.
+            */}
+
+            {/* Grey base track */}
+            <div
+              className="absolute top-5 md:top-6 h-1 bg-slate-100 rounded-full"
+              style={{
+                left:  `${insetPct}%`,
+                right: `${insetPct}%`,
+              }}
+            />
 
             {/* Coloured progress fill */}
             <div
-              className={`absolute top-5 md:top-6 left-5 md:left-6 h-1
-                          rounded-full transition-all duration-1000 ${accentColour}`}
+              className={`absolute top-5 md:top-6 h-1 rounded-full
+                          transition-all duration-1000 ${accentColour}`}
               style={{
-                width: `calc(${progressPct / 100} * (100% - 2.5rem))`,
+                left:  `${insetPct}%`,
+                width: `calc((100% - ${insetPct * 2}%) * ${progressPct / 100})`,
               }}
             />
 
             <div className="relative flex items-start justify-between
                             gap-1 md:gap-2 pb-4 min-w-0">
-              {item.timeline.map((step, idx) => (
+              {visibleTimeline.map((step, idx) => (
                 <TimelineStepNode
                   key={idx}
                   step={step}
-                  isLast={idx === item.timeline.length - 1}
+                  isLast={idx === visibleTimeline.length - 1}
                   displayStatus={item.display_status}
                 />
               ))}
@@ -741,8 +743,10 @@ const DetailView: React.FC<{
                           tracking-wide mb-1">
               {kv.label}
             </p>
-            <p className="text-sm font-bold text-slate-800 truncate"
-               title={kv.value}>
+            <p
+              className="text-sm font-bold text-slate-800 truncate"
+              title={kv.value}
+            >
               {kv.value}
             </p>
           </div>
@@ -879,7 +883,6 @@ const ListView: React.FC<{
                 </td>
                 <td className="px-4 md:px-5 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
-                    {/* Leading icon for special states */}
                     {c.isTerminated && (
                       <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
                     )}
