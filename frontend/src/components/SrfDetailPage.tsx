@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthProvider";
 import {
   BookOpen, XCircle, ArrowLeft, Download, CheckCircle,
   Calendar, User, Phone, Mail, FileText, MapPin,
-  Building, Award, Home, Lock
+  Building, Award, Home, Lock, AlertCircle
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -98,6 +98,17 @@ const generateNeplSrfNo = (srfNo: string | number | undefined): string => {
 };
  
 const getTodayDateString = (): string => new Date().toISOString().split("T")[0];
+
+const isEmpty = (value: unknown): boolean => {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") return value.trim() === "";
+  return false;
+};
+
+const EMPTY_FIELD_CLASS =
+  "bg-amber-50 border-amber-400 ring-1 ring-amber-300 focus:ring-amber-500 focus:border-amber-500";
+const EMPTY_FIELD_TABLE_CLASS =
+  "bg-amber-50 border-amber-400 ring-1 ring-amber-300 focus:ring-amber-500 focus:border-amber-500";
  
 const fetchUnitForMakeModel = async (make: string, model: string): Promise<string> => {
   if (!make || !model) return '';
@@ -858,9 +869,32 @@ export const SrfDetailPage: React.FC = () => {
   const isApproved = srfData.status === "approved";
   const isRejected = srfData.status === "rejected";
   const showSpecialInstructions = isApproved || isRejected;
- 
+
   // Disable interaction if locked
   const formOpacity = isLocked ? "opacity-70 pointer-events-none select-none" : "opacity-100";
+
+  // Count empty editable fields so we can both highlight and warn the user.
+  const emptyFieldCount = (() => {
+    if (!canEdit) return 0;
+    let count = 0;
+    if (isEmpty(srfData.date)) count += 1;
+    if (isEmpty(srfData.contact_person)) count += 1;
+    if (isEmpty(srfData.phone)) count += 1;
+    if (isEmpty(srfData.email)) count += 1;
+    if (isEmpty(srfData.certificate_issue_name)) count += 1;
+    if (isEmpty(srfData.certificate_issue_adress)) count += 1;
+
+    for (const eq of srfData.inward?.equipments || []) {
+      const isConfigured = configuredTypes.has(
+        (eq.material_description || "").toLowerCase().trim()
+      );
+      // Unit is auto-filled when configured, so skip it then.
+      if (!isConfigured && isEmpty(eq.srf_equipment?.unit ?? eq.unit)) count += 1;
+      if (isEmpty(eq.srf_equipment?.no_of_calibration_points)) count += 1;
+      if (isEmpty(eq.srf_equipment?.mode_of_calibration)) count += 1;
+    }
+    return count;
+  })();
  
   return (
     <div className="min-h-screen bg-gray-50 flex justify-center py-8 px-4 relative">
@@ -939,7 +973,21 @@ export const SrfDetailPage: React.FC = () => {
               </div>
             </div>
           )}
- 
+
+          {canEdit && emptyFieldCount > 0 && (
+            <div className="p-4 mb-8 border-l-4 border-amber-400 bg-amber-50 rounded-r-lg flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  {emptyFieldCount} field{emptyFieldCount > 1 ? "s" : ""} need{emptyFieldCount > 1 ? "" : "s"} your attention
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Empty fields are highlighted in amber below. Please review and fill in any missing values before submitting.
+                </p>
+              </div>
+            </div>
+          )}
+
           <fieldset className="border border-gray-300 rounded-2xl p-6 mb-10 bg-white shadow-sm">
             <legend className="px-3 text-lg font-semibold text-gray-800 bg-white rounded-md shadow-sm border border-gray-200">
               Customer Details
@@ -976,7 +1024,13 @@ export const SrfDetailPage: React.FC = () => {
                     readOnly={!canEdit}
                     value={srfData.date}
                     onChange={(e) => handleSrfChange("date", e.target.value)}
-                    className={`block w-full rounded-lg border-gray-300 px-3 py-2 text-sm ${canEdit ? "bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500" : "bg-gray-50 cursor-not-allowed"}`}
+                    className={`block w-full rounded-lg border px-3 py-2 text-sm ${
+                      canEdit
+                        ? isEmpty(srfData.date)
+                          ? EMPTY_FIELD_CLASS
+                          : "bg-white border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        : "bg-gray-50 border-gray-300 cursor-not-allowed"
+                    }`}
                   />
               </div>
             </div>
@@ -1022,46 +1076,64 @@ export const SrfDetailPage: React.FC = () => {
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Contact Person</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <User size={16} className="text-gray-400"/>
+                        <User size={16} className={canEdit && isEmpty(srfData.contact_person) ? "text-amber-500" : "text-gray-400"}/>
                     </div>
                     <input
                         type="text"
                         readOnly={!canEdit}
                         value={srfData.contact_person}
                         onChange={(e) => handleSrfChange("contact_person", e.target.value)}
-                        className={`block w-full pl-10 rounded-lg border-gray-300 text-sm ${canEdit ? "bg-white" : "bg-gray-50 cursor-not-allowed"}`}
+                        className={`block w-full pl-10 rounded-lg border text-sm ${
+                          canEdit
+                            ? isEmpty(srfData.contact_person)
+                              ? EMPTY_FIELD_CLASS
+                              : "bg-white border-gray-300"
+                            : "bg-gray-50 border-gray-300 cursor-not-allowed"
+                        }`}
                     />
                   </div>
                 </div>
- 
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Phone</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Phone size={16} className="text-gray-400"/>
+                        <Phone size={16} className={canEdit && isEmpty(srfData.phone) ? "text-amber-500" : "text-gray-400"}/>
                     </div>
                     <input
                         type="text"
                         readOnly={!canEdit}
                         value={srfData.phone}
                         onChange={(e) => handleSrfChange("phone", e.target.value)}
-                        className={`block w-full pl-10 rounded-lg border-gray-300 text-sm ${canEdit ? "bg-white" : "bg-gray-50 cursor-not-allowed"}`}
+                        className={`block w-full pl-10 rounded-lg border text-sm ${
+                          canEdit
+                            ? isEmpty(srfData.phone)
+                              ? EMPTY_FIELD_CLASS
+                              : "bg-white border-gray-300"
+                            : "bg-gray-50 border-gray-300 cursor-not-allowed"
+                        }`}
                     />
                   </div>
                 </div>
- 
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Email</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Mail size={16} className="text-gray-400"/>
+                        <Mail size={16} className={canEdit && isEmpty(srfData.email) ? "text-amber-500" : "text-gray-400"}/>
                     </div>
                     <input
                         type="email"
                         readOnly={!canEdit}
                         value={srfData.email}
                         onChange={(e) => handleSrfChange("email", e.target.value)}
-                        className={`block w-full pl-10 rounded-lg border-gray-300 text-sm ${canEdit ? "bg-white" : "bg-gray-50 cursor-not-allowed"}`}
+                        className={`block w-full pl-10 rounded-lg border text-sm ${
+                          canEdit
+                            ? isEmpty(srfData.email)
+                              ? EMPTY_FIELD_CLASS
+                              : "bg-white border-gray-300"
+                            : "bg-gray-50 border-gray-300 cursor-not-allowed"
+                        }`}
                     />
                   </div>
                 </div>
@@ -1072,30 +1144,42 @@ export const SrfDetailPage: React.FC = () => {
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Certificate Issue Name</label>
                   <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Award size={16} className="text-indigo-500"/>
+                        <Award size={16} className={canEdit && isEmpty(srfData.certificate_issue_name) ? "text-amber-500" : "text-indigo-500"}/>
                       </div>
                       <input
                           type="text"
                           readOnly={!canEdit}
                           value={srfData.certificate_issue_name}
                           onChange={(e) => handleSrfChange("certificate_issue_name", e.target.value)}
-                          className={`block w-full pl-10 rounded-lg border-gray-300 text-sm ${canEdit ? "bg-white" : "bg-gray-50 cursor-not-allowed"}`}
+                          className={`block w-full pl-10 rounded-lg border text-sm ${
+                            canEdit
+                              ? isEmpty(srfData.certificate_issue_name)
+                                ? EMPTY_FIELD_CLASS
+                                : "bg-white border-gray-300"
+                              : "bg-gray-50 border-gray-300 cursor-not-allowed"
+                          }`}
                       />
                   </div>
                 </div>
- 
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Certificate Issue Address</label>
                   <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 pt-2.5 flex items-start pointer-events-none">
-                        <Home size={16} className="text-indigo-500"/>
+                        <Home size={16} className={canEdit && isEmpty(srfData.certificate_issue_adress) ? "text-amber-500" : "text-indigo-500"}/>
                       </div>
                       <textarea
                           rows={2}
                           readOnly={!canEdit}
                           value={srfData.certificate_issue_adress || ""}
                           onChange={(e) => handleSrfChange("certificate_issue_adress", e.target.value)}
-                          className={`block w-full pl-10 rounded-lg border-gray-300 text-sm ${canEdit ? "bg-white" : "bg-gray-50 cursor-not-allowed"}`}
+                          className={`block w-full pl-10 rounded-lg border text-sm ${
+                            canEdit
+                              ? isEmpty(srfData.certificate_issue_adress)
+                                ? EMPTY_FIELD_CLASS
+                                : "bg-white border-gray-300"
+                              : "bg-gray-50 border-gray-300 cursor-not-allowed"
+                          }`}
                           placeholder="Same as Bill To if empty"
                       />
                   </div>
@@ -1238,6 +1322,15 @@ export const SrfDetailPage: React.FC = () => {
                     // Unit is Read Only if: User cannot edit OR Tool is configured (System Driven)
                     const isUnitReadOnly = !canEdit || isConfigured;
 
+                    const unitValue = eq.srf_equipment?.unit || eq.unit || "";
+                    const calibPointsValue = eq.srf_equipment?.no_of_calibration_points ?? "";
+                    const modeValue = eq.srf_equipment?.mode_of_calibration || "";
+
+                    // Only highlight unit when user can actually edit it (skip auto-filled rows)
+                    const highlightUnit = canEdit && !isConfigured && isEmpty(unitValue);
+                    const highlightCalibPoints = canEdit && isEmpty(calibPointsValue);
+                    const highlightMode = canEdit && isEmpty(modeValue);
+
                     return (
                         <tr key={eq.inward_eqp_id} className="bg-white border-b hover:bg-blue-50 transition">
                         <td className="px-4 py-2">{eq.material_description}</td>
@@ -1248,16 +1341,50 @@ export const SrfDetailPage: React.FC = () => {
                             <input
                             type="text"
                             readOnly={isUnitReadOnly}
-                            value={eq.srf_equipment?.unit || eq.unit || ""}
+                            value={unitValue}
                             onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "unit", e.target.value)}
-                            className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${
-                                isUnitReadOnly ? "bg-gray-100 cursor-not-allowed" : "bg-white border-blue-400 focus:ring-2 focus:ring-blue-500"
+                            className={`block w-full rounded-lg border px-2 py-1 text-sm ${
+                                isUnitReadOnly
+                                  ? "bg-gray-100 border-gray-300 cursor-not-allowed"
+                                  : highlightUnit
+                                    ? EMPTY_FIELD_TABLE_CLASS
+                                    : "bg-white border-blue-400 focus:ring-2 focus:ring-blue-500"
                             }`}
                             placeholder={isConfigured ? "Auto-filled from spec" : "Enter Unit"}
                             />
                         </td>
-                        <td className="px-2 py-1"><input type="text" className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${canEdit ? "bg-white" : "bg-gray-100 cursor-not-allowed"}`} readOnly={!canEdit} value={eq.srf_equipment?.no_of_calibration_points ?? ""} onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "no_of_calibration_points", e.target.value)} /></td>
-                        <td className="px-2 py-1"><input type="text" className={`block w-full rounded-lg border-gray-300 px-2 py-1 text-sm ${canEdit ? "bg-white" : "bg-gray-100 cursor-not-allowed"}`} readOnly={!canEdit} value={eq.srf_equipment?.mode_of_calibration || ""} onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "mode_of_calibration", e.target.value)} /></td>
+                        <td className="px-2 py-1">
+                          <input
+                            type="text"
+                            readOnly={!canEdit}
+                            value={calibPointsValue}
+                            onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "no_of_calibration_points", e.target.value)}
+                            placeholder={canEdit ? "Enter points" : ""}
+                            className={`block w-full rounded-lg border px-2 py-1 text-sm ${
+                              canEdit
+                                ? highlightCalibPoints
+                                  ? EMPTY_FIELD_TABLE_CLASS
+                                  : "bg-white border-gray-300"
+                                : "bg-gray-100 border-gray-300 cursor-not-allowed"
+                            }`}
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <input
+                            type="text"
+                            readOnly={!canEdit}
+                            value={modeValue}
+                            onChange={(e) => handleSrfEquipmentChange(eq.inward_eqp_id, "mode_of_calibration", e.target.value)}
+                            placeholder={canEdit ? "Enter mode" : ""}
+                            className={`block w-full rounded-lg border px-2 py-1 text-sm ${
+                              canEdit
+                                ? highlightMode
+                                  ? EMPTY_FIELD_TABLE_CLASS
+                                  : "bg-white border-gray-300"
+                                : "bg-gray-100 border-gray-300 cursor-not-allowed"
+                            }`}
+                          />
+                        </td>
                         </tr>
                     );
                   })}

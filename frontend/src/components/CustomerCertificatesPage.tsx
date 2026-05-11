@@ -3,17 +3,18 @@ import { Link } from 'react-router-dom';
 import { 
   Award, Eye, Loader2, X, ChevronLeft, 
   Download, Package, Search, Calendar, 
-  ChevronRight, ClipboardList, ExternalLink 
+  ChevronRight, ClipboardList, ExternalLink
 } from 'lucide-react';
 import { api, ENDPOINTS } from '../api/config';
 import { CustomerCertificatePrintView } from './CustomerCertificatePrintView';
 import type { CertificateTemplateData } from './CustomerCertificatePrintView';
 
-// Unified interface to handle both System and Manual certificates
+// Updated interface to include nepl_id
 interface Certificate {
   certificate_id: number | string; 
   job_id: number;
   inward_id: number | null;
+  nepl_id: string | null; 
   certificate_no: string;
   date_of_calibration: string;
   ulr_no: string | null;
@@ -68,8 +69,7 @@ export const CustomerCertificatesPage: React.FC = () => {
     if (searchTerm) {
       const low = searchTerm.toLowerCase();
       filtered = filtered.filter(c => 
-        (c.customer_dc_no?.toLowerCase().includes(low)) || 
-        (c.certificate_no?.toLowerCase().includes(low))
+        (c.customer_dc_no?.toLowerCase().includes(low))
       );
     }
     return filtered.reduce((acc, cert) => {
@@ -83,11 +83,11 @@ export const CustomerCertificatesPage: React.FC = () => {
   const activeCertificates = selectedDc ? groupedData[selectedDc] || [] : [];
 
   const handleDownloadPdf = async (cert: Certificate) => {
-    // FLOW 1: Manual/External Upload
     if (cert.is_external && cert.certificate_file_url) {
       const link = document.createElement('a');
       link.href = cert.certificate_file_url;
-      link.download = cert.certificate_file_name || `cert_${cert.certificate_id}.pdf`;
+      const fileName = cert.nepl_id ? `${cert.nepl_id}.pdf` : (cert.certificate_file_name || `cert_${cert.certificate_id}.pdf`);
+      link.download = fileName;
       link.target = "_blank";
       document.body.appendChild(link);
       link.click();
@@ -95,7 +95,6 @@ export const CustomerCertificatesPage: React.FC = () => {
       return;
     }
 
-    // FLOW 2: System Generated
     try {
       const res = await api.get(ENDPOINTS.PORTAL.CERTIFICATE_DOWNLOAD_PDF(cert.certificate_id as number), {
         responseType: 'blob',
@@ -103,7 +102,8 @@ export const CustomerCertificatesPage: React.FC = () => {
       const blob = new Blob([res.data], { type: 'application/pdf' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `certificate_${cert.certificate_no || cert.certificate_id}.pdf`.replace(/\//g, '-');
+      const downloadName = (cert.nepl_id || cert.certificate_no || cert.certificate_id.toString()).replace(/\//g, '-');
+      link.download = `Cert_${downloadName}.pdf`;
       link.click();
       URL.revokeObjectURL(link.href);
     } catch (err: any) {
@@ -112,13 +112,11 @@ export const CustomerCertificatesPage: React.FC = () => {
   };
 
   const handleViewCertificate = async (cert: Certificate) => {
-    // FLOW 1: Manual/External Upload (Open URL directly)
     if (cert.is_external && cert.certificate_file_url) {
       window.open(cert.certificate_file_url, '_blank');
       return;
     }
 
-    // FLOW 2: System Generated (Show Preview Modal)
     setSelectedCertId(cert.certificate_id);
     setShowPrintModal(true);
     setPrintData(null);
@@ -137,7 +135,7 @@ export const CustomerCertificatesPage: React.FC = () => {
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* --- Header Section --- */}
+        {/* Header Section */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
@@ -148,7 +146,7 @@ export const CustomerCertificatesPage: React.FC = () => {
                 {selectedDc ? `DC: ${selectedDc}` : "Calibration Certificates"}
               </h2>
               <p className="text-gray-500 text-sm mt-1">
-                {selectedDc ? `List of certificates for this delivery challan` : "View and download your issued calibration certificates"}
+                {selectedDc ? `Viewing all certificates for this delivery challan` : "Search by NEPL-ID, DC No, or Certificate No"}
               </p>
             </div>
           </div>
@@ -159,7 +157,7 @@ export const CustomerCertificatesPage: React.FC = () => {
               className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm transition-all shadow-sm"
             >
               <ChevronLeft size={16} />
-              <span>Back to List</span>
+              <span>Back to DC List</span>
             </button>
           ) : (
             <Link 
@@ -173,7 +171,7 @@ export const CustomerCertificatesPage: React.FC = () => {
         </div>
 
         {!selectedDc ? (
-          /* --- VIEW 1: Group Listing (Cards Style) --- */
+          /* VIEW 1: Group Listing */
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
             <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
               <div className="relative max-w-md w-full">
@@ -184,7 +182,7 @@ export const CustomerCertificatesPage: React.FC = () => {
                   type="text" 
                   value={searchTerm} 
                   onChange={(e) => setSearchTerm(e.target.value)} 
-                  placeholder="Search by DC or Certificate No..." 
+                  placeholder="Search DC No" 
                   className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 transition-shadow bg-white" 
                 />
               </div>
@@ -196,7 +194,7 @@ export const CustomerCertificatesPage: React.FC = () => {
               ) : Object.keys(groupedData).length === 0 ? (
                 <div className="text-center py-16 text-gray-400">
                    <Package className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                   <p>No certificates found.</p>
+                   <p>No certificates found matching your search.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -214,10 +212,9 @@ export const CustomerCertificatesPage: React.FC = () => {
                         </div>
                         <div>
                           <p className="font-semibold text-lg text-gray-800">DC No: {dcNo}</p>
-                         
                           <div className="mt-2">
                             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white border border-gray-200 text-indigo-700">
-                              {certs.length} Certificates
+                              {certs.length} Instruments
                             </span>
                           </div>
                         </div>
@@ -230,7 +227,7 @@ export const CustomerCertificatesPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* --- VIEW 2: Table Detail View --- */
+          /* VIEW 2: Detail Table (Showing NEPL-ID) */
           <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
             <div className="bg-gray-50/50 border-b border-gray-200 px-6 py-4 flex items-center justify-between">
                <h3 className="font-bold text-gray-800 flex items-center gap-2">
@@ -243,23 +240,27 @@ export const CustomerCertificatesPage: React.FC = () => {
               <table className="w-full text-left">
                 <thead>
                   <tr className="bg-gray-50/50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
-                    <th className="px-6 py-4 font-semibold">Certificate No</th>
-                    <th className="px-6 py-4 font-semibold">ULR No</th>
-                    <th className="px-6 py-4 font-semibold">Calibration Date</th>
+                    <th className="px-6 py-4 font-semibold">NEPL-ID</th>
+                    <th className="px-6 py-4 font-semibold text-center">Calibration Date</th>
                     <th className="px-6 py-4 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
                   {activeCertificates.map((cert) => (
                     <tr key={cert.certificate_id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 font-mono font-bold text-indigo-700">
-                        {cert.certificate_no || (cert.is_external ? 'MANUAL-UPLOAD' : '—')}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+
+                          <span className="font-bold text-gray-900 text-base">
+                            {cert.nepl_id || 'N/A'}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-6 py-4 text-gray-500 font-mono">
-                        {cert.ulr_no || '—'}
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">
-                        {formatDate(cert.date_of_calibration)}
+                      <td className="px-6 py-4 text-gray-600 text-center">
+                        <div className="flex flex-col items-center">
+                          <Calendar className="h-3.5 w-3.5 text-gray-400 mb-1" />
+                          {formatDate(cert.date_of_calibration)}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -273,6 +274,7 @@ export const CustomerCertificatesPage: React.FC = () => {
                            <button 
                              onClick={() => handleDownloadPdf(cert)} 
                              className="p-1.5 border border-gray-200 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                             title="Download PDF"
                            >
                               <Download className="h-4 w-4" />
                            </button>
@@ -286,15 +288,37 @@ export const CustomerCertificatesPage: React.FC = () => {
           </div>
         )}
 
-        {/* --- Modal Preview (System only) --- */}
+        {/* Modal Preview */}
         {showPrintModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowPrintModal(false)}>
             <div className="bg-white rounded-2xl shadow-2xl flex flex-col max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between px-6 py-4 border-b">
-                <h3 className="text-lg font-bold text-gray-800">Certificate Preview</h3>
-                <button onClick={() => setShowPrintModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <X className="h-6 w-6 text-gray-400" />
-                </button>
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-bold text-gray-800">Certificate Preview</h3>
+                  {selectedCertId && (
+                    <span className="text-xs text-indigo-600 font-medium">
+                      NEPL-ID: {certificates.find(c => c.certificate_id === selectedCertId)?.nepl_id}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Moved download button here to avoid prop mismatch */}
+                  {!printLoading && printData && (
+                    <button 
+                      onClick={() => {
+                        const cert = certificates.find(c => c.certificate_id === selectedCertId);
+                        if(cert) handleDownloadPdf(cert);
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-sm font-semibold transition-colors"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download PDF
+                    </button>
+                  )}
+                  <button onClick={() => setShowPrintModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <X className="h-6 w-6 text-gray-400" />
+                  </button>
+                </div>
               </div>
               <div className="flex-1 overflow-y-auto bg-gray-100 p-6">
                 {printLoading ? (
@@ -303,10 +327,6 @@ export const CustomerCertificatesPage: React.FC = () => {
                   printData?.template_data && (
                     <CustomerCertificatePrintView 
                       data={printData.template_data} 
-                      onDownload={() => {
-                        const cert = certificates.find(c => c.certificate_id === selectedCertId);
-                        if(cert) handleDownloadPdf(cert);
-                      }} 
                     />
                   )
                 )}
