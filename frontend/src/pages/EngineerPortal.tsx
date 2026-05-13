@@ -410,7 +410,7 @@ const SrfDeviationRecordsPage = () => {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">
-            {activeSection === "OOT" ? "OOT SRF Records" : "Manual SRF Records"}
+            {activeSection === "OOT" ? "Deviation-Out of Tolerance Records" : "Deviation-Not Calibrated Records"}
           </h2>
           <p className="text-sm text-gray-600 mt-1">
             SRF: <span className="font-semibold text-gray-800">{decodedSrf}</span> · {filtered.length} record(s)

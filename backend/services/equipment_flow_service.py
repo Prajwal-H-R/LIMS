@@ -224,6 +224,10 @@ def get_manual_equipment_for_srf(db: Session, srf_no: str) -> List[ManualEquipme
             InwardEquipment.inward_eqp_id,
             InwardEquipment.nepl_id,
             InwardEquipment.material_description,
+            InwardEquipment.make,
+            InwardEquipment.model,
+            InwardEquipment.serial_no,
+            InwardEquipment.range,
             InwardEquipment.photos.label("documents")
         )
         .join(Inward, Inward.inward_id == InwardEquipment.inward_id)

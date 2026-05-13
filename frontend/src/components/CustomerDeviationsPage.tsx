@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Loader2, Eye } from "lucide-react";
 import { api, ENDPOINTS } from "../api/config";
-
+ 
 export interface CustomerDeviationRow {
   deviation_id: number;
   inward_id: number;
@@ -24,7 +24,7 @@ export interface CustomerDeviationRow {
   report?: string | null;
   created_at?: string | null;
 }
-
+ 
 const CustomerDeviationsPage: React.FC = () => {
   const formatDcDate = (value?: string | null) => {
     if (!value) return "—";
@@ -47,7 +47,7 @@ const CustomerDeviationsPage: React.FC = () => {
     () => rows.filter((r) => (r.deviation_type || "").toUpperCase() === "MANUAL"),
     [rows]
   );
-
+ 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -65,25 +65,25 @@ const CustomerDeviationsPage: React.FC = () => {
       setLoading(false);
     }
   }, []);
-
+ 
   useEffect(() => {
     load();
   }, [load]);
-
+ 
   const toggleSrfGroup = (srf: string) => {
     setExpandedSrfGroups((prev) => ({
       ...prev,
       [srf]: !(prev[srf] ?? false),
     }));
   };
-
+ 
   const toggleNeplGroup = (groupKey: string) => {
     setExpandedNeplGroups((prev) => ({
       ...prev,
       [groupKey]: !(prev[groupKey] ?? false),
     }));
   };
-
+ 
   const renderSection = (
     sectionKey: string,
     title: string,
@@ -101,7 +101,7 @@ const CustomerDeviationsPage: React.FC = () => {
       if (b === "Without SRF") return -1;
       return b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" });
     });
-
+ 
     return (
       <div className="space-y-3">
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
@@ -187,7 +187,7 @@ const CustomerDeviationsPage: React.FC = () => {
                               {neplRows.length} record{neplRows.length > 1 ? "s" : ""}
                             </span>
                           </button>
-
+ 
                           {isNeplExpanded && (
                             <div className="overflow-x-auto">
                               <table className="w-full text-sm">
@@ -244,7 +244,7 @@ const CustomerDeviationsPage: React.FC = () => {
       </div>
     );
   };
-
+ 
   return (
     <div className="p-6 md:p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -259,27 +259,27 @@ const CustomerDeviationsPage: React.FC = () => {
           <ChevronLeft className="h-4 w-4" /> Back to Dashboard
         </Link>
       </div>
-
+ 
       <p className="text-sm text-slate-600 mb-6">
         Review out-of-tolerance or recorded deviations for your equipment. Submit your decision for each line;
         your engineering team will see it in the engineer portal.
       </p>
-
+ 
       {loading && (
         <div className="flex items-center gap-2 text-slate-500 text-sm py-8 justify-center">
           <Loader2 className="h-5 w-5 animate-spin" />
           Loading deviations...
         </div>
       )}
-
+ 
       {!loading && error && (
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm mb-4">{error}</div>
       )}
-
+ 
       {!loading && !error && rows.length === 0 && (
         <div className="text-center py-12 text-slate-500 text-sm">No deviations are linked to your account.</div>
       )}
-
+ 
       {!loading && rows.length > 0 && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -308,7 +308,7 @@ const CustomerDeviationsPage: React.FC = () => {
               <p className="text-sm text-slate-600 mt-1">Grouped by SRF number. {manualRows.length} record(s).</p>
             </button>
           </div>
-
+ 
           {activeDeviationSection === "OOT"
             ? renderSection("OOT", "OOT - Out of Tolerance", ootRows, "No OOT deviations found.")
             : renderSection("MANUAL", "Manual Deviation", manualRows, "No manual deviations found.")}
@@ -317,5 +317,5 @@ const CustomerDeviationsPage: React.FC = () => {
     </div>
   );
 };
-
+ 
 export default CustomerDeviationsPage;

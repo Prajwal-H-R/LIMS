@@ -192,7 +192,7 @@ export const CertificatesPage: React.FC = () => {
   // Form state for edit
   const [editForm, setEditForm] = useState({
     ulr_no: "",
-    field_of_parameter: "",
+    field_of_parameter: "Torque",
     recommended_cal_due_date: "",
     item_status: "Satisfactory",
   });
@@ -548,7 +548,7 @@ useEffect(() => {
     setSelectedCertificate(cert);
     setEditForm({
       ulr_no: cert.ulr_no || "",
-      field_of_parameter: cert.field_of_parameter || "",
+      field_of_parameter: cert.field_of_parameter || "Torque",
       recommended_cal_due_date: cert.recommended_cal_due_date
         ? cert.recommended_cal_due_date.slice(0, 10)
         : "",
@@ -1157,7 +1157,7 @@ useEffect(() => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Field of Parameter *</label>
-                      <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Mechanical" />
+                      <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Torque" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Recommended Due Date *</label>
@@ -1452,7 +1452,7 @@ useEffect(() => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Field of Parameter *</label>
-                  <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Mechanical" />
+                  <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Torque" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Recommended Due Date *</label>
