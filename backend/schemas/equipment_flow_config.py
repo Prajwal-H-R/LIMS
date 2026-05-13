@@ -75,6 +75,10 @@ class ManualEquipmentDetail(BaseModel):
     inward_eqp_id: int
     nepl_id: str
     material_description: str
+    make: Optional[str] = None
+    model: Optional[str] = None
+    serial_no: Optional[str] = None
+    range: Optional[str] = None
     # You will need to join with another table to get these document paths
     # For now, we assume a placeholder or a JSONB field.
 
