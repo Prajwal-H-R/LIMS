@@ -60,6 +60,7 @@ from backend.routes.equipment_flow import router as equipment_flow
 from backend.routes.external_upload import router as external_upload
 from backend.routes.external_deviation import router as external_deviation
 from backend.routes.external_deviation_attachments import router as external_deviation_attachments
+from backend.routes.final_inspection_router import router as final_inspection_router
 # --- BACKGROUND TASKS & LIFESPAN ---
 async def automated_daily_maintenance():
     while True:
@@ -188,7 +189,7 @@ app.include_router(equipment_flow, prefix="/api")
 app.include_router(external_upload, prefix="/api")
 app.include_router(external_deviation, prefix="/api")
 app.include_router(external_deviation_attachments, prefix="/api")
-
+app.include_router(final_inspection_router, prefix="/api")
 
 # --- ROOT ENDPOINT ---
 @app.get("/")

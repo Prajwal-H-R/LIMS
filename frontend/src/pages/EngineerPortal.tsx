@@ -3,7 +3,7 @@ import { Routes, Route, useNavigate, useLocation, useParams } from "react-router
 import { 
   Wrench, FileText, Award, ClipboardList, AlertTriangle, 
   ArrowRight, Mail, Download, Briefcase, ChevronLeft, XCircle, 
-  Loader2, Eye, Save, FileUp, Paperclip, ExternalLink 
+  Loader2, Eye, Save, FileUp, Paperclip, ExternalLink ,EyeOff
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -38,6 +38,8 @@ interface DeviationDetailResponse {
   report?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  hide_customer_visibility?: boolean;
+  deviation_type?: string | null;
   attachments: { id: number; file_name: string; file_type?: string | null; file_url: string; created_at: string }[];
   oot_steps?: { step_percent?: number | null; set_torque?: number | null; corrected_mean?: number | null; deviation_percent?: number | null }[];
 }
@@ -79,6 +81,8 @@ import UncertaintyBudgetPage from '../components/UncertaintyBudgetPage';
 import { CertificatesPage } from "../components/CertificatesPage";
 import ProfilePage from "../components/ProfilePage";
 import ManualCalibrationPage from "../components/ManualCalibrationPage";
+import { FinalInspectionView } from "../components/FinalInspectionView"; // adjust path
+
 
 // --- Interfaces ---
 interface EngineerPortalProps {
@@ -290,6 +294,7 @@ const DeviationPage = () => {
             const items = groupedBySrf[srfKey] || [];
             const first = items[0];
             return (
+              
               <div key={srfKey} className="border border-gray-200 rounded-xl overflow-hidden">
                 <div className="w-full bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between text-left">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -511,7 +516,7 @@ const DeviationDetailPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<DeviationDetailResponse | null>(null);
   const [engineerRemarksInput, setEngineerRemarksInput] = useState("");
-
+  const [togglingVisibility, setTogglingVisibility] = useState(false);
   const isExternalRecord = deviationId ? Number(deviationId) < 0 : false;
 
   const getFileFullUrl = (url: string) => {
@@ -629,7 +634,42 @@ const DeviationDetailPage = () => {
       setTerminatingDeviationJob(false);
     }
   };
+// Helper to determine the current state
+  const isCurrentlyVisible = () => {
+    if (!detail) return false;
+    // Internal Manual is always visible by business rule
+    if (!isExternalRecord && detail.deviation_type === "MANUAL") return true;
+    // hide_customer_visibility = false means it is VISIBLE
+    return detail.hide_customer_visibility === false;
+  };
 
+// 2. Simplified Toggle Function
+const toggleCustomerVisibility = async () => {
+  if (!detail || !deviationId) return;
+  setTogglingVisibility(true);
+  setError(null);
+  
+  try {
+    const id = Number(deviationId);
+    // Use the same payload key for both internal and external
+    const payload = { hide_customer_visibility: !(!isCurrentlyVisible()) };
+    let response;
+
+    if (isExternalRecord) {
+      const externalId = Math.abs(id);
+      response = await api.patch<DeviationDetailResponse>(`/external-deviations/${externalId}`, payload);
+    } else {
+      response = await api.patch<DeviationDetailResponse>(`/deviations/${id}/visibility`, payload);
+    }
+    
+    // Update local state with the returned object from backend
+    setDetail(response.data);
+  } catch (e: unknown) {
+    setError("Failed to update visibility settings.");
+  } finally {
+    setTogglingVisibility(false);
+  }
+};
   return (
     <div className="p-8 bg-white rounded-2xl shadow-lg">
       <div className="flex items-center justify-between mb-6">
@@ -657,28 +697,71 @@ const DeviationDetailPage = () => {
 
       {!loading && !error && detail && (
         <div className="space-y-5 text-sm">
-          {!isExternalRecord && (
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={closingDeviation || (detail.status || "").toUpperCase() === "CLOSED"}
-                onClick={closeDeviationRecord}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-black disabled:opacity-60"
-              >
-                {closingDeviation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {(detail.status || "").toUpperCase() === "CLOSED" ? "Closed" : "Close Deviation"}
-              </button>
-              <button
-                type="button"
-                disabled={terminatingDeviationJob}
-                onClick={terminateDeviationJob}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
-              >
-                {terminatingDeviationJob ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Terminate Job
-              </button>
-            </div>
-          )}
+ <div className="flex justify-between items-center bg-gray-50 p-5 rounded-xl border border-gray-200 shadow-sm">
+  <div>
+    <h3 className="font-bold text-gray-900 text-base">Actions & Visibility</h3>
+    <div className="mt-1 flex items-center gap-2">
+      <div className={`h-2 w-2 rounded-full ${isCurrentlyVisible() ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+      <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+        Status: {isCurrentlyVisible() ? "Visible to Customer" : "Hidden from Customer"}
+      </span>
+    </div>
+  </div>
+  
+  <div className="flex gap-3">
+    {/* DYNAMIC TOGGLE BUTTON */}
+    {(isExternalRecord || detail.deviation_type === "OOT") && (
+       <button
+                  type="button"
+                  disabled={togglingVisibility}
+                  onClick={toggleCustomerVisibility}
+                  className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all border-2 shadow-sm ${
+                    isCurrentlyVisible() 
+                      ? "bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700" 
+                      : "bg-slate-700 text-white border-slate-800 hover:bg-slate-900"
+                  }`}
+                >
+                  {togglingVisibility ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isCurrentlyVisible() ? (
+                    <>
+                      <EyeOff size={18} />
+                      <span>Hide from Customer</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={18} />
+                      <span>Show to Customer</span>
+                    </>
+                  )}
+                </button>
+    )}
+
+    {!isExternalRecord && (
+      <>
+        <button
+          type="button"
+          disabled={closingDeviation || (detail.status || "").toUpperCase() === "CLOSED"}
+          onClick={closeDeviationRecord}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white border-2 border-gray-300 text-gray-900 text-sm font-bold hover:bg-gray-50 disabled:opacity-50 transition-all"
+        >
+          {closingDeviation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {(detail.status || "").toUpperCase() === "CLOSED" ? "Record Closed" : "Close Record"}
+        </button>
+        
+        <button
+          type="button"
+          disabled={terminatingDeviationJob}
+          onClick={terminateDeviationJob}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-50 border-2 border-red-200 text-red-600 text-sm font-bold hover:bg-red-600 hover:text-white disabled:opacity-50 transition-all"
+        >
+          {terminatingDeviationJob ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Terminate Job
+        </button>
+      </>
+    )}
+  </div>
+</div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -1187,6 +1270,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           <Route path="deviations" element={<DeviationPage />} />
           <Route path="deviations/srf/:section/:srfKey" element={<SrfDeviationRecordsPage />} />
           <Route path="deviations/:deviationId" element={<DeviationDetailPage />} />
+          <Route path="final-inspection/:inwardId" element={<FinalInspectionView />} />
         </Routes>
       </main>
       <Footer />

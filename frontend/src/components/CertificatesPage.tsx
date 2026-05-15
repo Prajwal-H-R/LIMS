@@ -22,7 +22,8 @@ import {
   User,
   ArrowLeft,
   Printer,
-  QrCode
+  QrCode,
+  ClipboardCheck
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ENDPOINTS } from "../api/config";
@@ -170,8 +171,15 @@ export const CertificatesPage: React.FC = () => {
   // Navigation / View State
   const activeSrfId = searchParams.get("srfId") ? Number(searchParams.get("srfId")) : null;
   const activeTab = (searchParams.get("tab") as CertTabKey) || "pending_gen";
-  const viewMode = activeSrfId ? "detail" : "list";
+// Inside CertificatesPage component
+const [finalReportSrfId, setFinalReportSrfId] = useState<number | null>(null);
+const [finalReportData, setFinalReportData] = useState<any | null>(null);
+const [isReportLoading, setIsReportLoading] = useState(false);
+const [recipientEmail, setRecipientEmail] = useState("");
+const [isSendingReport, setIsSendingReport] = useState(false);
 
+// Update viewMode logic
+const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "list");
   // Data State
   const [srfGroups, setSrfGroups] = useState<SrfGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -216,7 +224,7 @@ export const CertificatesPage: React.FC = () => {
   const [qrGeneratingCertId, setQrGeneratingCertId] = useState<number | null>(null);
   const [bulkQrGenerating, setBulkQrGenerating] = useState(false);
   const [bulkQrPrinting, setBulkQrPrinting] = useState(false);
-
+  
   // --- Scrollbar Management (FIXED) ---
   // Removed the padding-right calculation to prevent Header jumping/misalignment.
   // --- Scrollbar Management (PREVENT HEADER SHIFT) ---
@@ -705,6 +713,7 @@ useEffect(() => {
     setBulkIncludeLetterhead(includeLetterhead);
     setShowBulkDownloadModal(true);
   };
+
 
   const handleConfirmBulkDownload = async () => {
     setBulkDownloading(true);
@@ -1239,113 +1248,120 @@ useEffect(() => {
         </div>
       </div>);
   }
-  // ==========================================
-  // VIEW MODE: LIST
-  // ==========================================
+return (
+  <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+    <div className="max-w-6xl mx-auto space-y-6">
 
-  return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-6">
+      {/* Header Card */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
+            <Award className="h-8 w-8" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Certificates</h2>
+            <p className="text-gray-500 text-sm mt-1">
+              Generate and manage calibration certificates
+            </p>
+          </div>
+        </div>
+        <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm" >
+          <ChevronLeft size={16} /> <span>Back to Dashboard</span>
+        </button>
+      </div>
 
-        {/* Header Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-              <Award className="h-8 w-8" />
+      {/* Main Content Card */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
+        {/* Toolbar */}
+        <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
+          <div className="relative max-w-md w-full">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-gray-400" />
             </div>
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Certificates</h2>
-              <p className="text-gray-500 text-sm mt-1">
-                Generate and manage calibration certificates
+            <input type="text" placeholder="Search by SRF or Customer DC..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow bg-white" />
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleOpenGenerateModal} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 shadow-sm transition-colors" >
+              <Plus className="h-4 w-4" /> Generate Certificate
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" /> {error}
+          </div>
+        )}
+
+        <div className="p-4 sm:p-6">
+          {isLoading ? (
+            <CertificateListSkeleton />
+          ) : filteredGroups.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
+                <FileText className="h-8 w-8 text-gray-300" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900">No SRFs found</h3>
+              <p className="text-gray-500 mt-1 max-w-sm mx-auto">
+                Calibrate equipment first to see them appear here for certificate generation.
               </p>
             </div>
-          </div>
-          <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm" >
-            <ChevronLeft size={16} /> <span>Back to Dashboard</span>
-          </button>
-        </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredGroups.map((group) => {
+                const total = group.equipments.length;
+                const issued = group.equipments.filter(e => e.certificate?.status === "ISSUED").length;
+                const drafts = group.equipments.filter(e => e.certificate?.status === "DRAFT" || e.certificate?.status === "REWORK").length;
+                const pending = group.equipments.filter(e => !e.certificate).length;
 
-        {/* Main Content Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
-          {/* Toolbar */}
-          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
-            <div className="relative max-w-md w-full">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-gray-400" />
-              </div>
-              <input type="text" placeholder="Search by SRF or Customer DC..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow bg-white" />
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={handleOpenGenerateModal} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 shadow-sm transition-colors" >
-                <Plus className="h-4 w-4" /> Generate Certificate
-              </button>
-            </div>
-          </div>
-
-          {error && (
-            <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" /> {error}
-            </div>
-          )}
-
-          <div className="p-4 sm:p-6">
-            {isLoading ? (
-              <CertificateListSkeleton />
-            ) : filteredGroups.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
-                  <FileText className="h-8 w-8 text-gray-300" />
-                </div>
-                <h3 className="text-lg font-medium text-gray-900">No SRFs found</h3>
-                <p className="text-gray-500 mt-1 max-w-sm mx-auto">
-                  Calibrate equipment first to see them appear here for certificate generation.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredGroups.map((group) => {
-                  const total = group.equipments.length;
-                  const issued = group.equipments.filter(e => e.certificate?.status === "ISSUED").length;
-                  const drafts = group.equipments.filter(e => e.certificate?.status === "DRAFT" || e.certificate?.status === "REWORK").length;
-                  const pending = group.equipments.filter(e => !e.certificate).length;
-
-                  return (
-                    <div
-                      key={group.inward_id}
-                      onClick={() => handleOpenSrf(group.inward_id)}
-                      className="flex items-center justify-between p-5 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer"
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className="mt-1">
-                          <div className="p-2 rounded-full bg-indigo-100 text-indigo-600">
-                            <Package className="h-5 w-5" />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <p className="font-semibold text-lg text-gray-800">
-                              SRF No: {group.srf_no}
-                            </p>
-                            {pending > 0 && <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-gray-200 text-gray-700 border border-gray-300">{pending} Pending</span>}
-                            {drafts > 0 && <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 border border-amber-200">{drafts} Drafts/Rework</span>}
-                          </div>
-                          <p className="text-sm text-gray-600 mt-1">
-                            <span className="font-medium text-gray-900">{total} Equipments</span> • {issued} Certificates Issued
-                          </p>
-                          {group.customer_dc_no && (
-                            <p className="text-xs text-gray-500 mt-0.5">DC: {group.customer_dc_no}</p>
-                          )}
-                        </div>
-                      </div>
-                      <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                return (
+  <div
+    key={group.inward_id}
+    className="flex items-center justify-between p-5 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer"
+    onClick={() => handleOpenSrf(group.inward_id)}
+  >
+    <div className="flex items-start gap-4">
+      <div className="mt-1">
+        <div className="p-2 rounded-full bg-indigo-100 text-indigo-600">
+          <Package className="h-5 w-5" />
         </div>
       </div>
+      <div>
+        <div className="flex items-center gap-3">
+          <p className="font-semibold text-lg text-gray-800">
+            SRF No: {group.srf_no}
+          </p>
+          {/* ... existing pending/draft badges ... */}
+        </div>
+        <p className="text-sm text-gray-600 mt-1">
+          <span className="font-medium text-gray-900">{total} Equipments</span> • {issued} Certificates Issued
+        </p>
+      </div>
+    </div>
+
+    {/* NEW ACTION BUTTONS SECTION */}
+    <div className="flex items-center gap-3">
+      {/* THIS IS THE ROUTING BUTTON */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation(); // Prevents opening the Detail view
+          navigate(`/engineer/final-inspection/${group.inward_id}`);
+        }}
+        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition-all shadow-sm"
+      >
+        <ClipboardCheck className="h-4 w-4" />
+        Final Inspection
+      </button>
+      <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
+    </div>
+  </div>
+);
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
 
       {/* --- MODALS IN LIST VIEW --- */}
 

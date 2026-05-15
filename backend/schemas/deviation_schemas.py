@@ -12,7 +12,8 @@ class DeviationAttachmentOut(BaseModel):
     file_type: Optional[str] = None
     file_url: str
     created_at: datetime
-
+class VisibilityUpdate(BaseModel):
+    hide_customer_visibility: bool
 
 class CustomerDeviationItem(BaseModel):
     deviation_id: int
@@ -83,6 +84,7 @@ class DeviationDetailOut(BaseModel):
     corrected_mean: Optional[float] = None
     deviation_percent: Optional[float] = None
     deviation_type: str = "OOT"
+    status: str
     certificate_id: Optional[int] = None
     tool_status: Optional[str] = None
     calibration_status: str = "not calibrated"
@@ -93,3 +95,4 @@ class DeviationDetailOut(BaseModel):
     updated_at: Optional[datetime] = None
     oot_steps: List[OOTStepOut] = []
     attachments: List[DeviationAttachmentOut] = []
+    hide_customer_visibility: Optional[bool] = False

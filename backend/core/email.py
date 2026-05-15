@@ -469,3 +469,49 @@ async def send_master_standard_expiry_email(
         recipient_user_id=recipient_user_id,
         created_by=created_by
     )
+# Add this function to the bottom of backend/core/email.py
+
+async def send_final_inspection_report_email(
+    background_tasks: BackgroundTasks,
+    recipient_email: EmailStr,
+    inward_id: int,
+    srf_no: str,
+    direct_link: str,  # <--- MUST match the name in router
+    login_link: str,    customer_name: str,
+    frontend_url: str = settings.FRONTEND_URL,
+    db: Session = None,
+    created_by: str = "system",
+    recipient_user_id: int = None
+):
+    """
+    Sends the Final Inspection Report notification to the customer.
+    This typically includes links to download certificates and the final summary.
+    """
+    subject = f"Final Inspection Report & Certificates Ready: SRF No {srf_no}"
+    
+    # Link to the customer portal where they can see issued certificates
+    portal_link = f"{frontend_url}/portal/certificates"
+    login_link = f"{frontend_url}/login"
+
+    template_body = {
+        "title": "Final Inspection Completed",
+        "customer_name": customer_name,
+        "srf_no": srf_no,
+        "direct_link": direct_link,
+        "login_link": login_link,
+        "date": datetime.now().strftime("%d-%b-%Y")
+    }
+
+    # Reuses your existing robust logging and sending logic
+    return await send_email_with_logging(
+        background_tasks=background_tasks,
+        subject=subject,
+        recipient=recipient_email,
+        template_name="final_inspection_report.html", 
+        template_body=template_body,
+        db=db,
+        inward_id=inward_id,
+        created_by=created_by,
+        recipient_user_id=recipient_user_id,
+        body_text_override=f"Final Inspection Report for SRF {srf_no} sent to {recipient_email}"
+    )

@@ -10,6 +10,7 @@ from backend.schemas.deviation_schemas import (
     DeviationDetailOut,
     EngineerRemarksUpdate,
     ManualDeviationCreate,
+    VisibilityUpdate,
 )
 from backend.schemas.user_schemas import UserResponse
 from backend.services import deviation_service as svc
@@ -110,6 +111,17 @@ def terminate_deviation_job(
     _current_user: UserResponse = Depends(check_staff_role),
 ):
     updated = svc.terminate_deviation_job(db, deviation_id)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deviation not found")
+    return updated
+@router.patch("/{deviation_id}/visibility", response_model=DeviationDetailOut)
+def update_deviation_visibility(
+    deviation_id: int,
+    body: VisibilityUpdate, # Use the new schema here
+    db: Session = Depends(get_db),
+    _current_user: UserResponse = Depends(check_staff_role),
+):
+    updated = svc.update_deviation_visibility(db, deviation_id, body.hide_customer_visibility)
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deviation not found")
     return updated
