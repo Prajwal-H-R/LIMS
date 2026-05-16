@@ -652,20 +652,28 @@ const toggleCustomerVisibility = async () => {
   
   try {
     const id = Number(deviationId);
-    // Use the same payload key for both internal and external
-    const payload = { hide_customer_visibility: !(!isCurrentlyVisible()) };
-    let response;
+    
+    // LOGIC: If currently hidden (true), we want to send false. 
+    // If currently visible (false), we want to send true.
+    const nextHideValue = !detail.hide_customer_visibility;
 
+    // The key MUST match the Pydantic Schema in Step 1
+    const payload = { hide_customer_visibility: nextHideValue };
+
+    let response;
     if (isExternalRecord) {
       const externalId = Math.abs(id);
-      response = await api.patch<DeviationDetailResponse>(`/external-deviations/${externalId}`, payload);
+      // For external, we usually PATCH the whole record or a similar endpoint
+      response = await api.patch(`/external-deviations/${externalId}`, payload);
     } else {
-      response = await api.patch<DeviationDetailResponse>(`/deviations/${id}/visibility`, payload);
+      // INTERNAL RECORD
+      response = await api.patch(`/deviations/${id}/visibility`, payload);
     }
     
-    // Update local state with the returned object from backend
+    // Update local state with the returned data from backend
     setDetail(response.data);
   } catch (e: unknown) {
+    console.error("Visibility update failed:", e);
     setError("Failed to update visibility settings.");
   } finally {
     setTogglingVisibility(false);

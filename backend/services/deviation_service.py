@@ -323,7 +323,7 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
         Inward, Inward.inward_id == InwardEquipment.inward_id
     ).filter(
         Inward.customer_id == customer_id,
-        ExternalDeviation.hide_customer_visibility == True
+        ExternalDeviation.hide_customer_visibility == False
     ).all()
 
     for d, eq, srf_no, dc_no, dc_date, inward_id in external_rows:
@@ -540,7 +540,7 @@ def get_deviation_detail_for_customer(db: Session, deviation_id: int, customer_i
     dtype = _derive_deviation_type(d)
     
     # SECURITY CHECK: If it's an OOT record and visibility is FALSE, deny access
-    if dtype == "OOT" and d.hide_customer_visibility is False:
+    if dtype == "OOT" and d.hide_customer_visibility is True:
         return None
 
     # Sync report date on the fly
@@ -616,15 +616,20 @@ def terminate_deviation_job(db: Session, deviation_id: int) -> Optional[Deviatio
     db.commit()
     return get_deviation_detail_for_staff(db, deviation_id)
 
-def update_deviation_visibility(db: Session, deviation_id: int, visible: bool) -> Optional[DeviationDetailOut]:
+def update_deviation_visibility(db: Session, deviation_id: int, hide: bool) -> Optional[DeviationDetailOut]:
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
     if not d:
         return None
     
-    d.hide_customer_visibility = visible
+    # Update the database field
+    d.hide_customer_visibility = hide
     d.updated_at = datetime.now(timezone.utc)
-    db.commit()
     
-    # Return the updated detail so the frontend state refreshes
+    # Ensure report date exists
+    if d.report is None and d.created_at:
+        d.report = d.created_at.date()
+        
+    db.commit()
+    # Refresh to return the full updated object
     return get_deviation_detail_for_staff(db, deviation_id)
 # REPORT COLUMN FILLING NULL STORE THE CREATED AT DATE ONLY TO THE REPORT COLUMN TO IDETIFY THE DEVIATION REPORT DATE

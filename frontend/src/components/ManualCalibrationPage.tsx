@@ -659,7 +659,7 @@ const DeviationModal: React.FC<{
           setEngineerRemarks(d.engineer_remarks || '');
           setCustomerDecision(d.customer_decision || '');
           setAttachments(d.attachments || []);
-          setHideCustomerVisibility(d.hide_customer_visibility ?? false);
+          setHideCustomerVisibility(d.hide_customer_visibility ?? true);
           const s = Object.entries(d.step_per_deviation || {}).map(([step, value]) => ({ step, value: String(value) }));
           setSteps(s.length > 0 ? s : [{ step: '', value: '' }]);
         }
@@ -737,8 +737,8 @@ const DeviationModal: React.FC<{
               {deviationType === 'OOT' && (
                 <div className="mt-1 flex items-center gap-1.5">
                   <div className={`h-1.5 w-1.5 rounded-full ${!hideCustomerVisibility ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                    {!hideCustomerVisibility ? "Visible to Customer" : "Hidden from Customer"}
+                  <p className={`text-[10px] font-bold uppercase tracking-wider ${!hideCustomerVisibility ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    {hideCustomerVisibility ? "Status: Hidden from Customer" : "Status: Visible to Customer"}
                   </p>
                 </div>
               )}
@@ -751,13 +751,13 @@ const DeviationModal: React.FC<{
                 type="button"
                 onClick={() => setHideCustomerVisibility(!hideCustomerVisibility)}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold transition-all border-2 shadow-sm ${
-                  !hideCustomerVisibility
-                    ? "bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700"
-                    : "bg-slate-700 text-white border-slate-800 hover:bg-slate-900"
+                  hideCustomerVisibility
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" // Click to Show
+                    : "bg-slate-800 text-white border-slate-900 hover:bg-slate-900" // Click to Hide
                 }`}
               >
-                {!hideCustomerVisibility ? <Eye size={16} /> : <EyeOff size={16} />}
-                {!hideCustomerVisibility ? "Show to Customer" : "Hide from Customer"}
+                {hideCustomerVisibility ? <Eye size={16} /> : <EyeOff size={16} />}
+                {hideCustomerVisibility ? "Show to Customer" : "Hide from Customer"}
               </button>
             )}
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
@@ -765,7 +765,7 @@ const DeviationModal: React.FC<{
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* PROFESSIONAL 2-ROW EQUIPMENT INFO */}
+          {/* EQUIPMENT INFO PANEL */}
           <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center gap-2 mb-5 text-gray-800">
               <div className="p-1.5 bg-blue-600 text-white rounded-lg"><Info size={16} /></div>
@@ -819,8 +819,7 @@ const DeviationModal: React.FC<{
                 </div>
               </div>
 
-              {/* OOT STEPS */}
-              {deviationType === 'OOT' && (
+              {deviationType === 'OOT' ? (
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                   <div className="flex justify-between items-center mb-3">
                     <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">OOT Observations</label>
@@ -836,10 +835,7 @@ const DeviationModal: React.FC<{
                   </div>
                   <button onClick={addStep} className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700"><Plus size={14} /> Add Row</button>
                 </div>
-              )}
-
-              {/* NC ATTACHMENTS */}
-              {deviationType !== 'OOT' && (
+              ) : (
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-gray-500 uppercase">Attachments (Required for NC)</label>
                   <div className="grid gap-2">
