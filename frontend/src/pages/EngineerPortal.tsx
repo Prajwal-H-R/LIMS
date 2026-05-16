@@ -9,7 +9,8 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { User } from "../types";
 import { api, ENDPOINTS } from "../api/config";
-
+import CalibrationReminderWidget from "../components/CalibrationReminder";
+import CalibrationReminderDetailsPage from "../components/CalibrationReminderDetailsPage";
 // --- UPDATED INTERFACE ---
 interface DeviationDetailResponse {
   deviation_id: number;
@@ -1271,9 +1272,14 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           <Route path="deviations/srf/:section/:srfKey" element={<SrfDeviationRecordsPage />} />
           <Route path="deviations/:deviationId" element={<DeviationDetailPage />} />
           <Route path="final-inspection/:inwardId" element={<FinalInspectionView />} />
+          <Route path="calibration-reminders/:customerId" element={<CalibrationReminderDetailsPage />}/>
         </Routes>
       </main>
+      
       <Footer />
+      <CalibrationReminderWidget
+  onCustomerSelect={(customerId) => navigate(`/engineer/calibration-reminders/${customerId}`)}
+/>
       {showProfileUpdatePopup && (
         <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md p-6">

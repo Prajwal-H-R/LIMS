@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Routes, Route, useNavigate, Link } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Srf, DashboardProps } from "../types";
 import {
@@ -7,16 +7,11 @@ import {
   Award,
   ClipboardList,
   Activity,
-  ChevronLeft,
   FileText,
   AlertTriangle,
   Search,
-  Download,
   ArrowRight,
-  Clock,
   Bell,
-  CheckCircle,
-  Eye
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -31,7 +26,7 @@ import CustomerDeviationDetailPage from "../components/CustomerDeviationDetailPa
 import ProfilePage from "../components/ProfilePage";
 import { CustomerFirListView } from "../components/CustomerFirListView";
 import { CustomerFinalReportView } from "../components/CustomerFinalReportView";
-
+import CustomerCalibrationReminderWidget from "../components/CustomerCalibrationReminder";
 // --- LOCAL TYPE DEFINITIONS ---
 interface FirForReview {
   inward_id: number;
@@ -364,6 +359,7 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
                 )}
             </main>
             <Footer />
+            <CustomerCalibrationReminderWidget/>
         </div>
     );
 };

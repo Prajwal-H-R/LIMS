@@ -306,7 +306,7 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
         
         if dtype == "OOT":
             # OOT VISIBILITY: Only show if flag is True
-            if d.hide_customer_visibility is True:
+            if d.hide_customer_visibility is False:
                 primary_rep = _get_primary_oot_step(db, d.job_id)
                 oot_list.append(_row_to_customer_item(d, eq, srf_no, dc_no, dc_date, inward_id, primary_rep, d.job_id))
         else:
@@ -323,7 +323,7 @@ def list_deviations_for_customer(db: Session, customer_id: int) -> List[Customer
         Inward, Inward.inward_id == InwardEquipment.inward_id
     ).filter(
         Inward.customer_id == customer_id,
-        ExternalDeviation.hide_customer_visibility == False
+        ExternalDeviation.hide_customer_visibility == True
     ).all()
 
     for d, eq, srf_no, dc_no, dc_date, inward_id in external_rows:
