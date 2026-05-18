@@ -47,3 +47,17 @@ class FinalInspectionService:
             db.delete(db_obj)
             db.commit()
         return db_obj
+        
+    @staticmethod
+    def update_decision(db: Session, db_obj: FinalInspection, decision: str, remarks: Optional[str]):
+        db_obj.customer_decision = decision
+        db_obj.customer_remarks = remarks
+        # Update status based on decision
+        if decision == "APPROVED":
+            db_obj.status = "APPROVED"
+        else:
+            db_obj.status = "REJECTED"
+            
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj

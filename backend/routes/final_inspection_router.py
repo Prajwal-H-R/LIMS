@@ -10,7 +10,8 @@ from backend.schemas.user_schemas import UserResponse
 from backend.schemas.final_inspection import (
     FinalInspectionCreate, 
     FinalInspectionUpdate, 
-    FinalInspectionResponse
+    FinalInspectionResponse,
+    FinalInspectionDecisionRequest
 )
 from backend.services.final_inspection_service import FinalInspectionService
 
@@ -166,6 +167,9 @@ def get_final_inspection_details(
             "report_sent": saved_inspection.report_sent,
             "status": saved_inspection.status,
             # Fallback to saved emails if the customer profile email is missing
+            "customer_decision": saved_inspection.customer_decision,  # ADDED
+            "customer_remarks": saved_inspection.customer_remarks,    # ADDED
+            "updated_at": saved_inspection.updated_at,
             "customer_email": cust_email or str(saved_inspection.customer_email or "")
         })
 
@@ -197,6 +201,8 @@ async def send_final_report(
         else:
             inspection.customer_id = inward.customer_id
 
+        inspection.customer_decision = None
+        inspection.customer_remarks = None
         # Solves Pylance AttributeAccessIssue: Forced string conversion ensures type safety
         inspection.srf_no = str(payload.get("srf_no") or "")
         inspection.customer_name = str(payload.get("customer_name") or "")
@@ -288,7 +294,7 @@ def get_customer_dashboard_reports(
         ]
     }
 
-@router.get("/inward/{inward_id}/customer-view")
+@router.get("/inward/{inward_id}/customer-view", response_model=FinalInspectionResponse)
 def get_final_inspection_customer_view(
     inward_id: int,
     db: Session = Depends(get_db),
@@ -304,3 +310,39 @@ def get_final_inspection_customer_view(
         raise HTTPException(status_code=403, detail="Access denied to this report")
 
     return inspection
+
+@router.post("/inward/{inward_id}/submit-decision")
+def submit_customer_decision(
+    inward_id: int,
+    payload: FinalInspectionDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Endpoint for customers to Approve or Reject the final inspection.
+    """
+    inspection = db.query(FinalInspection).filter(FinalInspection.inward_id == inward_id).first()
+    
+    if inspection is None:
+        raise HTTPException(status_code=404, detail="Inspection report not found")
+    
+    # Security check: Ensure customer only updates their own data
+    if current_user.role.lower() == "customer" and inspection.customer_id != current_user.customer_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Update using the service logic
+    updated_inspection = FinalInspectionService.update_decision(
+        db=db, 
+        db_obj=inspection, 
+        decision=payload.decision.upper(), 
+        remarks=payload.remarks
+    )
+
+    return {
+        "status": "success", 
+        "message": f"Inspection {payload.decision}",
+        "data": {
+            "decision": updated_inspection.customer_decision,
+            "status": updated_inspection.status
+        }
+    }

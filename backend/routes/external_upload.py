@@ -3,7 +3,7 @@ import copy
 import uuid
 import shutil
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional, List
 
@@ -26,15 +26,13 @@ from ..schemas import external_upload as schemas
 from backend.db import get_db
 from backend.auth import get_current_user
 from backend.models.users import User
-
-# ── Adjust these import paths to match your project structure ────────────────
 from backend.models.external_upload import ExternalUpload
 from backend.models.inward_equipments import InwardEquipment
 
 logger = logging.getLogger(__name__)
 
-# ── Upload directory setup ───────────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent.parent
+# ── Upload directory ─────────────────────────────────────────────────────────
+BASE_DIR   = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -49,39 +47,41 @@ router = APIRouter(
 # ====================================================================
 
 class RequestUnlockBody(BaseModel):
-    """Payload for engineer → unlock request."""
-    doc_type: str   # "result" | "certificate"
-    reason: str     # must be non-empty
+    doc_type: str
+    reason: str
 
 
 class ActionUnlockBody(BaseModel):
-    """Payload for admin → approve or reject an unlock request."""
     doc_type: str
-    action: str                  # "APPROVED" | "REJECTED"
-    comment: Optional[str] = ""  # mandatory when action == "REJECTED"
+    action: str
+    comment: Optional[str] = ""
+
+
+class UpdateDatesBody(BaseModel):
+    """
+    Payload for the standalone date-update endpoint.
+    Both fields are optional so callers can patch either or both.
+    """
+    report_date: Optional[date] = None
+    recommended_cal_due_date: Optional[date] = None
 
 
 # ====================================================================
-# RESPONSE SCHEMA (for unlock-requests list endpoint)
+# RESPONSE SCHEMA (unlock-requests list)
 # ====================================================================
 
 class UnlockRequestDetail(BaseModel):
-    """
-    Shape of a single unlock request entry returned by the
-    admin list endpoint. Mirrors the frontend UnlockNotificationItem type.
-    """
     inward_eqp_id:        int
     nepl_id:              str
     material_description: str
-    doc_type:             str           # "result" | "certificate"
-    unlock_request:       dict          # full JSONB payload + requested_by_name
+    doc_type:             str
+    unlock_request:       dict
 
 
 # ====================================================================
 # PRIVATE HELPERS
 # ====================================================================
 
-# Mapping from doc_type string → ORM column attribute names
 _DOC_TYPE_MAP: dict[str, dict[str, str]] = {
     "result": {
         "locked":         "calibration_worksheet_locked",
@@ -103,10 +103,6 @@ _DOC_TYPE_MAP: dict[str, dict[str, str]] = {
 
 
 def _get_lock_fields(doc_type: str) -> dict:
-    """
-    Returns the column-name mapping for doc_type.
-    Raises HTTP 400 for unrecognised values.
-    """
     try:
         return _DOC_TYPE_MAP[doc_type]
     except KeyError:
@@ -120,7 +116,6 @@ def _get_lock_fields(doc_type: str) -> dict:
 
 
 def _require_admin(current_user: User) -> None:
-    """Raise HTTP 403 if the caller is not an admin."""
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -133,35 +128,21 @@ def _check_lock_permission(
     fields: dict,
     current_user: User,
 ) -> None:
-    """
-    Central lock gate for upload and delete operations.
-
-    Allowed when:
-      ✓ No record yet (first upload)
-      ✓ Caller is admin
-      ✓ File is not locked
-      ✓ Unlock request status is APPROVED
-
-    Raises HTTP 403 when:
-      ✗ File is locked AND caller is not admin AND no APPROVED unlock request
-    """
     if record is None:
-        return  # first upload — always allowed
-
+        return
     if current_user.role == "admin":
-        return  # admins bypass lock
+        return
 
     is_locked: bool = getattr(record, fields["locked"], False)
     if not is_locked:
-        return  # file is not locked — allowed
+        return
 
     unlock_req: dict = getattr(record, fields["unlock_request"]) or {}
     req_status: Optional[str] = unlock_req.get("status")
 
     if req_status == "APPROVED":
-        return  # engineer has explicit approval
+        return
 
-    # Build a context-specific error message
     label = fields["label"]
     if req_status == "PENDING":
         message = (
@@ -186,28 +167,17 @@ def _check_lock_permission(
 
 
 def _delete_file_from_disk(file_url: Optional[str]) -> None:
-    """
-    Best-effort deletion of a previously saved file.
-    Logs a warning on failure but does not raise.
-    """
     if not file_url:
         return
-    # file_url format: "/api/uploads/<filename>"
     filename = file_url.split("/")[-1]
     path = UPLOAD_DIR / filename
     try:
         path.unlink(missing_ok=True)
     except Exception:
-        logger.warning(
-            "Could not delete orphaned file: %s", path, exc_info=True
-        )
+        logger.warning("Could not delete orphaned file: %s", path, exc_info=True)
 
 
 def _resolve_engineer_name(db: Session, user_id: Optional[int]) -> Optional[str]:
-    """
-    Fetches the display name for a user_id.
-    Returns None safely when user_id is None or user not found.
-    """
     if user_id is None:
         return None
     engineer = db.query(User).filter(User.user_id == user_id).first()
@@ -231,15 +201,7 @@ def get_upload_details(
     inward_eqp_id: int,
     db: Session = Depends(get_db),
 ):
-    """
-    Returns file metadata, lock flags, and unlock_request JSONB for both
-    documents tied to this equipment ID.
-
-    Raises 404 when no files have been uploaded yet.
-    """
-    db_upload = service.get_upload_by_equipment_id(
-        db, inward_eqp_id=inward_eqp_id
-    )
+    db_upload = service.get_upload_by_equipment_id(db, inward_eqp_id=inward_eqp_id)
     if db_upload is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -260,27 +222,52 @@ async def handle_document_upload(
     inward_eqp_id: int,
     file: UploadFile = File(...),
     doc_type: str = Form(...),
+    report_date: Optional[date] = Form(
+        default=None,
+        description="Report date (YYYY-MM-DD). Certificate uploads only.",
+    ),
+    recommended_cal_due_date: Optional[date] = Form(
+        default=None,
+        description="Next calibration due date (YYYY-MM-DD). Certificate uploads only.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Upload a single document ('result' or 'certificate') for a piece of equipment.
+    Upload a single document ('result' or 'certificate').
 
-    Lock lifecycle
-    ──────────────
-    1. Locked file → engineer submits unlock request.
-    2. Admin approves → file unlocked (APPROVED status set).
-    3. Engineer re-uploads → file auto-locked again + APPROVED request cleared.
+    For **certificate** uploads you may also supply:
+    - `report_date`              — date printed on the certificate
+    - `recommended_cal_due_date` — next due date for calibration
 
-    The two document slots are locked independently.
+    These two fields are ignored when `doc_type == 'result'`.
+
+    The service layer handles:
+      - DB upsert
+      - Auto-locking
+      - Clearing APPROVED unlock requests
+      - Committing and refreshing
+
+    The router does NOT issue a second commit.
     """
     fields = _get_lock_fields(doc_type)
 
-    # ── 1. Lock check (before any disk I/O) ─────────────────────────────────
+    # ── Note if date fields are being ignored ────────────────────────
+    if doc_type != "certificate" and (
+        report_date is not None or recommended_cal_due_date is not None
+    ):
+        logger.debug(
+            "Date fields supplied for doc_type='%s' on inward_eqp_id=%s; "
+            "they will be ignored by the service layer.",
+            doc_type,
+            inward_eqp_id,
+        )
+
+    # ── 1. Lock check ────────────────────────────────────────────────
     existing = service.get_upload_by_equipment_id(db, inward_eqp_id)
     _check_lock_permission(existing, fields, current_user)
 
-    # ── 2. Persist file to disk ──────────────────────────────────────────────
+    # ── 2. Persist file to disk ──────────────────────────────────────
     unique_id      = uuid.uuid4().hex
     sanitized_name = os.path.basename(file.filename or "upload")
     saved_filename = f"{unique_id}_{sanitized_name}"
@@ -300,7 +287,10 @@ async def handle_document_upload(
 
     file_url = f"/api/uploads/{saved_filename}"
 
-    # ── 3. Upsert DB record ──────────────────────────────────────────────────
+    # ── 3. Upsert DB record ──────────────────────────────────────────
+    # The service handles: file fields, date fields, auto-lock,
+    # clearing APPROVED unlock request, flush, commit, and refresh.
+    # ⚠️  Do NOT add a second db.commit() after this call.
     try:
         db_record = service.upsert_document_for_equipment(
             db=db,
@@ -310,38 +300,95 @@ async def handle_document_upload(
             file_content_type=file.content_type,
             file_url=file_url,
             user_id=current_user.user_id,
+            report_date=report_date,
+            recommended_cal_due_date=recommended_cal_due_date,
         )
     except ValueError as exc:
         _delete_file_from_disk(file_url)
-        logger.warning("ValueError during DB upsert: %s", exc, exc_info=True)
+        logger.warning(
+            "ValueError during DB upsert | inward_eqp_id=%s error=%s",
+            inward_eqp_id,
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
     except Exception:
         _delete_file_from_disk(file_url)
-        logger.error("Unexpected error updating DB record.", exc_info=True)
+        logger.error(
+            "Unexpected error during DB upsert | inward_eqp_id=%s",
+            inward_eqp_id,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error. Check server logs.",
         )
 
-    # ── 4. Auto-lock + clear APPROVED request ────────────────────────────────
-    setattr(db_record, fields["locked"], True)
-
-    unlock_req: dict = copy.copy(
-        getattr(db_record, fields["unlock_request"]) or {}
+    logger.info(
+        "Uploaded & locked | eqp_id=%s doc_type=%s user=%s file=%s "
+        "report_date=%s cal_due=%s",
+        inward_eqp_id,
+        doc_type,
+        current_user.user_id,
+        file.filename,
+        report_date,
+        recommended_cal_due_date,
     )
-    if unlock_req.get("status") == "APPROVED":
-        setattr(db_record, fields["unlock_request"], None)
+    return db_record
 
-    db_record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(db_record)
+
+# ── PATCH /manual-calibration/equipment/{id}/dates ──────────────────────────
+
+@router.patch(
+    "/manual-calibration/equipment/{inward_eqp_id}/dates",
+    response_model=schemas.ExternalUpload,
+    summary="Update report_date and/or recommended_cal_due_date without re-uploading",
+)
+def update_dates(
+    inward_eqp_id: int,
+    body: UpdateDatesBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Patch only the date fields on an existing upload record.
+
+    - Both fields are optional; supply whichever needs changing.
+    - Does **not** affect file content, lock state, or unlock requests.
+    - Available to both engineers and admins.
+    - Record must exist (returns 404 otherwise).
+    """
+    if body.report_date is None and body.recommended_cal_due_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "At least one date field must be provided: "
+                "'report_date' or 'recommended_cal_due_date'."
+            ),
+        )
+
+    try:
+        db_record = service.update_date_fields(
+            db=db,
+            inward_eqp_id=inward_eqp_id,
+            report_date=body.report_date,
+            recommended_cal_due_date=body.recommended_cal_due_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
     logger.info(
-        "Uploaded & locked | eqp_id=%s doc_type=%s user=%s file=%s",
-        inward_eqp_id, doc_type, current_user.user_id, file.filename,
+        "Dates updated | eqp_id=%s user=%s report_date=%s cal_due=%s",
+        inward_eqp_id,
+        current_user.user_id,
+        body.report_date,
+        body.recommended_cal_due_date,
     )
     return db_record
 
@@ -360,11 +407,12 @@ def handle_document_delete(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Nullifies the file URL, name, and type for the given doc_type,
-    resets the lock flag to FALSE, and clears any unlock_request.
-
-    After deletion the engineer can re-upload immediately without
-    submitting a new unlock request.
+    Delegates fully to the service layer which handles:
+      - Nullifying file fields
+      - Clearing date fields (certificate only)
+      - Resetting lock to FALSE
+      - Clearing unlock_request
+      - flush + commit + refresh
     """
     fields = _get_lock_fields(doc_type)
 
@@ -377,23 +425,23 @@ def handle_document_delete(
 
     _check_lock_permission(record, fields, current_user)
 
+    # ── Delete physical file from disk before nullifying the URL ────
     _delete_file_from_disk(getattr(record, fields["file_url"], None))
 
-    setattr(record, fields["file_url"],       None)
-    setattr(record, fields["file_name"],      None)
-    setattr(record, fields["file_type"],      None)
-    setattr(record, fields["locked"],         False)
-    setattr(record, fields["unlock_request"], None)
-
-    record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    # ── Delegate all DB operations to the service ────────────────────
+    updated_record = service.delete_document_for_equipment(
+        db=db,
+        inward_eqp_id=inward_eqp_id,
+        doc_type=doc_type,
+    )
 
     logger.info(
         "Document deleted & unlocked | eqp_id=%s doc_type=%s user=%s",
-        inward_eqp_id, doc_type, current_user.user_id,
+        inward_eqp_id,
+        doc_type,
+        current_user.user_id,
     )
-    return record
+    return updated_record
 
 
 # ── POST /manual-calibration/equipment/{id}/request-unlock ──────────────────
@@ -409,16 +457,6 @@ def request_unlock(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Engineer submits a reason to request that a locked file be unlocked.
-
-    Rules
-    ─────
-    • File must currently be locked.
-    • Duplicate PENDING requests are blocked.
-    • Previous requests are archived in history[] for a full audit trail.
-    • Engineers may re-submit after a REJECTED decision.
-    """
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(
@@ -426,66 +464,28 @@ def request_unlock(
             detail="A reason is required to submit an unlock request.",
         )
 
-    fields = _get_lock_fields(body.doc_type)
-
-    record = service.get_upload_by_equipment_id(db, inward_eqp_id)
-    if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No upload record found for this equipment.",
+    try:
+        db_record = service.submit_unlock_request(
+            db=db,
+            inward_eqp_id=inward_eqp_id,
+            doc_type=body.doc_type,
+            reason=reason,
+            requested_by=current_user.user_id,
         )
-
-    if not getattr(record, fields["locked"], False):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{fields['label']} is not currently locked.",
-        )
-
-    existing_req: dict = copy.deepcopy(
-        getattr(record, fields["unlock_request"]) or {}
-    )
-
-    if existing_req.get("status") == "PENDING":
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "An unlock request is already pending admin review. "
-                "Please wait for a decision before submitting another."
-            ),
-        )
-
-    # Archive the previous request into history[]
-    history: list = list(existing_req.get("history", []))
-    if existing_req.get("status"):
-        history.append({
-            "status":          existing_req.get("status"),
-            "engineer_reason": existing_req.get("engineer_reason"),
-            "admin_comment":   existing_req.get("admin_comment"),
-            "requested_at":    existing_req.get("requested_at"),
-            "actioned_at":     existing_req.get("actioned_at"),
-        })
-
-    new_request: dict = {
-        "status":          "PENDING",
-        "engineer_reason": reason,
-        "requested_by":    current_user.user_id,
-        "requested_at":    datetime.now(timezone.utc).isoformat(),
-        "admin_comment":   None,
-        "actioned_by":     None,
-        "actioned_at":     None,
-        "history":         history,
-    }
-
-    setattr(record, fields["unlock_request"], new_request)
-    record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+            detail=str(exc),
+        ) from exc
 
     logger.info(
         "Unlock requested | eqp_id=%s doc_type=%s user=%s reason='%s'",
-        inward_eqp_id, body.doc_type, current_user.user_id, reason,
+        inward_eqp_id,
+        body.doc_type,
+        current_user.user_id,
+        reason,
     )
-    return record
+    return db_record
 
 
 # ── POST /manual-calibration/equipment/{id}/action-unlock ───────────────────
@@ -501,15 +501,6 @@ def action_unlock(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Admin approves or rejects a PENDING unlock request.
-
-    APPROVED → locked flag set to FALSE; engineer may re-upload immediately.
-    REJECTED → locked flag unchanged; engineer must re-submit with more detail.
-
-    A comment is mandatory on rejection.
-    History is preserved for auditing.
-    """
     _require_admin(current_user)
 
     if body.action not in ("APPROVED", "REJECTED"):
@@ -525,48 +516,30 @@ def action_unlock(
             detail="A comment is required when rejecting an unlock request.",
         )
 
-    fields = _get_lock_fields(body.doc_type)
-
-    record = service.get_upload_by_equipment_id(db, inward_eqp_id)
-    if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No upload record found for this equipment.",
+    try:
+        db_record = service.action_unlock_request(
+            db=db,
+            inward_eqp_id=inward_eqp_id,
+            doc_type=body.doc_type,
+            action=body.action,
+            comment=comment,
+            actioned_by=current_user.user_id,
         )
-
-    unlock_req: dict = copy.deepcopy(
-        getattr(record, fields["unlock_request"]) or {}
-    )
-
-    if unlock_req.get("status") != "PENDING":
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"No pending unlock request found for {fields['label']}. "
-                "Cannot action a request that is not in PENDING state."
-            ),
-        )
-
-    unlock_req["status"]        = body.action
-    unlock_req["admin_comment"] = comment
-    unlock_req["actioned_by"]   = current_user.user_id
-    unlock_req["actioned_at"]   = datetime.now(timezone.utc).isoformat()
-
-    setattr(record, fields["unlock_request"], unlock_req)
-
-    if body.action == "APPROVED":
-        setattr(record, fields["locked"], False)
-
-    record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+            detail=str(exc),
+        ) from exc
 
     logger.info(
         "Unlock %s | eqp_id=%s doc_type=%s admin=%s comment='%s'",
-        body.action, inward_eqp_id, body.doc_type,
-        current_user.user_id, comment,
+        body.action,
+        inward_eqp_id,
+        body.doc_type,
+        current_user.user_id,
+        comment,
     )
-    return record
+    return db_record
 
 
 # ── GET /manual-calibration/unlock-requests ─────────────────────────────────
@@ -580,23 +553,8 @@ def list_unlock_requests(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Returns every ExternalUpload row that has a non-null unlock_request
-    on the calibration worksheet, the certificate, or both.
-
-    Each document slot is returned as a separate entry so the frontend
-    can render one card per (equipment, doc_type) pair.
-
-    Sort order
-    ──────────
-    1. PENDING requests first (newest first within group)
-    2. Non-pending (APPROVED / REJECTED) newest first
-
-    Admin only.
-    """
     _require_admin(current_user)
 
-    # ── 1. Fetch all ExternalUpload rows with at least one unlock_request ────
     try:
         records = (
             db.query(ExternalUpload)
@@ -620,8 +578,6 @@ def list_unlock_requests(
     result: list[dict] = []
 
     for rec in records:
-
-        # ── 2. Resolve equipment details ─────────────────────────────────────
         try:
             eqp = (
                 db.query(InwardEquipment)
@@ -639,7 +595,6 @@ def list_unlock_requests(
         nepl_id              = getattr(eqp, "nepl_id", None) or str(rec.inward_eqp_id)
         material_description = getattr(eqp, "material_description", None) or ""
 
-        # ── 3. One entry per document slot that has an unlock_request ────────
         slots = [
             ("result",      rec.calibration_worksheet_unlock_request),
             ("certificate", rec.certificate_unlock_request),
@@ -647,12 +602,9 @@ def list_unlock_requests(
 
         for doc_type, raw_req in slots:
             if raw_req is None:
-                continue  # this slot has no request — skip
+                continue
 
-            # Defensive copy so we don't mutate the ORM object
             req_payload: dict = copy.deepcopy(raw_req)
-
-            # ── 4. Enrich with engineer's display name ───────────────────────
             req_payload["requested_by_name"] = _resolve_engineer_name(
                 db, req_payload.get("requested_by")
             )
@@ -667,31 +619,23 @@ def list_unlock_requests(
                 }
             )
 
-    # ── 5. Sort: PENDING first (newest), then others (newest) ───────────────
-    def _sort_key(item: dict) -> tuple:
-        req          = item["unlock_request"]
-        is_pending   = 0 if req.get("status") == "PENDING" else 1
-        requested_at = req.get("requested_at") or ""
-        return (is_pending, requested_at)
-
-    result.sort(key=_sort_key, reverse=False)
-
-    # Within each group, newest first → reverse the date component
-    pending    = [r for r in result if r["unlock_request"].get("status") == "PENDING"]
+    pending     = [r for r in result if r["unlock_request"].get("status") == "PENDING"]
     non_pending = [r for r in result if r["unlock_request"].get("status") != "PENDING"]
 
     pending.sort(
         key=lambda r: r["unlock_request"].get("requested_at") or "",
-        reverse=True,   # newest PENDING first
+        reverse=True,
     )
     non_pending.sort(
         key=lambda r: r["unlock_request"].get("requested_at") or "",
-        reverse=True,   # newest actioned first
+        reverse=True,
     )
 
     logger.info(
         "Unlock requests listed | admin=%s pending=%d others=%d",
-        current_user.user_id, len(pending), len(non_pending),
+        current_user.user_id,
+        len(pending),
+        len(non_pending),
     )
 
     return pending + non_pending

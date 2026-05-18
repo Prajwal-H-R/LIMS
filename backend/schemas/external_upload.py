@@ -1,16 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Any, List
-from datetime import datetime
+from datetime import datetime, date
 
 
 # ─────────────────────────────────────────────
 # UNLOCK REQUEST NESTED SCHEMA
-# Represents the JSONB shape stored in the DB
 # ─────────────────────────────────────────────
 
 class UnlockRequestHistory(BaseModel):
     """Single past unlock request cycle stored inside history[]."""
-    status: Optional[str] = None              # APPROVED | REJECTED
+    status: Optional[str] = None
     engineer_reason: Optional[str] = None
     admin_comment: Optional[str] = None
     requested_at: Optional[str] = None
@@ -26,7 +25,7 @@ class UnlockRequest(BaseModel):
     Lifecycle: PENDING → APPROVED | REJECTED
     Previous cycles moved into history[].
     """
-    status: str                               # PENDING | APPROVED | REJECTED
+    status: str
     engineer_reason: str
     requested_by: Optional[int] = None
     requested_at: Optional[str] = None
@@ -56,6 +55,16 @@ class ExternalUploadBase(BaseModel):
     certificate_file_type: Optional[str] = Field(None, max_length=255)
     certificate_file_url:  Optional[str] = None
 
+    # ── Date fields ────────────────────────────
+    report_date: Optional[date] = Field(
+        default=None,
+        description="Report date recorded on the calibration certificate.",
+    )
+    recommended_cal_due_date: Optional[date] = Field(
+        default=None,
+        description="Next recommended calibration due date.",
+    )
+
     created_by: Optional[int] = None
 
 
@@ -70,12 +79,10 @@ class ExternalUploadCreate(ExternalUploadBase):
 
 # ─────────────────────────────────────────────
 # UPDATE — file fields only, no lock fields
-# Lock/unlock is managed by dedicated endpoints,
-# never through a bulk update.
 # ─────────────────────────────────────────────
 
 class ExternalUploadUpdate(BaseModel):
-    """Partial update for file metadata only."""
+    """Partial update for file metadata and date fields."""
     calibration_worksheet_file_name: Optional[str] = Field(None, max_length=255)
     calibration_worksheet_file_type: Optional[str] = Field(None, max_length=255)
     calibration_worksheet_file_url:  Optional[str] = None
@@ -84,11 +91,12 @@ class ExternalUploadUpdate(BaseModel):
     certificate_file_type: Optional[str] = Field(None, max_length=255)
     certificate_file_url:  Optional[str] = None
 
+    report_date: Optional[date] = None
+    recommended_cal_due_date: Optional[date] = None
+
 
 # ─────────────────────────────────────────────
 # READ — returned by all endpoints
-# Includes lock flags + unlock request objects
-# so the frontend can render the correct UI
 # ─────────────────────────────────────────────
 
 class ExternalUpload(ExternalUploadBase):
@@ -118,7 +126,7 @@ class ExternalUpload(ExternalUploadBase):
     updated_at: datetime
 
     class Config:
-        from_attributes = True   # replaces orm_mode in Pydantic v2
+        from_attributes = True
 
 
 # ─────────────────────────────────────────────
@@ -126,14 +134,11 @@ class ExternalUpload(ExternalUploadBase):
 # ─────────────────────────────────────────────
 
 class RequestUnlockBody(BaseModel):
-    """
-    Engineer → POST /request-unlock
-    Body sent when requesting admin approval to re-upload a locked file.
-    """
+    """Engineer → POST /request-unlock"""
     doc_type: str = Field(
         ...,
         description="Which file to unlock: 'result' or 'certificate'",
-        pattern="^(result|certificate)$",   # validated at schema level
+        pattern="^(result|certificate)$",
     )
     reason: str = Field(
         ...,
@@ -144,10 +149,7 @@ class RequestUnlockBody(BaseModel):
 
 
 class ActionUnlockBody(BaseModel):
-    """
-    Admin → POST /action-unlock
-    Body sent when admin approves or rejects an unlock request.
-    """
+    """Admin → POST /action-unlock"""
     doc_type: str = Field(
         ...,
         description="Which file: 'result' or 'certificate'",
@@ -167,14 +169,10 @@ class ActionUnlockBody(BaseModel):
 
 # ─────────────────────────────────────────────
 # RESPONSE HELPERS
-# Lightweight schemas for list views / summaries
 # ─────────────────────────────────────────────
 
 class ExternalUploadSummary(BaseModel):
-    """
-    Slim version used in table rows — avoids sending
-    full unlock history in list responses.
-    """
+    """Slim version used in table rows."""
     id: int
     inward_eqp_id: int
 
@@ -184,7 +182,7 @@ class ExternalUploadSummary(BaseModel):
     calibration_worksheet_locked:    bool = False
     calibration_worksheet_unlock_status: Optional[str] = Field(
         default=None,
-        description="Just the status string: PENDING | APPROVED | REJECTED | null",
+        description="PENDING | APPROVED | REJECTED | null",
     )
 
     # Certificate
@@ -193,8 +191,12 @@ class ExternalUploadSummary(BaseModel):
     certificate_locked:    bool = False
     certificate_unlock_status: Optional[str] = Field(
         default=None,
-        description="Just the status string: PENDING | APPROVED | REJECTED | null",
+        description="PENDING | APPROVED | REJECTED | null",
     )
+
+    # Date fields
+    report_date: Optional[date] = None
+    recommended_cal_due_date: Optional[date] = None
 
     updated_at: datetime
 
@@ -203,11 +205,7 @@ class ExternalUploadSummary(BaseModel):
 
     @classmethod
     def from_orm_with_status(cls, obj: Any) -> "ExternalUploadSummary":
-        """
-        Helper to extract just the status string from the JSONB
-        so the list view doesn't need the full history payload.
-        """
-        ws_req  = obj.calibration_worksheet_unlock_request or {}
+        ws_req   = obj.calibration_worksheet_unlock_request or {}
         cert_req = obj.certificate_unlock_request or {}
 
         return cls(
@@ -221,5 +219,7 @@ class ExternalUploadSummary(BaseModel):
             certificate_file_url=obj.certificate_file_url,
             certificate_locked=obj.certificate_locked,
             certificate_unlock_status=cert_req.get("status"),
+            report_date=obj.report_date,
+            recommended_cal_due_date=obj.recommended_cal_due_date,
             updated_at=obj.updated_at,
         )

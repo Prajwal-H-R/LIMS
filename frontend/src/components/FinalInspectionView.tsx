@@ -2,8 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { 
   ArrowLeft, Loader2, Mail, CheckCircle2, 
-  FileText, X, Send, Plus, Share2
-} from "lucide-react";
+  FileText, X, Send, Plus, Share2, XCircle, AlertCircle, Check
+} from "lucide-react"; // Added XCircle, AlertCircle, Check
 import { api, ENDPOINTS } from "../api/config"; 
 import toast from "react-hot-toast";
 
@@ -22,7 +22,6 @@ export const FinalInspectionView: React.FC = () => {
     const fetchDetails = async () => {
       try {
         setLoading(true);
-        // UPDATED: Pointing to the new FINAL_INSPECTIONS router path
         const res = await api.get(ENDPOINTS.FINAL_INSPECTIONS.GET_DETAILS(Number(inwardId)));
         setData(res.data);
         if (res.data.customer_email) {
@@ -37,12 +36,12 @@ export const FinalInspectionView: React.FC = () => {
     fetchDetails();
   }, [inwardId]);
 
+  // ... (addEmailField, removeEmailField, handleSendFir, handleRemarkChange remain same)
   const addEmailField = () => setReportEmails(prev => [...prev, '']);
   const removeEmailField = (index: number) => setReportEmails(prev => prev.filter((_, i) => i !== index));
 
   const handleSendFir = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     const validEmails = reportEmails.filter(email => email.trim() && email.includes('@'));
     if (validEmails.length === 0) return toast.error("Please enter at least one valid email.");
 
@@ -58,13 +57,7 @@ export const FinalInspectionView: React.FC = () => {
         equipments: data.equipments, 
         emails: validEmails
       };
-
-      // UPDATED: Pointing to the new FINAL_INSPECTIONS router path
-      await api.post(
-        ENDPOINTS.FINAL_INSPECTIONS.SEND_REPORT(Number(inwardId)), 
-        payload
-      );
-
+      await api.post(ENDPOINTS.FINAL_INSPECTIONS.SEND_REPORT(Number(inwardId)), payload);
       toast.success("Final Inspection Report saved and sent!");
       setShowSuccessUI(true);
     } catch (err: any) {
@@ -81,8 +74,6 @@ export const FinalInspectionView: React.FC = () => {
     setData({ ...data, equipments: updatedEquipments });
   };
 
-  // ... (Rest of your JSX remains exactly the same as before)
-
   if (loading) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
       <Loader2 className="h-10 w-10 animate-spin text-indigo-600 mb-4" />
@@ -92,6 +83,9 @@ export const FinalInspectionView: React.FC = () => {
 
   if (!data) return <div className="p-10 text-center">Inward data not found.</div>;
 
+  // New logic for engineer view
+  const hasCustomerDecision = !!data.customer_decision;
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -100,9 +94,46 @@ export const FinalInspectionView: React.FC = () => {
             <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
                 <ArrowLeft className="h-4 w-4" /> Back to List
             </button>
+            
+            {/* Report Sent Status Badge */}
+            {data.report_sent && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-full text-xs font-bold">
+                    <Send size={12} /> REPORT DISPATCHED
+                </div>
+            )}
         </div>
 
         <div className="bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden">
+            
+            {/* NEW: CUSTOMER DECISION BANNER FOR ENGINEER */}
+            {hasCustomerDecision && (
+                <div className={`${data.customer_decision === 'APPROVED' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'} border-b px-6 py-4 flex items-center gap-4`}>
+                    <div className={`p-2 rounded-full ${data.customer_decision === 'APPROVED' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                        {data.customer_decision === 'APPROVED' ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
+                    </div>
+                    <div className="flex-grow">
+                        <div className="flex items-center justify-between">
+                            <h3 className={`text-sm font-bold uppercase tracking-wide ${data.customer_decision === 'APPROVED' ? 'text-emerald-800' : 'text-red-800'}`}>
+                                Customer Decision: {data.customer_decision}
+                            </h3>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                                Updated: {data.updated_at ? new Date(data.updated_at).toLocaleString() : ""}
+                            </span>
+                        </div>
+                        {data.customer_decision === 'REJECTED' && (
+                            <div className="mt-1 p-3 bg-white/50 border border-red-100 rounded-lg">
+                                <p className="text-sm text-red-900">
+                                    <span className="font-bold">Rejection Reason:</span> {data.customer_remarks || "No remarks provided"}
+                                </p>
+                            </div>
+                        )}
+                        {data.customer_decision === 'APPROVED' && (
+                            <p className="text-xs text-emerald-700 mt-0.5">Report has been reviewed and accepted by the customer.</p>
+                        )}
+                    </div>
+                </div>
+            )}
+
             <div className="bg-slate-800 text-white p-6 flex justify-between items-center">
                 <div className="flex items-center gap-3">
                     <FileText size={24} className="text-blue-400" />
@@ -115,6 +146,17 @@ export const FinalInspectionView: React.FC = () => {
             </div>
 
             <div className="p-6 sm:p-8">
+                {/* Warnings for Engineer */}
+                {data.customer_decision === 'REJECTED' && (
+                    <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-amber-800">
+                        <AlertCircle size={20} className="text-amber-600 flex-shrink-0" />
+                        <p className="text-sm font-medium">
+                            Action Required: Please update the "Final Remarks" below based on customer feedback and re-dispatch the report.
+                        </p>
+                    </div>
+                )}
+
+                {/* ... Metadata Grid (DC No, Date, etc.) ... */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 pb-8 border-b border-gray-100">
                     <div className="space-y-3 text-sm">
                         <div className="flex border-b border-slate-50 pb-2">
@@ -139,9 +181,11 @@ export const FinalInspectionView: React.FC = () => {
                     </div>
                 </div>
 
+                {/* Table remains the same but Engineer can still edit Final Remarks */}
                 <div className="relative rounded-lg border border-slate-200 overflow-hidden">
                     <div className="overflow-x-auto overflow-y-hidden">
                         <table className="w-full text-sm border-collapse min-w-[1800px]">
+                            {/* ... thead ... */}
                             <thead>
                                 <tr className="bg-slate-50 text-slate-600 font-bold text-xs uppercase tracking-wider">
                                     <th className="border-b border-r border-slate-200 p-3 w-12 text-center sticky left-0 bg-slate-50 z-10">Sl</th>
@@ -163,6 +207,7 @@ export const FinalInspectionView: React.FC = () => {
                             <tbody className="divide-y divide-slate-100">
                                 {data.equipments.map((eq: any, idx: number) => (
                                     <tr key={idx} className="hover:bg-slate-50 transition-colors group">
+                                        {/* ... (Existing cells) ... */}
                                         <td className="border-r border-slate-200 p-3 text-center text-slate-400 bg-white sticky left-0 group-hover:bg-slate-50">{idx + 1}</td>
                                         <td className="border-r border-slate-200 p-3 font-mono font-bold text-blue-700">{eq.nepl_id}</td>
                                         <td className="border-r border-slate-200 p-3 text-slate-800 font-medium">{eq.material_description}</td>
@@ -184,7 +229,7 @@ export const FinalInspectionView: React.FC = () => {
                                             <textarea
                                                 value={eq.final_remarks || ""}
                                                 onChange={(e) => handleRemarkChange(idx, e.target.value)}
-                                                placeholder="Type here..."
+                                                placeholder="Update remarks here..."
                                                 rows={1}
                                                 className="w-full text-xs p-2 bg-white border border-indigo-100 rounded focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none transition-all resize-none min-h-[40px]"
                                             />
@@ -195,22 +240,26 @@ export const FinalInspectionView: React.FC = () => {
                         </table>
                     </div>
                 </div>
-                <div className="mt-2 text-[10px] text-slate-400 text-right italic">
-                    * Shift + Scroll to navigate horizontally
-                </div>
+                {/* ... shift scroll hint ... */}
             </div>
         </div>
 
+        {/* Action Button: Still available even if approved, but maybe highlight if rejected */}
         <div className="flex justify-end pt-4 pb-12">
             <button 
                 onClick={() => setIsModalOpen(true)}
-                className="flex items-center gap-3 bg-indigo-600 text-white px-10 py-4 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-200 active:scale-95"
+                className={`flex items-center gap-3 px-10 py-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${
+                    data.customer_decision === 'REJECTED' 
+                    ? 'bg-red-600 hover:bg-red-700 shadow-red-100' 
+                    : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
+                } text-white`}
             >
                 <Share2 size={20} />
-                Dispatch Final Inspection Report
+                {data.customer_decision === 'REJECTED' ? 'Re-Dispatch Final Report' : 'Dispatch Final Report'}
             </button>
         </div>
 
+        {/* ... (isModalOpen remains exactly same) ... */}
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                 <div 

@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     TIMESTAMP,
     func,
+    Date,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -64,6 +65,8 @@ class ExternalUpload(Base):
 
     # Unlock request lifecycle stored as JSONB (same shape as above)
     certificate_unlock_request = Column(JSONB, nullable=True, default=None)
+    report_date = Column(Date, nullable=True)
+    recommended_cal_due_date = Column(Date, nullable=True)
 
     # ── Audit ──────────────────────────────────────────────────────────
     created_by = Column(

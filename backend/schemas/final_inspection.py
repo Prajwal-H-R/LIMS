@@ -12,7 +12,8 @@ class FinalInspectionBase(BaseModel):
     equipments: List[Any] = []
     sent_emails: List[Any] = []
     status: str = "PENDING"
-
+    customer_decision: Optional[str] = None  # APPROVED / REJECTED
+    customer_remarks: Optional[str] = None
 class FinalInspectionResponse(FinalInspectionBase):
     id: int
     report_sent: bool
@@ -21,6 +22,12 @@ class FinalInspectionResponse(FinalInspectionBase):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class FinalInspectionDecisionRequest(BaseModel):
+    decision: str  # "APPROVED" or "REJECTED"
+    remarks: Optional[str] = None
+
+    
 class FinalInspectionUpdate(BaseModel):
     equipments: Optional[List[Any]] = None
     sent_emails: Optional[List[Any]] = None

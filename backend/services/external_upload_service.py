@@ -1,9 +1,13 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+import logging
 
 from ..models import external_upload as models
 from ..schemas import external_upload as schemas
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────
@@ -13,7 +17,7 @@ from ..schemas import external_upload as schemas
 def _get_lock_fields(doc_type: str) -> dict:
     """
     Returns a dict of attribute names for the given doc_type.
-    Raises ValueError for unknown types — caller converts to HTTPException.
+    Raises ValueError for unknown types.
     """
     mapping = {
         "result": {
@@ -35,7 +39,8 @@ def _get_lock_fields(doc_type: str) -> dict:
     }
     if doc_type not in mapping:
         raise ValueError(
-            f"Unknown document type: '{doc_type}'. Must be 'result' or 'certificate'."
+            f"Unknown document type: '{doc_type}'. "
+            f"Must be 'result' or 'certificate'."
         )
     return mapping[doc_type]
 
@@ -95,15 +100,8 @@ def can_modify(
     Central permission check used by both upload and delete.
 
     Returns:
-        (True, "")            — allowed
-        (False, reason_str)   — blocked with a human-readable reason
-
-    Rules:
-        - No record yet         → always allowed (first upload)
-        - Admin                 → always allowed
-        - Not locked            → allowed
-        - Locked + APPROVED req → allowed (engineer is in re-upload window)
-        - Locked + no/PENDING/REJECTED req → blocked
+        (True, "")           — allowed
+        (False, reason_str)  — blocked with a human-readable reason
     """
     if record is None:
         return True, ""
@@ -118,7 +116,7 @@ def can_modify(
     if unlock_req.get("status") == "APPROVED":
         return True, ""
 
-    fields = _get_lock_fields(doc_type)
+    fields     = _get_lock_fields(doc_type)
     req_status = unlock_req.get("status")
 
     if req_status == "PENDING":
@@ -152,15 +150,20 @@ def upsert_document_for_equipment(
     file_content_type: Optional[str],
     file_url: str,
     user_id: Optional[int] = None,
+    report_date: Optional[date] = None,
+    recommended_cal_due_date: Optional[date] = None,
 ) -> models.ExternalUpload:
     """
     Creates or updates an external_upload record and populates
     the correct file fields based on doc_type.
 
+    Date fields (report_date, recommended_cal_due_date):
+      - Accepted only when doc_type == 'certificate'.
+      - Ignored silently for doc_type == 'result'.
+
     After saving:
       - The file is AUTO-LOCKED (locked flag set to True).
-      - If the previous unlock_request was APPROVED it is cleared,
-        completing one full lock → request → approve → re-upload cycle.
+      - If the previous unlock_request was APPROVED it is cleared.
     """
     fields = _get_lock_fields(doc_type)   # raises ValueError for bad doc_type
 
@@ -180,6 +183,29 @@ def upsert_document_for_equipment(
     setattr(db_upload, fields["file_type"], file_content_type)
     setattr(db_upload, fields["file_url"],  file_url)
 
+    # ── Persist date fields only for certificate uploads ────────────
+    if doc_type == "certificate":
+        if report_date is not None:
+            db_upload.report_date = report_date
+            logger.debug(
+                "Setting report_date=%s for inward_eqp_id=%s",
+                report_date,
+                inward_eqp_id,
+            )
+        if recommended_cal_due_date is not None:
+            db_upload.recommended_cal_due_date = recommended_cal_due_date
+            logger.debug(
+                "Setting recommended_cal_due_date=%s for inward_eqp_id=%s",
+                recommended_cal_due_date,
+                inward_eqp_id,
+            )
+    else:
+        logger.debug(
+            "Date fields ignored for doc_type='%s' on inward_eqp_id=%s",
+            doc_type,
+            inward_eqp_id,
+        )
+
     # ── Auto-lock after upload ──────────────────────────────────────
     setattr(db_upload, fields["locked"], True)
 
@@ -187,11 +213,95 @@ def upsert_document_for_equipment(
     current_req = getattr(db_upload, fields["unlock_request"]) or {}
     if current_req.get("status") == "APPROVED":
         setattr(db_upload, fields["unlock_request"], None)
+        flag_modified(db_upload, fields["unlock_request"])
 
     db_upload.updated_at = datetime.now(timezone.utc)
 
+    # ── Flush so all changes are staged, then verify ─────────────────
+    db.flush()
+
+    # ── Sanity-check: confirm dates are staged before commit ─────────
+    if doc_type == "certificate":
+        logger.debug(
+            "Pre-commit check | inward_eqp_id=%s report_date=%s cal_due=%s",
+            inward_eqp_id,
+            db_upload.report_date,
+            db_upload.recommended_cal_due_date,
+        )
+
     db.commit()
     db.refresh(db_upload)
+
+    # ── Post-commit verification ─────────────────────────────────────
+    if doc_type == "certificate":
+        logger.info(
+            "Post-commit dates | inward_eqp_id=%s report_date=%s cal_due=%s",
+            inward_eqp_id,
+            db_upload.report_date,
+            db_upload.recommended_cal_due_date,
+        )
+
+    return db_upload
+
+
+# ─────────────────────────────────────────────
+# UPDATE DATE FIELDS ONLY (standalone endpoint)
+# ─────────────────────────────────────────────
+
+def update_date_fields(
+    db: Session,
+    inward_eqp_id: int,
+    report_date: Optional[date] = None,
+    recommended_cal_due_date: Optional[date] = None,
+) -> models.ExternalUpload:
+    """
+    Updates only the date fields on an existing record.
+    Does not touch file fields or lock state.
+
+    Raises ValueError when no record exists.
+    """
+    db_upload = get_upload_by_equipment_id(db, inward_eqp_id)
+    if not db_upload:
+        raise ValueError(
+            f"No upload record found for inward_eqp_id={inward_eqp_id}."
+        )
+
+    if report_date is not None:
+        db_upload.report_date = report_date
+        logger.debug(
+            "update_date_fields | setting report_date=%s for inward_eqp_id=%s",
+            report_date,
+            inward_eqp_id,
+        )
+
+    if recommended_cal_due_date is not None:
+        db_upload.recommended_cal_due_date = recommended_cal_due_date
+        logger.debug(
+            "update_date_fields | setting recommended_cal_due_date=%s "
+            "for inward_eqp_id=%s",
+            recommended_cal_due_date,
+            inward_eqp_id,
+        )
+
+    # Explicitly mark Date columns as modified so SQLAlchemy always
+    # issues an UPDATE even when the value has not changed.
+    flag_modified(db_upload, "report_date")
+    flag_modified(db_upload, "recommended_cal_due_date")
+
+    db_upload.updated_at = datetime.now(timezone.utc)
+
+    db.flush()
+    db.commit()
+    db.refresh(db_upload)
+
+    logger.info(
+        "update_date_fields | committed | inward_eqp_id=%s "
+        "report_date=%s cal_due=%s",
+        inward_eqp_id,
+        db_upload.report_date,
+        db_upload.recommended_cal_due_date,
+    )
+
     return db_upload
 
 
@@ -208,11 +318,11 @@ def delete_document_for_equipment(
     Nullifies all file fields for the given doc_type.
 
     After deletion:
-      - The locked flag is set to FALSE so the engineer
-        can immediately re-upload without a new unlock request.
-      - The unlock_request is cleared — clean state for next upload.
+      - The locked flag is set to FALSE.
+      - The unlock_request is cleared.
+      - For certificate: date fields are also cleared.
     """
-    fields = _get_lock_fields(doc_type)   # raises ValueError for bad doc_type
+    fields = _get_lock_fields(doc_type)
 
     db_upload = get_upload_by_equipment_id(db, inward_eqp_id)
     if not db_upload:
@@ -223,12 +333,21 @@ def delete_document_for_equipment(
     setattr(db_upload, fields["file_type"], None)
     setattr(db_upload, fields["file_url"],  None)
 
+    # ── Clear date fields when the certificate is deleted ────────────
+    if doc_type == "certificate":
+        db_upload.report_date              = None
+        db_upload.recommended_cal_due_date = None
+        flag_modified(db_upload, "report_date")
+        flag_modified(db_upload, "recommended_cal_due_date")
+
     # ── Unlock so engineer can re-upload immediately ────────────────
     setattr(db_upload, fields["locked"],         False)
     setattr(db_upload, fields["unlock_request"], None)
+    flag_modified(db_upload, fields["unlock_request"])
 
     db_upload.updated_at = datetime.now(timezone.utc)
 
+    db.flush()
     db.commit()
     db.refresh(db_upload)
     return db_upload
@@ -248,11 +367,11 @@ def submit_unlock_request(
     """
     Engineer submits a reason to request that a locked file be unlocked.
 
-    Rules enforced here (router should pre-check, but service is the source of truth):
+    Rules:
       - Record must exist.
       - File must be locked.
       - No duplicate PENDING request.
-      - Previous request (any status) is archived into history[].
+      - Previous request archived into history[].
     """
     fields = _get_lock_fields(doc_type)
 
@@ -294,8 +413,11 @@ def submit_unlock_request(
     }
 
     setattr(db_upload, fields["unlock_request"], new_request)
+    flag_modified(db_upload, fields["unlock_request"])
+
     db_upload.updated_at = datetime.now(timezone.utc)
 
+    db.flush()
     db.commit()
     db.refresh(db_upload)
     return db_upload
@@ -309,22 +431,15 @@ def action_unlock_request(
     db: Session,
     inward_eqp_id: int,
     doc_type: str,
-    action: str,            # "APPROVED" | "REJECTED"
+    action: str,
     comment: str,
     actioned_by: int,
 ) -> models.ExternalUpload:
     """
     Admin approves or rejects the pending unlock request.
 
-    APPROVED:
-      - locked flag set to FALSE.
-      - Engineer can now delete / re-upload.
-      - On next upload, lock is reapplied and request cleared.
-
-    REJECTED:
-      - locked flag stays TRUE.
-      - Engineer sees the rejection reason.
-      - Engineer can submit a new request (loop continues).
+    APPROVED → locked flag set to FALSE.
+    REJECTED → locked flag stays TRUE.
     """
     if action not in ("APPROVED", "REJECTED"):
         raise ValueError("action must be 'APPROVED' or 'REJECTED'.")
@@ -344,57 +459,68 @@ def action_unlock_request(
             f"No pending unlock request found for {fields['label']}."
         )
 
-    # ── Update request in-place ─────────────────────────────────────
     current_req["status"]        = action
     current_req["admin_comment"] = comment.strip() if comment else ""
     current_req["actioned_by"]   = actioned_by
     current_req["actioned_at"]   = _now()
 
     setattr(db_upload, fields["unlock_request"], current_req)
+    flag_modified(db_upload, fields["unlock_request"])
 
-    # Only physically unlock the file on approval
     if action == "APPROVED":
         setattr(db_upload, fields["locked"], False)
 
     db_upload.updated_at = datetime.now(timezone.utc)
 
+    db.flush()
     db.commit()
     db.refresh(db_upload)
     return db_upload
 
 
 # ─────────────────────────────────────────────
-# CONVENIENCE — get lock status summary
-# Useful for admin dashboard / list views
+# CONVENIENCE — lock status summary
 # ─────────────────────────────────────────────
 
 def get_lock_status_summary(record: models.ExternalUpload) -> dict:
     """
-    Returns a lightweight dict describing the lock state of both files.
-    Used by list endpoints that don't need the full unlock history.
+    Returns a lightweight dict describing the lock state of both files
+    plus the current date field values.
 
     Example output:
     {
         "result": {
             "locked": true,
-            "unlock_status": "PENDING",   # or APPROVED | REJECTED | null
+            "unlock_status": "PENDING",
             "has_file": true
         },
         "certificate": {
             "locked": false,
             "unlock_status": null,
-            "has_file": false
+            "has_file": false,
+            "report_date": "2024-06-01",
+            "recommended_cal_due_date": "2025-06-01"
         }
     }
     """
     def _summary(doc_type: str) -> dict:
         fields = _get_lock_fields(doc_type)
-        req = getattr(record, fields["unlock_request"]) or {}
-        return {
-            "locked":         bool(getattr(record, fields["locked"], False)),
-            "unlock_status":  req.get("status"),            # None if no request
-            "has_file":       bool(getattr(record, fields["file_url"])),
+        req    = getattr(record, fields["unlock_request"]) or {}
+        data   = {
+            "locked":        bool(getattr(record, fields["locked"], False)),
+            "unlock_status": req.get("status"),
+            "has_file":      bool(getattr(record, fields["file_url"])),
         }
+        if doc_type == "certificate":
+            data["report_date"] = (
+                record.report_date.isoformat()
+                if record.report_date else None
+            )
+            data["recommended_cal_due_date"] = (
+                record.recommended_cal_due_date.isoformat()
+                if record.recommended_cal_due_date else None
+            )
+        return data
 
     return {
         "result":      _summary("result"),
