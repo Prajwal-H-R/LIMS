@@ -96,20 +96,16 @@ interface UnlockRequest {
 }
 
 interface DocStatus {
-  // Calibration Worksheet
   res: string | null;
   resN: string | null;
   resLocked: boolean;
   resUnlockRequest: UnlockRequest | null;
-  // Certificate
   cert: string | null;
   certN: string | null;
   certLocked: boolean;
   certUnlockRequest: UnlockRequest | null;
-  // ── Date fields ──────────────────────────
   reportDate: string | null;
   recommendedCalDueDate: string | null;
-  // Deviation
   dev: boolean;
 }
 
@@ -120,7 +116,8 @@ interface DocStatus {
 type FileValidationFailReason =
   | "INVALID_EXTENSION"
   | "NEPL_ID_MISSING"
-  | "EXTRA_ID_FOUND";
+  | "EXTRA_ID_FOUND"
+  | "FILENAME_NOT_EXACT";
 
 interface FileValidationResult {
   isValid: boolean;
@@ -129,6 +126,9 @@ interface FileValidationResult {
   failReason?: FileValidationFailReason;
   failDetail?: string;
 }
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const validateFile = (file: File, neplId: string): FileValidationResult => {
   const base: Pick<FileValidationResult, "uploadedFileName" | "neplId"> = {
@@ -147,27 +147,42 @@ const validateFile = (file: File, neplId: string): FileValidationResult => {
     };
   }
 
-  const normalise = (s: string) => s.toLowerCase().replace(/[\s\-_.]/g, "");
-  const stemRaw = file.name.replace(/\.[^.]+$/, "");
-  const stemNorm = normalise(stemRaw);
-  const neplNorm = normalise(neplId);
+  const stem = file.name.replace(/\.[^.]+$/, "").trim();
+  const nepl = neplId.trim();
 
-  if (!stemNorm.includes(neplNorm)) {
+  if (stem.toLowerCase() === nepl.toLowerCase()) {
+    return { ...base, isValid: true };
+  }
+
+  const loose = (s: string) => s.toLowerCase().replace(/[\s\-_.]/g, "");
+  const stemLoose = loose(stem);
+  const neplLoose = loose(nepl);
+
+  if (!stemLoose.includes(neplLoose)) {
     return { ...base, isValid: false, failReason: "NEPL_ID_MISSING" };
   }
 
-  const remaining = stemNorm.replace(neplNorm, "");
-  const foreignIdPattern = /\d{4,}/;
-  if (foreignIdPattern.test(remaining)) {
-    return {
-      ...base,
-      isValid: false,
-      failReason: "EXTRA_ID_FOUND",
-      failDetail: (remaining.match(foreignIdPattern) ?? [])[0],
-    };
+  const exactNeplRegex = new RegExp(escapeRegExp(nepl), "i");
+
+  if (exactNeplRegex.test(stem)) {
+    const remaining = stem.replace(exactNeplRegex, "");
+    const foreignIdMatch = remaining.match(/\d{4,}/);
+    if (foreignIdMatch) {
+      return {
+        ...base,
+        isValid: false,
+        failReason: "EXTRA_ID_FOUND",
+        failDetail: foreignIdMatch[0],
+      };
+    }
   }
 
-  return { ...base, isValid: true };
+  return {
+    ...base,
+    isValid: false,
+    failReason: "FILENAME_NOT_EXACT",
+    failDetail: `Expected exactly "${nepl}.pdf" or "${nepl}.xlsx"`,
+  };
 };
 
 // ─────────────────────────────────────────────
@@ -211,9 +226,14 @@ const ValidationErrorBanner: React.FC<{
           </div>
           <div className="bg-white border border-red-100 rounded-lg px-3 py-2">
             <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-0.5">
-              Must contain NEPL ID
+              Required filename
             </p>
-            <p className="font-mono font-bold text-blue-600">{result.neplId}</p>
+            <p className="font-mono font-bold text-blue-600">
+              {result.neplId}.pdf
+            </p>
+            <p className="font-mono font-bold text-blue-600">
+              {result.neplId}.xlsx
+            </p>
           </div>
         </div>
       ),
@@ -224,11 +244,38 @@ const ValidationErrorBanner: React.FC<{
         <p className="text-xs text-red-700">
           The filename{" "}
           <span className="font-mono font-bold">{result.uploadedFileName}</span>{" "}
-          appears to contain another equipment ID alongside{" "}
+          contains an extra numeric ID (
+          <span className="font-mono font-bold text-red-600">
+            {result.failDetail}
+          </span>
+          ) alongside{" "}
           <span className="font-mono font-bold text-blue-600">
             {result.neplId}
           </span>
-          . The filename must reference only this equipment.
+          . The filename must be exactly{" "}
+          <span className="font-mono font-bold">{result.neplId}.pdf</span> or{" "}
+          <span className="font-mono font-bold">{result.neplId}.xlsx</span>.
+        </p>
+      ),
+    },
+    FILENAME_NOT_EXACT: {
+      title: "Upload blocked — filename must exactly match NEPL ID",
+      body: (
+        <p className="text-xs text-red-700">
+          File{" "}
+          <span className="font-mono font-bold">{result.uploadedFileName}</span>{" "}
+          is not in the required format. The filename must be exactly{" "}
+          <span className="font-mono font-bold text-blue-600">
+            {result.neplId}.pdf
+          </span>{" "}
+          or{" "}
+          <span className="font-mono font-bold text-blue-600">
+            {result.neplId}.xlsx
+          </span>
+          . Suffixes like{" "}
+          <span className="font-mono text-red-600">(2)</span>,{" "}
+          <span className="font-mono text-red-600">_copy</span>, or extra
+          spaces are not allowed.
         </p>
       ),
     },
@@ -269,8 +316,7 @@ const UploadingIndicator: React.FC<{ neplId: string }> = ({ neplId }) => (
   <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 shadow-sm">
     <Loader2 size={18} className="text-blue-500 animate-spin shrink-0" />
     <p className="text-sm font-semibold text-blue-800">
-      Uploading file for{" "}
-      <span className="font-mono font-bold">{neplId}</span>…
+      Uploading file for <span className="font-mono font-bold">{neplId}</span>…
     </p>
   </div>
 );
@@ -302,7 +348,7 @@ const LockPill: React.FC<{
 };
 
 // ─────────────────────────────────────────────
-// DATE BADGE — shows report/cal-due dates under the Certificate slot
+// DATE BADGE
 // ─────────────────────────────────────────────
 
 const CertDateBadge: React.FC<{
@@ -361,8 +407,6 @@ const UploadDocumentModal: React.FC<{
   onValidationError: (result: FileValidationResult) => void;
 }> = ({ isOpen, docType, equipment, onClose, onUpload, onValidationError }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Date fields are only relevant for certificate uploads ────────
   const isCertificate = docType === "certificate";
 
   const [formData, setFormData] = useState<UploadFormData>({
@@ -409,16 +453,12 @@ const UploadDocumentModal: React.FC<{
 
   const validate = (): boolean => {
     const errors: Record<string, string> = {};
-
-    // Date fields only required for certificate
     if (isCertificate) {
-      if (!formData.reportDate)
-        errors.reportDate = "Report date is required.";
+      if (!formData.reportDate) errors.reportDate = "Report date is required.";
       if (!formData.recommendedCalDueDate)
         errors.recommendedCalDueDate =
           "Recommended calibration due date is required.";
     }
-
     if (!formData.file) errors.file = "Please attach a file.";
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
@@ -454,7 +494,6 @@ const UploadDocumentModal: React.FC<{
   return (
     <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[150] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-        {/* Header */}
         <div className="flex items-center gap-3 p-5 border-b bg-blue-50">
           <div className="p-2 bg-blue-100 text-blue-600 rounded-xl">
             <UploadCloud size={18} />
@@ -479,26 +518,26 @@ const UploadDocumentModal: React.FC<{
           </button>
         </div>
 
-        {/* Body */}
         <div className="p-5 space-y-5">
-          {/* Info banner */}
           <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl p-3">
             <Info size={14} className="text-blue-400 mt-0.5 shrink-0" />
             <p className="text-xs text-blue-700">
               Only <span className="font-mono font-bold">.pdf</span> and{" "}
-              <span className="font-mono font-bold">.xlsx</span> files are
-              accepted. The filename must contain the NEPL ID{" "}
+              <span className="font-mono font-bold">.xlsx</span> are accepted.
+              The filename must be exactly{" "}
               <span className="font-mono font-bold text-blue-600">
-                {equipment.nepl_id}
+                {equipment.nepl_id}.pdf
+              </span>{" "}
+              or{" "}
+              <span className="font-mono font-bold text-blue-600">
+                {equipment.nepl_id}.xlsx
               </span>
               .
             </p>
           </div>
 
-          {/* ── Date fields — ONLY for certificate uploads ─────────────── */}
           {isCertificate && (
             <>
-              {/* Report Date */}
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
                   Report Date <span className="text-red-500">*</span>
@@ -532,7 +571,6 @@ const UploadDocumentModal: React.FC<{
                 )}
               </div>
 
-              {/* Recommended Cal Due Date */}
               <div>
                 <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
                   Recommended Cal Due Date{" "}
@@ -572,7 +610,6 @@ const UploadDocumentModal: React.FC<{
             </>
           )}
 
-          {/* File Attachment */}
           <div>
             <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
               Attach File <span className="text-red-500">*</span>
@@ -599,18 +636,43 @@ const UploadDocumentModal: React.FC<{
                   )}
                   {validationError.failReason === "NEPL_ID_MISSING" && (
                     <p className="text-xs text-red-700">
-                      Filename must contain NEPL ID{" "}
+                      Filename must be exactly{" "}
                       <span className="font-mono font-bold text-blue-600">
-                        {validationError.neplId}
+                        {validationError.neplId}.pdf
+                      </span>{" "}
+                      or{" "}
+                      <span className="font-mono font-bold text-blue-600">
+                        {validationError.neplId}.xlsx
                       </span>
                       .
                     </p>
                   )}
                   {validationError.failReason === "EXTRA_ID_FOUND" && (
                     <p className="text-xs text-red-700">
-                      Filename contains an extra identifier. Must reference only{" "}
+                      Filename contains an extra identifier (
+                      <span className="font-mono font-bold text-red-600">
+                        {validationError.failDetail}
+                      </span>
+                      ). Must be exactly{" "}
                       <span className="font-mono font-bold text-blue-600">
-                        {validationError.neplId}
+                        {validationError.neplId}.pdf
+                      </span>{" "}
+                      or{" "}
+                      <span className="font-mono font-bold text-blue-600">
+                        {validationError.neplId}.xlsx
+                      </span>
+                      .
+                    </p>
+                  )}
+                  {validationError.failReason === "FILENAME_NOT_EXACT" && (
+                    <p className="text-xs text-red-700">
+                      Filename must exactly match — use{" "}
+                      <span className="font-mono font-bold text-blue-600">
+                        {validationError.neplId}.pdf
+                      </span>{" "}
+                      or{" "}
+                      <span className="font-mono font-bold text-blue-600">
+                        {validationError.neplId}.xlsx
                       </span>
                       .
                     </p>
@@ -689,9 +751,13 @@ const UploadDocumentModal: React.FC<{
                     Click to browse file
                   </p>
                   <p className="text-[11px] text-gray-400 mt-0.5">
-                    PDF or XLSX · Must contain{" "}
+                    Filename must be exactly{" "}
                     <span className="font-mono font-bold text-blue-500">
-                      {equipment.nepl_id}
+                      {equipment.nepl_id}.pdf
+                    </span>{" "}
+                    or{" "}
+                    <span className="font-mono font-bold text-blue-500">
+                      {equipment.nepl_id}.xlsx
                     </span>
                   </p>
                 </div>
@@ -702,60 +768,8 @@ const UploadDocumentModal: React.FC<{
               <p className="text-xs text-red-500 mt-1">{fieldErrors.file}</p>
             )}
           </div>
-
-          {/* Upload summary — certificate only when all fields are filled */}
-          {isCertificate &&
-            formData.file &&
-            formData.reportDate &&
-            formData.recommendedCalDueDate && (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1.5">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  Upload Summary
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-gray-500">Report Date: </span>
-                    <span className="font-semibold text-gray-800">
-                      {new Date(formData.reportDate).toLocaleDateString(
-                        "en-GB"
-                      )}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Cal Due Date: </span>
-                    <span className="font-semibold text-gray-800">
-                      {new Date(
-                        formData.recommendedCalDueDate
-                      ).toLocaleDateString("en-GB")}
-                    </span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-gray-500">File: </span>
-                    <span className="font-semibold text-gray-800 font-mono">
-                      {formData.file.name}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          {/* Worksheet summary — just file name */}
-          {!isCertificate && formData.file && (
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1.5">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                Upload Summary
-              </p>
-              <div className="text-xs">
-                <span className="text-gray-500">File: </span>
-                <span className="font-semibold text-gray-800 font-mono">
-                  {formData.file.name}
-                </span>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Footer */}
         <div className="px-5 pb-5 flex justify-end gap-3">
           <button
             onClick={onClose}
@@ -861,9 +875,8 @@ const RequestUnlockModal: React.FC<{
               <p className="text-[10px] font-bold text-red-500 uppercase tracking-wider">
                 Previous Request — Rejected
               </p>
-              <p className="text-xs text-gray-700">
-                <span className="font-semibold">Your reason: </span>
-                {unlockRequest.engineer_reason}
+              <p className="text-xs text-gray-700 font-medium">
+                "{unlockRequest.engineer_reason}"
               </p>
               {unlockRequest.admin_comment && (
                 <p className="text-xs text-gray-700">
@@ -871,9 +884,6 @@ const RequestUnlockModal: React.FC<{
                   {unlockRequest.admin_comment}
                 </p>
               )}
-              <p className="text-[10px] text-gray-400 pt-1 border-t border-red-100">
-                Submit a new request with more detail.
-              </p>
             </div>
           )}
 
@@ -885,89 +895,31 @@ const RequestUnlockModal: React.FC<{
                 </div>
               </div>
               <p className="font-bold text-gray-900">Awaiting Admin Approval</p>
-              <p className="text-xs text-gray-500">
-                Your unlock request for{" "}
-                <span className="font-semibold">{label}</span> is pending.
-              </p>
-              <div className="bg-white border border-yellow-100 rounded-lg p-3 text-left space-y-1">
-                <p className="text-[10px] font-bold text-gray-400 uppercase">
-                  Your Reason
-                </p>
+              <div className="bg-white border border-yellow-100 rounded-lg p-3 text-left">
                 <p className="text-xs text-gray-700 font-medium">
                   "{unlockRequest?.engineer_reason}"
-                </p>
-                <p className="text-[10px] text-gray-400">
-                  Submitted{" "}
-                  {new Date(unlockRequest!.requested_at).toLocaleString(
-                    "en-GB"
-                  )}
                 </p>
               </div>
             </div>
           ) : (
-            <>
-              <div className="flex items-start gap-2 bg-gray-50 border border-gray-200 rounded-xl p-3">
-                <Info size={14} className="text-gray-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-gray-600">
-                  Files are locked after upload. Provide a clear reason for the
-                  Admin.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
-                  Reason <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={reason}
-                  onChange={(e) => {
-                    setReason(e.target.value);
-                    setError("");
-                  }}
-                  placeholder={`Why does the ${label} need to be changed?`}
-                  maxLength={500}
-                  className={`w-full p-3 border rounded-xl text-sm h-28 resize-none outline-none transition-colors ${
-                    error
-                      ? "border-red-300 bg-red-50"
-                      : "border-gray-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                  }`}
-                />
-                {error && (
-                  <p className="text-xs text-red-500 mt-1">{error}</p>
-                )}
-                <p className="text-[10px] text-gray-400 mt-1 text-right">
-                  {reason.length}/500
-                </p>
-              </div>
-
-              {(unlockRequest?.history?.length ?? 0) > 0 && (
-                <details className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                  <summary className="text-xs font-bold text-gray-500 uppercase cursor-pointer">
-                    Request History ({unlockRequest!.history!.length})
-                  </summary>
-                  <div className="mt-3 space-y-2">
-                    {unlockRequest!.history!.map((h, i) => (
-                      <div
-                        key={i}
-                        className="text-xs bg-white border border-gray-100 rounded-lg p-2.5 space-y-1"
-                      >
-                        <p className="text-gray-700">"{h.engineer_reason}"</p>
-                        <p
-                          className={`font-bold text-[10px] ${
-                            h.status === "APPROVED"
-                              ? "text-green-600"
-                              : "text-red-500"
-                          }`}
-                        >
-                          {h.status}
-                          {h.admin_comment && ` — "${h.admin_comment}"`}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </>
+            <div>
+              <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+                Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => {
+                  setReason(e.target.value);
+                  setError("");
+                }}
+                placeholder={`Why does the ${label} need to be changed?`}
+                maxLength={500}
+                className={`w-full p-3 border rounded-xl text-sm h-28 resize-none outline-none ${
+                  error ? "border-red-300 bg-red-50" : "border-gray-300"
+                }`}
+              />
+              {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+            </div>
           )}
         </div>
 
@@ -1068,21 +1020,15 @@ const AdminReviewModal: React.FC<{
             <X size={18} />
           </button>
         </div>
-
         <div className="p-5 space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-1.5">
-            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">
               Engineer's Reason
             </p>
             <p className="text-sm text-gray-800 font-medium">
               "{unlockRequest.engineer_reason}"
             </p>
-            <p className="text-[10px] text-gray-400">
-              Requested{" "}
-              {new Date(unlockRequest.requested_at).toLocaleString("en-GB")}
-            </p>
           </div>
-
           <div>
             <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">
               Comment{" "}
@@ -1094,10 +1040,8 @@ const AdminReviewModal: React.FC<{
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Add instructions or reason..."
-              className={`w-full p-3 border rounded-xl text-sm h-20 resize-none outline-none transition-colors ${
-                actionError
-                  ? "border-red-300 bg-red-50"
-                  : "border-gray-300 focus:ring-2 focus:ring-amber-100"
+              className={`w-full p-3 border rounded-xl text-sm h-20 resize-none outline-none ${
+                actionError ? "border-red-300 bg-red-50" : "border-gray-300"
               }`}
             />
             {actionError && (
@@ -1105,25 +1049,24 @@ const AdminReviewModal: React.FC<{
             )}
           </div>
         </div>
-
         <div className="px-5 pb-5 flex gap-3">
           <button
             onClick={() => handleAction("REJECTED")}
             disabled={isSubmitting}
-            className="flex-1 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-sm font-semibold rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+            className="flex-1 py-2.5 bg-red-50 border border-red-200 text-red-600 text-sm font-semibold rounded-lg flex items-center justify-center gap-2"
           >
             <X size={15} /> Reject
           </button>
           <button
             onClick={() => handleAction("APPROVED")}
             disabled={isSubmitting}
-            className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+            className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
               <Loader2 size={15} className="animate-spin" />
             ) : (
               <CheckCircle2 size={15} />
-            )}
+            )}{" "}
             Approve
           </button>
         </div>
@@ -1133,7 +1076,7 @@ const AdminReviewModal: React.FC<{
 };
 
 // ─────────────────────────────────────────────
-// DOWNLOAD / VIEW HELPERS
+// HELPERS
 // ─────────────────────────────────────────────
 
 const coreDownload = async (url: string, fileName: string) => {
@@ -1166,7 +1109,6 @@ const handleView = (url: string, fileName: string) =>
   fileName.match(/\.(xlsx|xls|csv)$/i)
     ? coreDownload(url, fileName)
     : window.open(url, "_blank", "noopener,noreferrer");
-
 const handleDownload = (url: string, fileName: string) =>
   coreDownload(url, fileName);
 
@@ -1183,7 +1125,6 @@ const FileGroup: React.FC<{
   isLocked: boolean;
   unlockRequest: UnlockRequest | null;
   isAdmin: boolean;
-  // ── NEW: date fields passed in for certificate display ───────────
   reportDate?: string | null;
   recommendedCalDueDate?: string | null;
   onPickFile: () => void;
@@ -1206,26 +1147,22 @@ const FileGroup: React.FC<{
 }) => {
   const [requestModal, setRequestModal] = useState(false);
   const [reviewModal, setReviewModal] = useState(false);
-
   const isPending = unlockRequest?.status === "PENDING";
   const isRejected = unlockRequest?.status === "REJECTED";
   const isApproved = unlockRequest?.status === "APPROVED";
+  const isCertificate = docType === "certificate";
 
   const handleDeleteClick = () => {
     if (!isLocked || isAdmin) {
-      if (window.confirm(`Delete the ${label}? This cannot be undone.`))
-        onDelete();
+      if (window.confirm(`Delete the ${label}?`)) onDelete();
       return;
     }
     if (isApproved) {
-      if (window.confirm(`You have admin approval. Delete the ${label}?`))
-        onDelete();
+      if (window.confirm(`Delete the ${label}?`)) onDelete();
       return;
     }
     setRequestModal(true);
   };
-
-  const isCertificate = docType === "certificate";
 
   if (isLocked) {
     return (
@@ -1284,7 +1221,7 @@ const FileGroup: React.FC<{
                 isPending ? (
                   <button
                     onClick={() => setReviewModal(true)}
-                    className="h-full px-3 flex items-center gap-1.5 text-[10px] font-bold text-amber-600 hover:bg-amber-50 whitespace-nowrap"
+                    className="h-full px-3 text-[10px] font-bold text-amber-600 hover:bg-amber-50 whitespace-nowrap"
                   >
                     <Clock size={11} className="animate-pulse" /> Review Request
                   </button>
@@ -1296,25 +1233,25 @@ const FileGroup: React.FC<{
               ) : isPending ? (
                 <button
                   onClick={() => setRequestModal(true)}
-                  className="h-full px-3 flex items-center gap-1.5 text-[10px] font-bold text-yellow-600 hover:bg-yellow-50 whitespace-nowrap"
+                  className="h-full px-3 text-[10px] font-bold text-yellow-600 hover:bg-yellow-50 whitespace-nowrap"
                 >
                   <Clock size={11} className="animate-pulse" /> Pending...
                 </button>
               ) : isRejected ? (
                 <button
                   onClick={() => setRequestModal(true)}
-                  className="h-full px-3 flex items-center gap-1.5 text-[10px] font-bold text-red-500 hover:bg-red-50 whitespace-nowrap"
+                  className="h-full px-3 text-[10px] font-bold text-red-500 hover:bg-red-50 whitespace-nowrap"
                 >
                   <RefreshCw size={11} /> Re-request
                 </button>
               ) : isApproved ? (
-                <div className="h-full px-3 flex items-center gap-1 text-[10px] text-green-600 font-bold">
+                <div className="h-full px-3 text-[10px] text-green-600 font-bold flex items-center gap-1">
                   <Unlock size={11} /> Approved
                 </div>
               ) : (
                 <button
                   onClick={() => setRequestModal(true)}
-                  className="h-full px-3 flex items-center gap-1.5 text-[10px] font-bold text-blue-600 hover:bg-blue-50 whitespace-nowrap"
+                  className="h-full px-3 text-[10px] font-bold text-blue-600 hover:bg-blue-50 whitespace-nowrap"
                 >
                   <Send size={11} /> Request Delete
                 </button>
@@ -1322,7 +1259,6 @@ const FileGroup: React.FC<{
             </div>
           </div>
           <LockPill locked={isLocked} unlockRequest={unlockRequest} />
-          {/* ── Show date badges under locked certificate ──────────── */}
           {isCertificate && (
             <CertDateBadge
               reportDate={reportDate ?? null}
@@ -1374,7 +1310,6 @@ const FileGroup: React.FC<{
           <Unlock size={8} /> UNLOCKED BY ADMIN
         </span>
       )}
-      {/* ── Show date badges under unlocked certificate ──────────── */}
       {isCertificate && (
         <CertDateBadge
           reportDate={reportDate ?? null}
@@ -1411,7 +1346,7 @@ const DeviationModal: React.FC<{
   const [hideCustomerVisibility, setHideCustomerVisibility] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false); // NEW: loader for toggle
+  const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1434,7 +1369,7 @@ const DeviationModal: React.FC<{
       )
       .then((res) => {
         if (res.data?.[0]) {
-          const d = res.data[0] as any;
+          const d = res.data[0];
           setDeviationId(d.id);
           setDeviationType(d.deviation_type);
           setToolStatus(d.tool_status || "");
@@ -1452,21 +1387,21 @@ const DeviationModal: React.FC<{
       .finally(() => setIsLoadingData(false));
   }, [isOpen, isEditMode, equipment.inward_eqp_id]);
 
-  // NEW: Dynamic update for visibility toggle
   const handleToggleVisibility = async () => {
     const nextVal = !hideCustomerVisibility;
     setHideCustomerVisibility(nextVal);
 
-    if (deviationId) {
+    // Dynamic patch only for OOT (the button is already hidden for NC)
+    if (deviationId && deviationType === "OOT") {
       setIsUpdatingVisibility(true);
       try {
         await api.patch(`/external-deviations/${deviationId}`, {
-          hide_customer_visibility: nextVal
+          hide_customer_visibility: nextVal,
         });
         onSuccess();
       } catch (err) {
         alert("Failed to update visibility dynamically.");
-        setHideCustomerVisibility(!nextVal); // rollback
+        setHideCustomerVisibility(!nextVal);
       } finally {
         setIsUpdatingVisibility(false);
       }
@@ -1506,7 +1441,8 @@ const DeviationModal: React.FC<{
             return acc;
           }, {} as any)
         : {};
-    const payload = {
+
+    const payload: any = {
       inward_eqp_id: equipment.inward_eqp_id,
       deviation_type: deviationType,
       tool_status: toolStatus,
@@ -1514,8 +1450,12 @@ const DeviationModal: React.FC<{
       step_per_deviation: stepPerDevObj,
       engineer_remarks: engineerRemarks,
       customer_decision: customerDecision,
-      hide_customer_visibility: hideCustomerVisibility,
     };
+
+    // ONLY send visibility status for OOT cases
+    if (deviationType === "OOT") {
+      payload.hide_customer_visibility = hideCustomerVisibility;
+    }
 
     try {
       let currentId = deviationId;
@@ -1525,7 +1465,6 @@ const DeviationModal: React.FC<{
         const res = await api.post("/external-deviations/", payload);
         currentId = res.data.id;
       }
-
       const localFiles = attachments.filter((a) => a.isLocal && a.fileObject);
       if (deviationType !== "OOT" && localFiles.length > 0 && currentId) {
         for (const att of localFiles) {
@@ -1603,7 +1542,7 @@ const DeviationModal: React.FC<{
                 }`}
               >
                 {isUpdatingVisibility ? (
-                   <Loader2 size={16} className="animate-spin" />
+                  <Loader2 size={16} className="animate-spin" />
                 ) : hideCustomerVisibility ? (
                   <Eye size={16} />
                 ) : (
@@ -1624,15 +1563,7 @@ const DeviationModal: React.FC<{
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-5 text-gray-800">
-              <div className="p-1.5 bg-blue-600 text-white rounded-lg">
-                <Info size={16} />
-              </div>
-              <h4 className="font-bold text-xs uppercase tracking-widest">
-                Equipment Specification
-              </h4>
-            </div>
+          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-y-6 gap-x-8">
               <div className="col-span-2 md:col-span-3">
                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-tight mb-1">
@@ -1733,11 +1664,9 @@ const DeviationModal: React.FC<{
 
               {deviationType === "OOT" ? (
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                  <div className="flex justify-between items-center mb-3">
-                    <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">
-                      OOT Observations
-                    </label>
-                  </div>
+                  <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-3">
+                    OOT Observations
+                  </label>
                   <div className="space-y-2 mb-3">
                     {steps.map((s, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
@@ -1759,7 +1688,7 @@ const DeviationModal: React.FC<{
                         />
                         <button
                           onClick={() => removeStep(idx)}
-                          className="text-gray-400 hover:text-red-500 transition-colors"
+                          className="text-gray-400 hover:text-red-500"
                         >
                           <MinusCircle size={18} />
                         </button>
@@ -1768,7 +1697,7 @@ const DeviationModal: React.FC<{
                   </div>
                   <button
                     onClick={addStep}
-                    className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700"
+                    className="flex items-center gap-1 text-xs font-bold text-blue-600"
                   >
                     <Plus size={14} /> Add Row
                   </button>
@@ -1795,7 +1724,7 @@ const DeviationModal: React.FC<{
                                 a.file_name
                               )
                             }
-                            className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg"
+                            className="p-2 text-blue-600"
                           >
                             <Eye size={16} />
                           </button>
@@ -1806,7 +1735,7 @@ const DeviationModal: React.FC<{
                                 a.file_name
                               )
                             }
-                            className="p-2 text-green-600 hover:bg-green-100 rounded-lg"
+                            className="p-2 text-green-600"
                           >
                             <Download size={16} />
                           </button>
@@ -1816,7 +1745,7 @@ const DeviationModal: React.FC<{
                                 attachments.filter((at) => at.id !== a.id)
                               )
                             }
-                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                            className="p-2 text-red-500"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -1833,7 +1762,7 @@ const DeviationModal: React.FC<{
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-50 hover:border-blue-300 transition-all"
+                    className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-50"
                   >
                     + Add File
                   </button>
@@ -1876,7 +1805,7 @@ const DeviationModal: React.FC<{
           <button
             onClick={handleSubmit}
             disabled={isSubmitting}
-            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-blue-700 transition-all flex items-center gap-2"
+            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold flex items-center gap-2"
           >
             {isSubmitting ? (
               <Loader2 size={16} className="animate-spin" />
@@ -1935,28 +1864,22 @@ const EquipmentItem: React.FC<{
           `/external-deviations/?inward_eqp_id=${equipment.inward_eqp_id}`
         ),
       ]);
-
       const data = d.data ?? {};
-
       setDocs({
-        // Calibration worksheet
         res: data.calibration_worksheet_file_url
           ? `${baseUrl}${data.calibration_worksheet_file_url}`
           : null,
         resN: data.calibration_worksheet_file_name || null,
         resLocked: data.calibration_worksheet_locked ?? false,
         resUnlockRequest: data.calibration_worksheet_unlock_request ?? null,
-        // Certificate
         cert: data.certificate_file_url
           ? `${baseUrl}${data.certificate_file_url}`
           : null,
         certN: data.certificate_file_name || null,
         certLocked: data.certificate_locked ?? false,
         certUnlockRequest: data.certificate_unlock_request ?? null,
-        // ── Date fields — read directly from the API response ────────
         reportDate: data.report_date ?? null,
         recommendedCalDueDate: data.recommended_cal_due_date ?? null,
-        // Deviation
         dev: (dv.data?.length ?? 0) > 0,
       });
     } finally {
@@ -1975,20 +1898,10 @@ const EquipmentItem: React.FC<{
       );
       await fetchAll();
     } catch (error: any) {
-      console.error("Delete failed:", error);
-      alert(error?.response?.data?.detail || "Failed to delete the document.");
+      alert(error?.response?.data?.detail || "Delete failed.");
     }
   };
 
-  const openUploadModal = (docType: DocType) => {
-    setUploadModal({ isOpen: true, docType });
-  };
-
-  /**
-   * Called by UploadDocumentModal.
-   * Dates are only populated when docType === 'certificate'.
-   * For 'result' uploads, empty strings are sent and the backend ignores them.
-   */
   const handleUpload = async (
     file: File,
     reportDate: string,
@@ -1999,31 +1912,23 @@ const EquipmentItem: React.FC<{
       const fd = new FormData();
       fd.append("file", file);
       fd.append("doc_type", uploadModal.docType);
-
-      // Only append date fields for certificate uploads
       if (uploadModal.docType === "certificate") {
         if (reportDate) fd.append("report_date", reportDate);
         if (recommendedCalDueDate)
           fd.append("recommended_cal_due_date", recommendedCalDueDate);
       }
-
       await api.post(
         `/manual-calibration/equipment/${equipment.inward_eqp_id}/upload`,
         fd
       );
-
       await fetchAll();
       onFeedback({ type: "success", neplId: equipment.nepl_id });
       setTimeout(() => onFeedback(null), 3000);
     } catch (err) {
       onFeedback(null);
-      alert("Upload failed. Please try again.");
+      alert("Upload failed.");
       throw err;
     }
-  };
-
-  const handleValidationError = (result: FileValidationResult) => {
-    onFeedback({ type: "error", neplId: result.neplId, result });
   };
 
   if (loading)
@@ -2041,21 +1946,19 @@ const EquipmentItem: React.FC<{
         equipment={equipment}
         onClose={() => setUploadModal((p) => ({ ...p, isOpen: false }))}
         onUpload={handleUpload}
-        onValidationError={handleValidationError}
+        onValidationError={(r) =>
+          onFeedback({ type: "error", neplId: r.neplId, result: r })
+        }
       />
-
-      <tr className="hover:bg-gray-50 transition-colors border-b border-gray-100">
-        <td className="px-6 py-4">
-          <span className="font-medium text-blue-600 text-sm">
-            {equipment.nepl_id}
-          </span>
+      <tr className="hover:bg-gray-50 transition-colors border-b border-gray-100 text-sm">
+        <td className="px-6 py-4 font-medium text-blue-600">
+          {equipment.nepl_id}
         </td>
-        <td className="px-6 py-4 text-gray-900 text-sm font-medium">
+        <td className="px-6 py-4 text-gray-900 font-medium">
           {equipment.material_description}
         </td>
-        <td className="px-6 py-4">
+        <td className="px-6 py-4 text-gray-900">
           <div className="flex flex-wrap gap-3 items-start">
-            {/* Calibration Worksheet — no date fields */}
             <FileGroup
               label="Calibration Worksheet"
               docType="result"
@@ -2065,24 +1968,21 @@ const EquipmentItem: React.FC<{
               isLocked={docs?.resLocked ?? false}
               unlockRequest={docs?.resUnlockRequest ?? null}
               isAdmin={isAdmin}
-              onPickFile={() => openUploadModal("result")}
+              onPickFile={() => setUploadModal({ isOpen: true, docType: "result" })}
               onDelete={() => handleDeleteDocument("result")}
               onRefresh={fetchAll}
             />
-
             <button
               onClick={() => onOpenDeviation(equipment, docs?.dev ?? false)}
-              className={`h-10 px-3 text-[10px] font-semibold border rounded-lg flex items-center gap-1.5 uppercase transition-all ${
+              className={`h-10 px-3 text-[10px] font-semibold border rounded-lg flex items-center gap-1.5 uppercase ${
                 docs?.dev
                   ? "bg-red-50 text-red-600 border-red-200"
-                  : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                  : "bg-amber-50 text-amber-700 border-amber-200"
               }`}
             >
-              <AlertTriangle size={14} />
+              <AlertTriangle size={14} />{" "}
               {docs?.dev ? "View Deviation" : "Log Deviation"}
             </button>
-
-            {/* Certificate — with date fields passed in */}
             <FileGroup
               label="Certificate"
               docType="certificate"
@@ -2092,9 +1992,11 @@ const EquipmentItem: React.FC<{
               isLocked={docs?.certLocked ?? false}
               unlockRequest={docs?.certUnlockRequest ?? null}
               isAdmin={isAdmin}
-              reportDate={docs?.reportDate ?? null}
-              recommendedCalDueDate={docs?.recommendedCalDueDate ?? null}
-              onPickFile={() => openUploadModal("certificate")}
+              reportDate={docs?.reportDate}
+              recommendedCalDueDate={docs?.recommendedCalDueDate}
+              onPickFile={() =>
+                setUploadModal({ isOpen: true, docType: "certificate" })
+              }
               onDelete={() => handleDeleteDocument("certificate")}
               onRefresh={fetchAll}
             />
@@ -2106,7 +2008,7 @@ const EquipmentItem: React.FC<{
 };
 
 // ─────────────────────────────────────────────
-// EQUIPMENT DETAIL LIST
+// LIST COMPONENTS
 // ─────────────────────────────────────────────
 
 const EquipmentDetailList: React.FC<{
@@ -2142,12 +2044,11 @@ const EquipmentDetailList: React.FC<{
         </div>
         <button
           onClick={onBack}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm"
         >
           <ArrowLeft size={16} /> Back
         </button>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-gray-200 flex items-start gap-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
@@ -2187,7 +2088,6 @@ const EquipmentDetailList: React.FC<{
           </div>
         </div>
       </div>
-
       {feedback?.type === "uploading" && (
         <UploadingIndicator neplId={feedback.neplId} />
       )}
@@ -2200,7 +2100,6 @@ const EquipmentDetailList: React.FC<{
           onDismiss={() => setFeedback(null)}
         />
       )}
-
       <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
         <table className="w-full text-left">
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase border-b border-gray-200">
@@ -2222,16 +2121,13 @@ const EquipmentDetailList: React.FC<{
                 }
                 onFeedback={(fb) => {
                   setFeedback(fb);
-                  if (fb?.type === "success") {
-                    setRefreshTrigger((p) => p + 1);
-                  }
+                  if (fb?.type === "success") setRefreshTrigger((p) => p + 1);
                 }}
               />
             ))}
           </tbody>
         </table>
       </div>
-
       {modalConfig.isOpen && modalConfig.eqp && (
         <DeviationModal
           isOpen={modalConfig.isOpen}
@@ -2244,10 +2140,6 @@ const EquipmentDetailList: React.FC<{
     </div>
   );
 };
-
-// ─────────────────────────────────────────────
-// MAIN PAGE
-// ─────────────────────────────────────────────
 
 const ManualCalibrationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -2264,7 +2156,6 @@ const ManualCalibrationPage: React.FC = () => {
       .then((r) => setGroups(r.data))
       .finally(() => setLoading(false));
   }, []);
-
   const filtered = groups.filter(
     (g) =>
       g.srf_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -2297,7 +2188,6 @@ const ManualCalibrationPage: React.FC = () => {
             </button>
           </div>
         )}
-
         {loading ? (
           <div className="space-y-4">
             {[1, 2].map((i) => (
@@ -2347,7 +2237,7 @@ const ManualCalibrationPage: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-all transform group-hover:translate-x-1" />
+                  <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transform group-hover:translate-x-1" />
                 </div>
               ))}
             </div>

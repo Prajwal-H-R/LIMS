@@ -2,10 +2,19 @@ import React, { useState, ChangeEvent, FormEvent } from "react";
 import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { User, UserRole } from "../types";
-import { Mail, Lock, ArrowRight, HelpCircle, Loader2, Eye, EyeOff } from "lucide-react"; // Added Eye, EyeOff
+import {
+  Mail,
+  Lock,
+  ArrowRight,
+  HelpCircle,
+  Loader2,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { api, ENDPOINTS } from "../api/config";
 import { useLicense } from "../hooks/useLicense";
 import LicenseModal from "../components/LicenseModal";
+import ShinyText from "../components/ShinyText";
 
 interface LoginResponse {
   user_id: number;
@@ -26,12 +35,18 @@ const Login: React.FC = () => {
   const location = useLocation();
   const { login, user, bootstrapped } = useAuth();
   const { license, loading: licenseLoading, refresh } = useLicense();
-  const [form, setForm] = useState({ email: "", password: "" });
+
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+  });
+
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
-  const [showPassword, setShowPassword] = useState<boolean>(false); // Added state for password visibility
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showLicenseModal, setShowLicenseModal] = useState(true);
+
   const licenseExpired = license?.status === "EXPIRED";
 
   if (!bootstrapped || licenseLoading) {
@@ -43,16 +58,22 @@ const Login: React.FC = () => {
   }
 
   if (user) {
-    const path = {
-      admin: '/admin',
-      engineer: '/engineer',
-      customer: '/customer',
-    }[user.role] || '/';
+    const path =
+      {
+        admin: "/admin",
+        engineer: "/engineer",
+        customer: "/customer",
+      }[user.role] || "/";
+
     return <Navigate to={path} replace />;
   }
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    setForm({
+      ...form,
+      [e.target.name]: e.target.value,
+    });
+
     setError("");
     setSuccess("");
   };
@@ -60,7 +81,7 @@ const Login: React.FC = () => {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
-    // 🔒 HARD BLOCK only if license expired
+    // HARD BLOCK if license expired
     if (licenseExpired) {
       setError(
         "License expired. Contact AIMLSN YatharthataLIMS System Administrator."
@@ -74,12 +95,18 @@ const Login: React.FC = () => {
 
     try {
       const formData = new URLSearchParams();
-      formData.append('username', form.email);
-      formData.append('password', form.password);
+      formData.append("username", form.email);
+      formData.append("password", form.password);
 
-      const response = await api.post<LoginResponse>(ENDPOINTS.AUTH.LOGIN, formData, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
+      const response = await api.post<LoginResponse>(
+        ENDPOINTS.AUTH.LOGIN,
+        formData,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+        }
+      );
 
       const loginData = response.data;
 
@@ -99,23 +126,27 @@ const Login: React.FC = () => {
       login(userInfo);
 
       const params = new URLSearchParams(location.search);
-      const redirectPath = params.get('redirect');
+      const redirectPath = params.get("redirect");
 
       setTimeout(() => {
         if (redirectPath) {
           navigate(redirectPath, { replace: true });
         } else {
-          const defaultPath = {
-            admin: '/admin',
-            engineer: '/engineer',
-            customer: '/customer',
-          }[userInfo.role] || '/';
+          const defaultPath =
+            {
+              admin: "/admin",
+              engineer: "/engineer",
+              customer: "/customer",
+            }[userInfo.role] || "/";
+
           navigate(defaultPath, { replace: true });
         }
       }, 500);
-
     } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || "Login failed. Please check your credentials.";
+      const errorMessage =
+        err.response?.data?.detail ||
+        "Login failed. Please check your credentials.";
+
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -123,34 +154,65 @@ const Login: React.FC = () => {
   };
 
   return (
-       <>
-      {license && license.status !== "ACTIVE" && showLicenseModal && (
-        <LicenseModal
-          status={license.status}
-          validUntil={license.valid_until}
-          onExtended={async (newDate) => {
-            await refresh();
-            setSuccess(`License extended successfully till ${newDate}`);
-            setShowLicenseModal(false); // ✅ CLOSE MODAL
-          }}
-          onClose={() => setShowLicenseModal(false)} // ✅ OK BUTTON WORKS
-        />
-      )}
+    <>
+      {license &&
+        license.status !== "ACTIVE" &&
+        showLicenseModal && (
+          <LicenseModal
+            status={license.status}
+            validUntil={license.valid_until}
+            onExtended={async (newDate) => {
+              await refresh();
+              setSuccess(
+                `License extended successfully till ${newDate}`
+              );
+              setShowLicenseModal(false);
+            }}
+            onClose={() => setShowLicenseModal(false)}
+          />
+        )}
+
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-4">
         <div className="max-w-md w-full space-y-8">
+
+          {/* Shiny Text Above Login Card */}
+ <div className="text-center">
+  <div className="bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+    <ShinyText
+      text="Yatharthata LIMS"
+      speed={3}
+      shineColor="#ffffff"
+      color="transparent"
+      spread={130}
+      direction="left"
+      pauseOnHover={false}
+      yoyo={true}
+    />
+  </div>
+</div>
+
+          {/* Login Card */}
           <div className="bg-white py-8 px-6 shadow-xl rounded-2xl sm:px-10">
             <div className="text-center mb-8">
               <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
                 Welcome Back
               </h2>
-              <p className="mt-2 text-gray-600">Sign in to your account</p>
+
+              <p className="mt-2 text-gray-600">
+                Sign in to your account
+              </p>
             </div>
 
-            <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+            <form
+              className="mt-8 space-y-6"
+              onSubmit={handleSubmit}
+            >
+              {/* Email */}
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
                   <Mail className="h-5 w-5" />
                 </span>
+
                 <input
                   id="email"
                   name="email"
@@ -164,14 +226,16 @@ const Login: React.FC = () => {
                 />
               </div>
 
+              {/* Password */}
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
                   <Lock className="h-5 w-5" />
                 </span>
+
                 <input
                   id="password"
                   name="password"
-                  type={showPassword ? "text" : "password"} // Updated to use showPassword state
+                  type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   required
                   value={form.password}
@@ -179,19 +243,29 @@ const Login: React.FC = () => {
                   placeholder="Password"
                   className="appearance-none block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200"
                 />
+
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() =>
+                    setShowPassword(!showPassword)
+                  }
                   className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
                 >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  {showPassword ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
                 </button>
               </div>
 
+              {/* Forgot Password */}
               <div className="text-right">
                 <button
                   type="button"
-                  onClick={() => navigate("/forgot-password")}
+                  onClick={() =>
+                    navigate("/forgot-password")
+                  }
                   className="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-500 transition-colors font-medium"
                 >
                   <HelpCircle className="w-4 h-4 mr-1" />
@@ -199,20 +273,33 @@ const Login: React.FC = () => {
                 </button>
               </div>
 
+              {/* Error */}
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
-                  <p className="text-red-800 text-sm">{error}</p>
-                </div>
-              )}
-              {success && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
-                  <p className="text-green-800 text-sm">{success}</p>
+                  <p className="text-red-800 text-sm">
+                    {error}
+                  </p>
                 </div>
               )}
 
+              {/* Success */}
+              {success && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                  <p className="text-green-800 text-sm">
+                    {success}
+                  </p>
+                </div>
+              )}
+
+              {/* Submit Button */}
               <button
                 type="submit"
-                disabled={loading || !form.email || !form.password || licenseExpired}
+                disabled={
+                  loading ||
+                  !form.email ||
+                  !form.password ||
+                  licenseExpired
+                }
                 className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-semibold rounded-lg text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
@@ -227,23 +314,9 @@ const Login: React.FC = () => {
                 )}
               </button>
             </form>
-
-            {/* Commented out signup section since it's not in your routes yet */}
-            {/* <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600">
-              Don't have an account?{" "}
-              <button
-                type="button"
-                onClick={() => navigate('/signup')}
-                className="font-medium text-indigo-600 hover:text-indigo-500 transition-colors"
-              >
-                Sign up here
-              </button>
-            </p>
-          </div> */}
           </div>
         </div>
-            </div>
+      </div>
     </>
   );
 };
