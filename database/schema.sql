@@ -1,6 +1,5 @@
--- Consolidated schema: CREATE TABLE statements include foreign keys and key indexes.
--- Reordered so referenced tables are created before referencing tables.
-
+-- This script has been corrected and consolidated into a single file with all CREATE statements.
+-- The duplicate 'htw_certificate' table has been removed and foreign keys have been updated.
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.alembic_version
@@ -24,7 +23,6 @@ CREATE TABLE IF NOT EXISTS public.customers
     CONSTRAINT customers_pkey PRIMARY KEY (customer_id)
 );
 
--- Users needs to be created early because many tables reference it
 CREATE TABLE IF NOT EXISTS public.users
 (
     user_id serial NOT NULL,
@@ -70,14 +68,14 @@ CREATE TABLE IF NOT EXISTS public.inward
         REFERENCES public.users (user_id) MATCH SIMPLE
         ON UPDATE NO ACTION
         ON DELETE NO ACTION,
-    CONSTRAINT inward_updated_by_fkey FOREIGN KEY (updated_by)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION,
     CONSTRAINT inward_customer_id_fkey FOREIGN KEY (customer_id)
         REFERENCES public.customers (customer_id) MATCH SIMPLE
         ON UPDATE NO ACTION
-        ON DELETE SET NULL
+        ON DELETE SET NULL,
+    CONSTRAINT inward_updated_by_fkey FOREIGN KEY (updated_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
 );
 
 CREATE TABLE IF NOT EXISTS public.inward_equipments
@@ -148,7 +146,6 @@ CREATE TABLE IF NOT EXISTS public.srfs
         ON DELETE CASCADE
 );
 
--- create the srf_equipments after inward_equipments and srfs
 CREATE TABLE IF NOT EXISTS public.srf_equipments
 (
     srf_eqp_id serial NOT NULL,
@@ -168,30 +165,6 @@ CREATE TABLE IF NOT EXISTS public.srf_equipments
         ON DELETE CASCADE,
     CONSTRAINT srf_equipments_srf_id_fkey FOREIGN KEY (srf_id)
         REFERENCES public.srfs (srf_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS public.delayed_email_tasks
-(
-    id serial NOT NULL,
-    inward_id integer NOT NULL,
-    recipient_email character varying(320) COLLATE pg_catalog."default",
-    email_type character varying(50) COLLATE pg_catalog."default",
-    scheduled_at timestamp with time zone NOT NULL,
-    is_sent boolean,
-    is_cancelled boolean,
-    reminder_sent boolean,
-    created_by integer NOT NULL,
-    created_at timestamp with time zone DEFAULT now(),
-    sent_at timestamp with time zone,
-    CONSTRAINT delayed_email_tasks_pkey PRIMARY KEY (id),
-    CONSTRAINT delayed_email_tasks_created_by_fkey FOREIGN KEY (created_by)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION,
-    CONSTRAINT delayed_email_tasks_inward_id_fkey FOREIGN KEY (inward_id)
-        REFERENCES public.inward (inward_id) MATCH SIMPLE
         ON UPDATE NO ACTION
         ON DELETE CASCADE
 );
@@ -225,12 +198,12 @@ CREATE TABLE IF NOT EXISTS public.htw_job
     created_at timestamp with time zone DEFAULT now(),
     CONSTRAINT htw_job_pkey PRIMARY KEY (job_id),
     CONSTRAINT htw_job_inward_eqp_id_key UNIQUE (inward_eqp_id),
-    CONSTRAINT htw_job_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
-        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION,
     CONSTRAINT htw_job_inward_id_fkey FOREIGN KEY (inward_id)
         REFERENCES public.inward (inward_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT htw_job_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
         ON UPDATE NO ACTION
         ON DELETE NO ACTION,
     CONSTRAINT htw_job_pressure_gauge_ref_id_fkey FOREIGN KEY (pressure_gauge_ref_id)
@@ -247,9 +220,267 @@ CREATE TABLE IF NOT EXISTS public.htw_job
         ON DELETE NO ACTION
 );
 
--- Indexes for htw_job unique keys (unique creates index automatically, but keep explicit indexes for parity with original script using different names)
-CREATE INDEX IF NOT EXISTS ix_htw_job_inward_eqp_id ON public.htw_job(inward_eqp_id);
-CREATE INDEX IF NOT EXISTS ix_htw_job_inward_id ON public.htw_job(inward_id);
+CREATE TABLE IF NOT EXISTS public.certificate
+(
+    certificate_id serial NOT NULL,
+    job_id integer NOT NULL,
+    inward_id integer,
+    inward_eqp_id integer,
+    certificate_no character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    date_of_calibration date NOT NULL,
+    ulr_no character varying(255) COLLATE pg_catalog."default",
+    field_of_parameter character varying(255) COLLATE pg_catalog."default",
+    recommended_cal_due_date date,
+    item_status character varying(255) COLLATE pg_catalog."default" DEFAULT 'Satisfactory'::character varying,
+    authorised_signatory character varying(255) COLLATE pg_catalog."default",
+    status character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'DRAFT'::character varying,
+    admin_rework_comment text COLLATE pg_catalog."default",
+    created_by integer,
+    created_at timestamp with time zone DEFAULT now(),
+    approved_by integer,
+    approved_at timestamp with time zone,
+    issued_at timestamp with time zone,
+    permissible_deviation_iso_6789 jsonb,
+    iso_6789_results jsonb,
+    qr_token character varying(128) COLLATE pg_catalog."default",
+    qr_image_base64 text COLLATE pg_catalog."default",
+    qr_generated_at timestamp with time zone,
+    CONSTRAINT htw_certificate_pkey PRIMARY KEY (certificate_id),
+    CONSTRAINT htw_certificate_approved_by_fkey FOREIGN KEY (approved_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT htw_certificate_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT htw_certificate_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT htw_certificate_inward_id_fkey FOREIGN KEY (inward_id)
+        REFERENCES public.inward (inward_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT htw_certificate_job_id_fkey FOREIGN KEY (job_id)
+        REFERENCES public.htw_job (job_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.delayed_email_tasks
+(
+    id serial NOT NULL,
+    inward_id integer NOT NULL,
+    recipient_email character varying(320) COLLATE pg_catalog."default",
+    email_type character varying(50) COLLATE pg_catalog."default",
+    scheduled_at timestamp with time zone NOT NULL,
+    is_sent boolean,
+    is_cancelled boolean,
+    reminder_sent boolean,
+    created_by integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now(),
+    sent_at timestamp with time zone,
+    CONSTRAINT delayed_email_tasks_pkey PRIMARY KEY (id),
+    CONSTRAINT delayed_email_tasks_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT delayed_email_tasks_inward_id_fkey FOREIGN KEY (inward_id)
+        REFERENCES public.inward (inward_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.deviation
+(
+    id serial NOT NULL,
+    inward_eqp_id integer NOT NULL,
+    certificate_id integer,
+    created_by integer,
+    status character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'OPEN'::character varying,
+    engineer_remarks text COLLATE pg_catalog."default",
+    customer_decision text COLLATE pg_catalog."default",
+    report date,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    calibration_status character varying COLLATE pg_catalog."default",
+    job_id integer,
+    hide_customer_visibility boolean DEFAULT false,
+    CONSTRAINT deviation_pkey PRIMARY KEY (id),
+    CONSTRAINT deviation_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT deviation_inward_eqp_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT deviation_job_fkey FOREIGN KEY (job_id)
+        REFERENCES public.htw_job (job_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT deviation_certificate_fkey FOREIGN KEY (certificate_id)
+        REFERENCES public.certificate (certificate_id) MATCH SIMPLE -- Corrected Reference
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.deviation_attachments
+(
+    id serial NOT NULL,
+    deviation_id integer NOT NULL,
+    file_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    file_type character varying(50) COLLATE pg_catalog."default",
+    file_url text COLLATE pg_catalog."default" NOT NULL,
+    uploaded_by integer,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT deviation_attachments_pkey PRIMARY KEY (id),
+    CONSTRAINT deviation_attachment_fkey FOREIGN KEY (deviation_id)
+        REFERENCES public.deviation (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT deviation_attachment_uploaded_by_fkey FOREIGN KEY (uploaded_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.equipment_flow_config
+(
+    id serial NOT NULL,
+    equipment_type character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    is_active boolean NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT equipment_flow_config_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.external_deviation
+(
+    id serial NOT NULL,
+    inward_eqp_id integer NOT NULL,
+    deviation_type character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    tool_status character varying(50) COLLATE pg_catalog."default",
+    step_per_deviation jsonb NOT NULL,
+    created_by integer,
+    engineer_remarks text COLLATE pg_catalog."default",
+    customer_decision text COLLATE pg_catalog."default",
+    report date,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    hide_customer_visibility boolean NOT NULL DEFAULT false,
+    CONSTRAINT external_deviation_pkey PRIMARY KEY (id),
+    CONSTRAINT external_deviation_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT external_deviation_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.external_deviation_attachments
+(
+    id serial NOT NULL,
+    external_deviation_id integer NOT NULL,
+    file_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    file_type character varying(255) COLLATE pg_catalog."default",
+    file_url text COLLATE pg_catalog."default" NOT NULL,
+    uploaded_by integer,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT external_deviation_attachments_pkey PRIMARY KEY (id),
+    CONSTRAINT external_deviation_attachments_external_deviation_id_fkey FOREIGN KEY (external_deviation_id)
+        REFERENCES public.external_deviation (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT external_deviation_attachments_uploaded_by_fkey FOREIGN KEY (uploaded_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.external_uploads
+(
+    id serial NOT NULL,
+    inward_eqp_id integer NOT NULL,
+    calibration_worksheet_file_name character varying(255) COLLATE pg_catalog."default",
+    calibration_worksheet_file_type character varying(255) COLLATE pg_catalog."default",
+    calibration_worksheet_file_url text COLLATE pg_catalog."default",
+    certificate_file_name character varying(255) COLLATE pg_catalog."default",
+    certificate_file_type character varying(255) COLLATE pg_catalog."default",
+    certificate_file_url text COLLATE pg_catalog."default",
+    created_by integer,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    calibration_worksheet_locked boolean DEFAULT false,
+    certificate_locked boolean DEFAULT false,
+    certificate_unlock_request jsonb,
+    calibration_worksheet_unlock_request jsonb,
+    report_date date,
+    recommended_cal_due_date date,
+    CONSTRAINT external_uploads_pkey PRIMARY KEY (id),
+    CONSTRAINT external_uploads_inward_eqp_id_key UNIQUE (inward_eqp_id),
+    CONSTRAINT external_uploads_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT external_uploads_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.final_inspections
+(
+    id serial NOT NULL,
+    inward_id integer NOT NULL,
+    customer_id integer NOT NULL,
+    srf_no character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    customer_dc_no character varying(255) COLLATE pg_catalog."default",
+    receiver character varying(255) COLLATE pg_catalog."default",
+    customer_name text COLLATE pg_catalog."default" NOT NULL,
+    customer_email character varying(320) COLLATE pg_catalog."default",
+    equipments jsonb NOT NULL,
+    sent_emails jsonb NOT NULL,
+    report_sent boolean NOT NULL,
+    report_sent_at timestamp with time zone,
+    status character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    is_active boolean NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone,
+    customer_decision text COLLATE pg_catalog."default",
+    customer_remarks text COLLATE pg_catalog."default",
+    CONSTRAINT final_inspections_pkey PRIMARY KEY (id),
+    CONSTRAINT final_inspections_inward_id_key UNIQUE (inward_id),
+    CONSTRAINT final_inspections_customer_id_fkey FOREIGN KEY (customer_id)
+        REFERENCES public.customers (customer_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_cmc_reference
+(
+    id serial NOT NULL,
+    lower_measure_range numeric(14, 4) NOT NULL,
+    higher_measure_range numeric(14, 4) NOT NULL,
+    cmc_percent numeric(8, 4) NOT NULL,
+    is_active boolean,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_cmc_reference_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_const_coverage_factor
+(
+    id serial NOT NULL,
+    k numeric(6, 4) NOT NULL,
+    is_active boolean,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_const_coverage_factor_pkey PRIMARY KEY (id)
+);
 
 CREATE TABLE IF NOT EXISTS public.htw_drive_interface_variation
 (
@@ -283,6 +514,62 @@ CREATE TABLE IF NOT EXISTS public.htw_drive_interface_variation_reading
         ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS public.htw_environment_config
+(
+    id serial NOT NULL,
+    temp_min numeric(5, 2) NOT NULL,
+    temp_max numeric(5, 2) NOT NULL,
+    humidity_min numeric(5, 2) NOT NULL,
+    humidity_max numeric(5, 2) NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT htw_environment_config_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_job_environment
+(
+    id serial NOT NULL,
+    job_id integer NOT NULL,
+    environment_config_id integer,
+    condition_stage character varying(10) COLLATE pg_catalog."default" NOT NULL,
+    ambient_temperature numeric(5, 2) NOT NULL,
+    temperature_unit character varying(10) COLLATE pg_catalog."default",
+    relative_humidity numeric(5, 2) NOT NULL,
+    humidity_unit character varying(10) COLLATE pg_catalog."default",
+    recorded_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT htw_job_environment_pkey PRIMARY KEY (id),
+    CONSTRAINT unique_job_condition_stage UNIQUE (job_id, condition_stage),
+    CONSTRAINT htw_job_environment_environment_config_id_fkey FOREIGN KEY (environment_config_id)
+        REFERENCES public.htw_environment_config (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL,
+    CONSTRAINT htw_job_environment_job_id_fkey FOREIGN KEY (job_id)
+        REFERENCES public.htw_job (job_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_job_standard_snapshot
+(
+    id serial NOT NULL,
+    job_id integer NOT NULL,
+    master_standard_id integer NOT NULL,
+    standard_order integer NOT NULL,
+    nomenclature character varying COLLATE pg_catalog."default" NOT NULL,
+    manufacturer character varying COLLATE pg_catalog."default",
+    model_serial_no character varying COLLATE pg_catalog."default",
+    certificate_no character varying COLLATE pg_catalog."default",
+    traceable_to_lab character varying COLLATE pg_catalog."default",
+    calibration_valid_upto date,
+    uncertainty numeric(18, 8),
+    uncertainty_unit character varying COLLATE pg_catalog."default",
+    resolution numeric(14, 4),
+    resolution_unit character varying COLLATE pg_catalog."default",
+    accuracy_of_master numeric(14, 4),
+    captured_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT htw_job_standard_snapshot_pkey PRIMARY KEY (id)
+);
+
 CREATE TABLE IF NOT EXISTS public.htw_loading_point_variation
 (
     id serial NOT NULL,
@@ -313,6 +600,86 @@ CREATE TABLE IF NOT EXISTS public.htw_loading_point_variation_reading
         REFERENCES public.htw_loading_point_variation (id) MATCH SIMPLE
         ON UPDATE NO ACTION
         ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_manufacturer_spec
+(
+    id serial NOT NULL,
+    make character varying(255) COLLATE pg_catalog."default",
+    model character varying(255) COLLATE pg_catalog."default",
+    range_min numeric,
+    range_max numeric,
+    torque_20 numeric,
+    torque_40 numeric,
+    torque_60 numeric,
+    torque_80 numeric,
+    torque_100 numeric,
+    torque_unit character varying(50) COLLATE pg_catalog."default",
+    pressure_20 numeric,
+    pressure_40 numeric,
+    pressure_60 numeric,
+    pressure_80 numeric,
+    pressure_100 numeric,
+    pressure_unit character varying(50) COLLATE pg_catalog."default",
+    is_active boolean,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_manufacturer_spec_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_master_standard
+(
+    id serial NOT NULL,
+    nomenclature character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    range_min numeric,
+    range_max numeric,
+    range_unit character varying(50) COLLATE pg_catalog."default",
+    manufacturer character varying(255) COLLATE pg_catalog."default",
+    model_serial_no character varying(255) COLLATE pg_catalog."default",
+    traceable_to_lab character varying(255) COLLATE pg_catalog."default",
+    uncertainty numeric,
+    uncertainty_unit character varying(50) COLLATE pg_catalog."default",
+    certificate_no character varying(255) COLLATE pg_catalog."default",
+    calibration_valid_upto date,
+    accuracy_of_master character varying(255) COLLATE pg_catalog."default",
+    resolution numeric,
+    resolution_unit character varying(50) COLLATE pg_catalog."default",
+    is_active boolean,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_master_standard_pkey PRIMARY KEY (id),
+    CONSTRAINT htw_master_standard_nomenclature_key UNIQUE (nomenclature)
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_nomenclature_range
+(
+    id serial NOT NULL,
+    master_standard_id integer NOT NULL,
+    range_min numeric(14, 4) NOT NULL,
+    range_max numeric(14, 4) NOT NULL,
+    nomenclature character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    is_active boolean,
+    valid_upto date,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_nomenclature_range_pkey PRIMARY KEY (id),
+    CONSTRAINT htw_nomenclature_range_nomenclature_key UNIQUE (nomenclature),
+    CONSTRAINT htw_nomenclature_range_master_standard_id_fkey FOREIGN KEY (master_standard_id)
+        REFERENCES public.htw_master_standard (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_max_val_measure_err
+(
+    id serial NOT NULL,
+    range_min numeric(14, 4) NOT NULL,
+    range_max numeric(14, 4) NOT NULL,
+    un_percent numeric(8, 4) NOT NULL,
+    is_active boolean,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_max_val_measure_err_pkey PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS public.htw_output_drive_variation
@@ -382,58 +749,6 @@ CREATE TABLE IF NOT EXISTS public.htw_repeatability_reading
         ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS public.deviation
-(
-    id serial NOT NULL,
-    inward_eqp_id integer NOT NULL,
-    certificate_id integer,
-    repeatability_id integer,
-    created_by integer,
-    status character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'OPEN'::character varying,
-    engineer_remarks text COLLATE pg_catalog."default",
-    customer_decision text COLLATE pg_catalog."default",
-    report date,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    updated_at timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT deviation_pkey PRIMARY KEY (id),
-    CONSTRAINT deviation_inward_eqp_fkey FOREIGN KEY (inward_eqp_id)
-        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE,
-    CONSTRAINT deviation_certificate_fkey FOREIGN KEY (certificate_id)
-        REFERENCES public.htw_certificate (certificate_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE SET NULL,
-    CONSTRAINT deviation_repeatability_fkey FOREIGN KEY (repeatability_id)
-        REFERENCES public.htw_repeatability (id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE SET NULL,
-    CONSTRAINT deviation_created_by_fkey FOREIGN KEY (created_by)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE SET NULL
-);
-
-CREATE TABLE IF NOT EXISTS public.deviation_attachments
-(
-    id serial NOT NULL,
-    deviation_id integer NOT NULL,
-    file_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
-    file_type character varying(50) COLLATE pg_catalog."default",
-    file_url text COLLATE pg_catalog."default" NOT NULL,
-    uploaded_by integer,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT deviation_attachments_pkey PRIMARY KEY (id),
-    CONSTRAINT deviation_attachment_fkey FOREIGN KEY (deviation_id)
-        REFERENCES public.deviation (id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE,
-    CONSTRAINT deviation_attachment_uploaded_by_fkey FOREIGN KEY (uploaded_by)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE SET NULL
-);
-
 CREATE TABLE IF NOT EXISTS public.htw_reproducibility
 (
     id serial NOT NULL,
@@ -464,47 +779,61 @@ CREATE TABLE IF NOT EXISTS public.htw_reproducibility_reading
         ON DELETE NO ACTION
 );
 
-CREATE TABLE IF NOT EXISTS public.htw_master_standard
+CREATE TABLE IF NOT EXISTS public.htw_standard_uncertainty_reference
 (
     id serial NOT NULL,
-    nomenclature character varying(255) COLLATE pg_catalog."default" NOT NULL,
-    range_min numeric,
-    range_max numeric,
-    range_unit character varying(50) COLLATE pg_catalog."default",
-    manufacturer character varying(255) COLLATE pg_catalog."default",
-    model_serial_no character varying(255) COLLATE pg_catalog."default",
-    traceable_to_lab character varying(255) COLLATE pg_catalog."default",
-    uncertainty numeric,
-    uncertainty_unit character varying(50) COLLATE pg_catalog."default",
-    certificate_no character varying(255) COLLATE pg_catalog."default",
-    calibration_valid_upto date,
-    accuracy_of_master character varying(255) COLLATE pg_catalog."default",
-    resolution numeric,
-    resolution_unit character varying(50) COLLATE pg_catalog."default",
+    valid_from date NOT NULL,
+    valid_upto date NOT NULL,
+    torque_nm integer NOT NULL,
+    applied_torque numeric(14, 4) NOT NULL,
+    indicated_torque numeric(14, 4) NOT NULL,
+    error_value numeric(18, 8) NOT NULL,
+    uncertainty_percent numeric(8, 4) NOT NULL,
     is_active boolean,
-    created_at timestamp with time zone DEFAULT now(),
+    created_at timestamp with time zone,
     updated_at timestamp with time zone,
-    CONSTRAINT htw_master_standard_pkey PRIMARY KEY (id),
-    CONSTRAINT htw_master_standard_nomenclature_key UNIQUE (nomenclature)
+    CONSTRAINT htw_standard_uncertainty_reference_pkey PRIMARY KEY (id)
 );
 
-CREATE TABLE IF NOT EXISTS public.htw_nomenclature_range
+CREATE TABLE IF NOT EXISTS public.htw_t_distribution
 (
     id serial NOT NULL,
-    master_standard_id integer NOT NULL,
-    range_min numeric(14, 4) NOT NULL,
-    range_max numeric(14, 4) NOT NULL,
-    nomenclature character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    degrees_of_freedom integer NOT NULL,
+    confidence_level numeric(6, 3) NOT NULL,
+    alpha numeric(8, 5) NOT NULL,
+    t_value numeric(10, 4) NOT NULL,
     is_active boolean,
-    valid_upto date,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone,
-    CONSTRAINT htw_nomenclature_range_pkey PRIMARY KEY (id),
-    CONSTRAINT htw_nomenclature_range_nomenclature_key UNIQUE (nomenclature),
-    CONSTRAINT htw_nomenclature_range_master_standard_id_fkey FOREIGN KEY (master_standard_id)
-        REFERENCES public.htw_master_standard (id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE RESTRICT
+    CONSTRAINT htw_t_distribution_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_t_dist_df_confidence UNIQUE (degrees_of_freedom, confidence_level)
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_tool_type
+(
+    id serial NOT NULL,
+    tool_name character varying COLLATE pg_catalog."default" NOT NULL,
+    tool_category character varying COLLATE pg_catalog."default" NOT NULL,
+    operation_type character varying COLLATE pg_catalog."default" NOT NULL,
+    classification character varying COLLATE pg_catalog."default",
+    is_active boolean,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_tool_type_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.htw_un_pg_master
+(
+    id serial NOT NULL,
+    set_pressure_min numeric(14, 4) NOT NULL,
+    set_pressure_max numeric(14, 4) NOT NULL,
+    uncertainty_percent numeric(8, 4) NOT NULL,
+    valid_upto date NOT NULL,
+    is_active boolean,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone,
+    CONSTRAINT htw_un_pg_master_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_un_pg_pressure_range UNIQUE (set_pressure_min, set_pressure_max)
 );
 
 CREATE TABLE IF NOT EXISTS public.htw_un_resolution
@@ -558,240 +887,6 @@ CREATE TABLE IF NOT EXISTS public.htw_uncertainty_budget
         ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS public.htw_tool_type
-(
-    id serial NOT NULL,
-    tool_name character varying COLLATE pg_catalog."default" NOT NULL,
-    tool_category character varying COLLATE pg_catalog."default" NOT NULL,
-    operation_type character varying COLLATE pg_catalog."default" NOT NULL,
-    classification character varying COLLATE pg_catalog."default",
-    is_active boolean,
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_tool_type_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_cmc_reference
-(
-    id serial NOT NULL,
-    lower_measure_range numeric(14, 4) NOT NULL,
-    higher_measure_range numeric(14, 4) NOT NULL,
-    cmc_percent numeric(8, 4) NOT NULL,
-    is_active boolean,
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_cmc_reference_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_const_coverage_factor
-(
-    id serial NOT NULL,
-    k numeric(6, 4) NOT NULL,
-    is_active boolean,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_const_coverage_factor_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_manufacturer_spec
-(
-    id serial NOT NULL,
-    make character varying(255) COLLATE pg_catalog."default",
-    model character varying(255) COLLATE pg_catalog."default",
-    range_min numeric,
-    range_max numeric,
-    torque_20 numeric,
-    torque_40 numeric,
-    torque_60 numeric,
-    torque_80 numeric,
-    torque_100 numeric,
-    torque_unit character varying(50) COLLATE pg_catalog."default",
-    pressure_20 numeric,
-    pressure_40 numeric,
-    pressure_60 numeric,
-    pressure_80 numeric,
-    pressure_100 numeric,
-    pressure_unit character varying(50) COLLATE pg_catalog."default",
-    is_active boolean,
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_manufacturer_spec_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_job_environment
-(
-    id serial NOT NULL,
-    job_id integer NOT NULL,
-    condition_stage character varying(10) COLLATE pg_catalog."default" NOT NULL,
-    ambient_temperature numeric(5, 2) NOT NULL,
-    temperature_unit character varying(10) COLLATE pg_catalog."default",
-    relative_humidity numeric(5, 2) NOT NULL,
-    humidity_unit character varying(10) COLLATE pg_catalog."default",
-    recorded_at timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT htw_job_environment_pkey PRIMARY KEY (id),
-    CONSTRAINT unique_job_condition_stage UNIQUE (job_id, condition_stage),
-    CONSTRAINT htw_job_environment_job_id_fkey FOREIGN KEY (job_id)
-        REFERENCES public.htw_job (job_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS ix_htw_job_environment_job_id
-    ON public.htw_job_environment(job_id);
-
-CREATE TABLE IF NOT EXISTS public.htw_certificate
-(
-    certificate_id serial NOT NULL,
-    job_id integer NOT NULL,
-    inward_id integer,
-    inward_eqp_id integer,
-    certificate_no character varying(255) COLLATE pg_catalog."default" NOT NULL,
-    date_of_calibration date NOT NULL,
-    ulr_no character varying(255) COLLATE pg_catalog."default",
-    field_of_parameter character varying(255) COLLATE pg_catalog."default",
-    recommended_cal_due_date date,
-    authorised_signatory character varying(255) COLLATE pg_catalog."default",
-    status character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'DRAFT'::character varying,
-    created_by integer,
-    created_at timestamp with time zone DEFAULT now(),
-    approved_by integer,
-    approved_at timestamp with time zone,
-    issued_at timestamp with time zone,
-    CONSTRAINT htw_certificate_pkey PRIMARY KEY (certificate_id),
-    CONSTRAINT htw_certificate_job_id_fkey FOREIGN KEY (job_id)
-        REFERENCES public.htw_job (job_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE,
-    CONSTRAINT htw_certificate_inward_id_fkey FOREIGN KEY (inward_id)
-        REFERENCES public.inward (inward_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE,
-    CONSTRAINT htw_certificate_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
-        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE,
-    CONSTRAINT htw_certificate_created_by_fkey FOREIGN KEY (created_by)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE SET NULL,
-    CONSTRAINT htw_certificate_approved_by_fkey FOREIGN KEY (approved_by)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS ix_htw_certificate_job_id ON public.htw_certificate(job_id);
-CREATE INDEX IF NOT EXISTS ix_htw_certificate_inward_id ON public.htw_certificate(inward_id);
-CREATE INDEX IF NOT EXISTS ix_htw_certificate_status ON public.htw_certificate(status);
-
-CREATE TABLE IF NOT EXISTS public.htw_job_standard_snapshot
-(
-    id serial NOT NULL,
-    job_id integer NOT NULL,
-    master_standard_id integer NOT NULL,
-    standard_order integer NOT NULL,
-    nomenclature character varying COLLATE pg_catalog."default" NOT NULL,
-    manufacturer character varying COLLATE pg_catalog."default",
-    model_serial_no character varying COLLATE pg_catalog."default",
-    certificate_no character varying COLLATE pg_catalog."default",
-    traceable_to_lab character varying COLLATE pg_catalog."default",
-    calibration_valid_upto date,
-    uncertainty numeric(18, 8),
-    uncertainty_unit character varying COLLATE pg_catalog."default",
-    resolution numeric(14, 4),
-    resolution_unit character varying COLLATE pg_catalog."default",
-    accuracy_of_master numeric(14, 4),
-    captured_at timestamp with time zone DEFAULT now(),
-    CONSTRAINT htw_job_standard_snapshot_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_max_val_measure_err
-(
-    id serial NOT NULL,
-    range_min numeric(14, 4) NOT NULL,
-    range_max numeric(14, 4) NOT NULL,
-    un_percent numeric(8, 4) NOT NULL,
-    is_active boolean,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_max_val_measure_err_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_t_distribution
-(
-    id serial NOT NULL,
-    degrees_of_freedom integer NOT NULL,
-    confidence_level numeric(6, 3) NOT NULL,
-    alpha numeric(8, 5) NOT NULL,
-    t_value numeric(10, 4) NOT NULL,
-    is_active boolean,
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_t_distribution_pkey PRIMARY KEY (id),
-    CONSTRAINT uq_t_dist_df_confidence UNIQUE (degrees_of_freedom, confidence_level)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_standard_uncertainty_reference
-(
-    id serial NOT NULL,
-    valid_from date NOT NULL,
-    valid_upto date NOT NULL,
-    torque_nm integer NOT NULL,
-    applied_torque numeric(14, 4) NOT NULL,
-    indicated_torque numeric(14, 4) NOT NULL,
-    error_value numeric(18, 8) NOT NULL,
-    uncertainty_percent numeric(8, 4) NOT NULL,
-    is_active boolean,
-    created_at timestamp with time zone,
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_standard_uncertainty_reference_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_un_pg_master
-(
-    id serial NOT NULL,
-    set_pressure_min numeric(14, 4) NOT NULL,
-    set_pressure_max numeric(14, 4) NOT NULL,
-    uncertainty_percent numeric(8, 4) NOT NULL,
-    valid_upto date NOT NULL,
-    is_active boolean,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT htw_un_pg_master_pkey PRIMARY KEY (id),
-    CONSTRAINT uq_un_pg_pressure_range UNIQUE (set_pressure_min, set_pressure_max)
-);
-
-CREATE TABLE IF NOT EXISTS public.htw_uncertainty_budget
-(
-    id serial NOT NULL,
-    job_id integer NOT NULL,
-    step_percent numeric(5, 2) NOT NULL,
-    set_torque_ts numeric(14, 4) NOT NULL,
-    delta_s_un numeric(18, 8),
-    delta_p numeric(18, 8),
-    wmd numeric(18, 8),
-    wr numeric(18, 8),
-    wrep numeric(18, 8),
-    wod numeric(18, 8),
-    wint numeric(18, 8),
-    wl numeric(18, 8),
-    wre numeric(18, 8),
-    combined_uncertainty numeric(18, 8),
-    effective_dof numeric(18, 8),
-    coverage_factor numeric(6, 3),
-    expanded_uncertainty numeric(18, 8),
-    expanded_un_nm numeric(18, 8),
-    mean_measurement_error numeric(18, 8),
-    max_device_error numeric(18, 8),
-    final_wl numeric(18, 8),
-    cmc numeric(18, 8),
-    cmc_of_reading numeric(18, 8),
-    created_at timestamp with time zone DEFAULT now(),
-    CONSTRAINT htw_uncertainty_budget_pkey PRIMARY KEY (id)
-    -- job FK is already added earlier in this script for htw_uncertainty_budget (kept above as well)
-);
-
--- Other utility tables
 CREATE TABLE IF NOT EXISTS public.invitations
 (
     id bigserial NOT NULL,
@@ -818,6 +913,50 @@ CREATE TABLE IF NOT EXISTS public.invitations
         ON DELETE NO ACTION
 );
 
+CREATE TABLE IF NOT EXISTS public.lab_scope
+(
+    id serial NOT NULL,
+    laboratory_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    accreditation_standard character varying(255) COLLATE pg_catalog."default",
+    lab_unique_number character varying(100) COLLATE pg_catalog."default",
+    valid_from date,
+    valid_upto date,
+    is_active boolean DEFAULT false,
+    updated_by integer,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone,
+    document_data bytea,
+    document_filename character varying(255) COLLATE pg_catalog."default",
+    document_content_type character varying(128) COLLATE pg_catalog."default",
+    CONSTRAINT lab_scope_pkey PRIMARY KEY (id),
+    CONSTRAINT fk_lab_scope_updated_by FOREIGN KEY (updated_by)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.license_audit
+(
+    id serial NOT NULL,
+    old_valid_until date,
+    new_valid_until date,
+    extended_by character varying(100) COLLATE pg_catalog."default",
+    extended_at timestamp without time zone,
+    CONSTRAINT license_audit_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.license_master
+(
+    id serial NOT NULL,
+    valid_from date NOT NULL,
+    valid_until date NOT NULL,
+    last_checked_date date NOT NULL,
+    checksum text COLLATE pg_catalog."default" NOT NULL,
+    last_extended_by character varying(100) COLLATE pg_catalog."default",
+    last_extended_at timestamp without time zone,
+    CONSTRAINT license_master_pkey PRIMARY KEY (id)
+);
+
 CREATE TABLE IF NOT EXISTS public.notifications
 (
     id serial NOT NULL,
@@ -832,12 +971,12 @@ CREATE TABLE IF NOT EXISTS public.notifications
     status character varying(30) COLLATE pg_catalog."default",
     error text COLLATE pg_catalog."default",
     CONSTRAINT notifications_pkey PRIMARY KEY (id),
-    CONSTRAINT notifications_recipient_user_id_fkey FOREIGN KEY (recipient_user_id)
-        REFERENCES public.users (user_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE NO ACTION,
     CONSTRAINT notifications_inward_id_fkey FOREIGN KEY (inward_id)
         REFERENCES public.inward (inward_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+    CONSTRAINT notifications_recipient_user_id_fkey FOREIGN KEY (recipient_user_id)
+        REFERENCES public.users (user_id) MATCH SIMPLE
         ON UPDATE NO ACTION
         ON DELETE NO ACTION
 );
@@ -858,8 +997,19 @@ CREATE TABLE IF NOT EXISTS public.password_reset_tokens
         ON DELETE NO ACTION
 );
 
-CREATE INDEX IF NOT EXISTS ix_password_reset_tokens_user_id
-    ON public.password_reset_tokens(user_id);
+CREATE TABLE IF NOT EXISTS public.record_locks
+(
+    id serial NOT NULL,
+    entity_type character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    entity_id integer NOT NULL,
+    locked_by_user_id integer NOT NULL,
+    locked_by_role character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    customer_id integer,
+    locked_at timestamp with time zone DEFAULT now(),
+    expires_at timestamp with time zone NOT NULL,
+    is_active boolean NOT NULL,
+    CONSTRAINT record_locks_pkey PRIMARY KEY (id)
+);
 
 CREATE TABLE IF NOT EXISTS public.refresh_tokens
 (
@@ -877,9 +1027,6 @@ CREATE TABLE IF NOT EXISTS public.refresh_tokens
         ON DELETE NO ACTION
 );
 
-CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id
-    ON public.refresh_tokens(user_id);
-
 CREATE TABLE IF NOT EXISTS public.report_log
 (
     id serial NOT NULL,
@@ -889,91 +1036,27 @@ CREATE TABLE IF NOT EXISTS public.report_log
     CONSTRAINT report_log_pkey PRIMARY KEY (id)
 );
 
-CREATE TABLE IF NOT EXISTS public.record_locks
-(
-    id serial NOT NULL,
-    entity_type character varying(50) COLLATE pg_catalog."default" NOT NULL,
-    entity_id integer NOT NULL,
-    locked_by_user_id integer NOT NULL,
-    locked_by_role character varying(20) COLLATE pg_catalog."default" NOT NULL,
-    customer_id integer,
-    locked_at timestamp with time zone DEFAULT now(),
-    expires_at timestamp with time zone NOT NULL,
-    is_active boolean NOT NULL,
-    CONSTRAINT record_locks_pkey PRIMARY KEY (id)
-);
 
-CREATE TABLE IF NOT EXISTS public.license_master
-(
-    id serial NOT NULL,
-    valid_from date NOT NULL,
-    valid_until date NOT NULL,
-    last_checked_date date NOT NULL,
-    checksum text COLLATE pg_catalog."default" NOT NULL,
-    last_extended_by character varying(100) COLLATE pg_catalog."default",
-    last_extended_at timestamp without time zone,
-    CONSTRAINT license_master_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.license_audit
-(
-    id serial NOT NULL,
-    old_valid_until date,
-    new_valid_until date,
-    extended_by character varying(100) COLLATE pg_catalog."default",
-    extended_at timestamp without time zone,
-    CONSTRAINT license_audit_pkey PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS public.srf_equipments
-(
-    srf_eqp_id serial NOT NULL,
-    srf_id integer,
-    inward_eqp_id integer,
-    unit text COLLATE pg_catalog."default",
-    status character varying(50) COLLATE pg_catalog."default",
-    no_of_calibration_points character varying COLLATE pg_catalog."default",
-    mode_of_calibration text COLLATE pg_catalog."default",
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT srf_equipments_pkey PRIMARY KEY (srf_eqp_id),
-    CONSTRAINT srf_equipments_inward_eqp_id_key UNIQUE (inward_eqp_id),
-    CONSTRAINT srf_equipments_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
-        REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE,
-    CONSTRAINT srf_equipments_srf_id_fkey FOREIGN KEY (srf_id)
-        REFERENCES public.srfs (srf_id) MATCH SIMPLE
-        ON UPDATE NO ACTION
-        ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS public.delayed_email_tasks -- already created above, kept here for completeness; avoid duplicate creation
-(
-    -- nothing here because created above earlier
-);
-
--- Note: htw_uncertainty_budget created earlier without job FK included to avoid duplicate. We will add an index if necessary.
-
-CREATE TABLE IF NOT EXISTS public.invitations -- created earlier; duplicate prevention
-(
-    -- nothing here, created above
-);
-
--- Create remaining small supporting tables that were in original script but not referencing others
-CREATE TABLE IF NOT EXISTS public.notifications -- created above
-
-(
-    -- nothing here, created above
-);
-
--- (Many htw-related tables already created earlier)
--- Finally, re-create any indexes that original script added separately
-
+-- Indexes
+CREATE INDEX IF NOT EXISTS ix_htw_certificate_inward_id
+    ON public.certificate(inward_id);
+CREATE INDEX IF NOT EXISTS ix_htw_certificate_job_id
+    ON public.certificate(job_id);
+CREATE INDEX IF NOT EXISTS external_uploads_inward_eqp_id_key
+    ON public.external_uploads(inward_eqp_id);
+CREATE INDEX IF NOT EXISTS htw_job_inward_eqp_id_key
+    ON public.htw_job(inward_eqp_id);
+CREATE INDEX IF NOT EXISTS ix_htw_job_inward_id
+    ON public.htw_job(inward_id);
+CREATE INDEX IF NOT EXISTS ix_htw_job_environment_job_id
+    ON public.htw_job_environment(job_id);
+CREATE INDEX IF NOT EXISTS ix_password_reset_tokens_user_id
+    ON public.password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id
+    ON public.refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS srf_equipments_inward_eqp_id_key
     ON public.srf_equipments(inward_eqp_id);
-
 CREATE INDEX IF NOT EXISTS ix_srfs_inward_id
     ON public.srfs(inward_id);
 
-COMMIT;
+END;

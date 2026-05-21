@@ -1010,7 +1010,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
            </h4>
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                 <label className="block text-sm font-medium text-gray-700 mb-1">Make / Manufacturer <span className="text-red-500">*</span></label>
+                 <label className="block text-sm font-medium text-gray-700 mb-1">Make <span className="text-red-500">*</span></label>
                  <input
                    required
                    aria-required
@@ -1020,8 +1020,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                    name="make"
                    value={formData.make}
                    onChange={handleChange}
-                   className={`w-full p-2.5 bg-white ${errors.make ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:ring-blue-500 focus:border-blue-500`}
-                   placeholder="e.g. TORCTECH"
+className={`w-full bg-white border ${errors.make ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                   placeholder="e.g. TORCTECH"
                  />
                  {errors.make && <p id="err-make" className="mt-1 text-xs text-red-600">{errors.make}</p>}
               </div>
@@ -1036,8 +1035,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                    name="model"
                    value={formData.model}
                    onChange={handleChange}
-                   className={`w-full p-2.5 bg-white ${errors.model ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:ring-blue-500 focus:border-blue-500`}
-                   placeholder="e.g. 10LC"
+className={`w-full bg-white border ${errors.model ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                   placeholder="e.g. 10LC"
                  />
                  {errors.model && <p id="err-model" className="mt-1 text-xs text-red-600">{errors.model}</p>}
               </div>
@@ -1055,8 +1053,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                         value={formData.range_min as any}
                         onChange={handleChange}
                         placeholder="Min"
-                        className={`w-full p-2.5 bg-white ${errors.range_min ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:ring-blue-500 focus:border-blue-500`}
-                      />
+className={`w-full bg-white border ${errors.range_min ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                      />
                       {errors.range_min && <p id="err-range_min" className="mt-1 text-xs text-red-600">{errors.range_min}</p>}
                     </div>
                     <span className="text-gray-400">-</span>
@@ -1071,8 +1068,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                         value={formData.range_max as any}
                         onChange={handleChange}
                         placeholder="Max"
-                        className={`w-full p-2.5 bg-white ${errors.range_max ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:ring-blue-500 focus:border-blue-500`}
-                      />
+className={`w-full bg-white border ${errors.range_max ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                      />
                       {errors.range_max && <p id="err-range_max" className="mt-1 text-xs text-red-600">{errors.range_max}</p>}
                     </div>
                  </div>
@@ -1108,8 +1104,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                     value={formData.torque_unit}
                     onChange={handleChange}
                     placeholder="e.g. Nm, lbf.ft"
-                    className={`p-2 text-sm border ${errors.torque_unit ? 'border-red-500' : 'border-gray-300'} rounded-md w-28 bg-white`}
-                  />
+className={`w-full bg-white border ${errors.torque_unit ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                  />
                   {errors.torque_unit && <p id="err-torque_unit" className="mt-1 text-xs text-red-600">{errors.torque_unit}</p>}
                 </div>
               </div>
@@ -1126,8 +1121,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   name="torque_20"
                   value={formData.torque_20 as any}
                   onChange={handleChange}
-                  className={`w-full p-2.5 bg-white ${errors.torque_20 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                />
+className={`w-full bg-white border ${errors.torque_20 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.torque_20 && <p id="err-torque_20" className="mt-1 text-xs text-red-600">{errors.torque_20}</p>}
               </div>
 
@@ -1143,8 +1137,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                     name="torque_40"
                     value={formData.torque_40 as any}
                     onChange={handleChange}
-                    className={`w-full p-2.5 bg-white ${errors.torque_40 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                  />
+className={`w-full bg-white border ${errors.torque_60 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                  />
                   {errors.torque_40 && <p id="err-torque_40" className="mt-1 text-xs text-red-600">{errors.torque_40}</p>}
                 </div>
               )}
@@ -1160,8 +1153,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   name="torque_60"
                   value={formData.torque_60 as any}
                   onChange={handleChange}
-                  className={`w-full p-2.5 bg-white ${errors.torque_60 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                />
+className={`w-full bg-white border ${errors.torque_60 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.torque_60 && <p id="err-torque_60" className="mt-1 text-xs text-red-600">{errors.torque_60}</p>}
               </div>
 
@@ -1177,8 +1169,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                     name="torque_80"
                     value={formData.torque_80 as any}
                     onChange={handleChange}
-                    className={`w-full p-2.5 bg-white ${errors.torque_80 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                  />
+className={`w-full bg-white border ${errors.torque_80 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                  />
                   {errors.torque_80 && <p id="err-torque_80" className="mt-1 text-xs text-red-600">{errors.torque_80}</p>}
                 </div>
               )}
@@ -1194,8 +1185,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   name="torque_100"
                   value={formData.torque_100 as any}
                   onChange={handleChange}
-                  className={`w-full p-2.5 bg-white ${errors.torque_100 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                />
+className={`w-full bg-white border ${errors.torque_100 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.torque_100 && <p id="err-torque_100" className="mt-1 text-xs text-red-600">{errors.torque_100}</p>}
               </div>
            </div>
@@ -1218,8 +1208,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   value={formData.pressure_unit}
                   onChange={handleChange}
                   placeholder="e.g. bar, psi"
-                  className={`p-2 text-sm border ${errors.pressure_unit ? 'border-red-500' : 'border-gray-300'} rounded-md w-28 bg-white`}
-                />
+className={`w-full bg-white border ${errors.pressure_unit ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.pressure_unit && <p id="err-pressure_unit" className="mt-1 text-xs text-red-600">{errors.pressure_unit}</p>}
               </div>
            </div>
@@ -1235,8 +1224,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   name="pressure_20"
                   value={formData.pressure_20 as any}
                   onChange={handleChange}
-                  className={`w-full p-2.5 bg-white ${errors.pressure_20 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                />
+className={`w-full bg-white border ${errors.pressure_20 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.pressure_20 && <p id="err-pressure_20" className="mt-1 text-xs text-red-600">{errors.pressure_20}</p>}
               </div>
 
@@ -1252,8 +1240,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                     name="pressure_40"
                     value={formData.pressure_40 as any}
                     onChange={handleChange}
-                    className={`w-full p-2.5 bg-white ${errors.pressure_40 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                  />
+className={`w-full bg-white border ${errors.pressure_40 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                  />
                   {errors.pressure_40 && <p id="err-pressure_40" className="mt-1 text-xs text-red-600">{errors.pressure_40}</p>}
                 </div>
               )}
@@ -1269,8 +1256,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   name="pressure_60"
                   value={formData.pressure_60 as any}
                   onChange={handleChange}
-                  className={`w-full p-2.5 bg-white ${errors.pressure_60 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                />
+className={`w-full bg-white border ${errors.pressure_60 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.pressure_60 && <p id="err-pressure_60" className="mt-1 text-xs text-red-600">{errors.pressure_60}</p>}
               </div>
 
@@ -1286,8 +1272,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                     name="pressure_80"
                     value={formData.pressure_80 as any}
                     onChange={handleChange}
-                    className={`w-full p-2.5 bg-white ${errors.pressure_80 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                  />
+className={`w-full bg-white border ${errors.pressure_80 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                  />
                   {errors.pressure_80 && <p id="err-pressure_80" className="mt-1 text-xs text-red-600">{errors.pressure_80}</p>}
                 </div>
               )}
@@ -1303,8 +1288,7 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
                   name="pressure_100"
                   value={formData.pressure_100 as any}
                   onChange={handleChange}
-                  className={`w-full p-2.5 bg-white ${errors.pressure_100 ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:border-blue-500`}
-                />
+className={`w-full bg-white border ${errors.pressure_100 ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 {errors.pressure_100 && <p id="err-pressure_100" className="mt-1 text-xs text-red-600">{errors.pressure_100}</p>}
               </div>
            </div>

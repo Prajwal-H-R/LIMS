@@ -821,9 +821,6 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
     let finalValue: any = type === 'checkbox' ? checked : value;
-    if (['range_unit', 'uncertainty_unit', 'resolution_unit'].includes(name) && typeof finalValue === 'string') {
-      finalValue = finalValue ? finalValue.charAt(0).toUpperCase() + finalValue.slice(1) : '';
-    }
     setFormData(prev => {
       const next = { ...prev, [name]: finalValue };
       const fieldError = validateField(name, finalValue);
@@ -916,34 +913,34 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
             <div className="col-span-1 md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Nomenclature <span className="text-red-500">*</span></label>
               <div className="relative">
-                <input required aria-required aria-invalid={!!errors.nomenclature} aria-describedby={errors.nomenclature ? 'err-nomenclature' : undefined} type="text" name="nomenclature" value={formData.nomenclature} onChange={handleChange} placeholder="Type nomenclature (free text)" className={`w-full bg-white border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 ${errors.nomenclature ? 'border-red-500' : 'border-gray-300'}`} />
+                <input required aria-required aria-invalid={!!errors.nomenclature} aria-describedby={errors.nomenclature ? 'err-nomenclature' : undefined} type="text" name="nomenclature" value={formData.nomenclature} onChange={handleChange} placeholder="Type nomenclature (free text)" className={`w-full bg-white border ${errors.nomenclature ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`} />
                 {errors.nomenclature && <p id="err-nomenclature" className="mt-1 text-xs text-red-600">{errors.nomenclature}</p>}
               </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer <span className="text-red-500">*</span></label>
-              <input required aria-required aria-invalid={!!errors.manufacturer} aria-describedby={errors.manufacturer ? 'err-manufacturer' : undefined} type="text" name="manufacturer" value={formData.manufacturer} onChange={handleChange} className={`bg-white ${errors.manufacturer ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
+              <input required aria-required aria-invalid={!!errors.manufacturer} aria-describedby={errors.manufacturer ? 'err-manufacturer' : undefined} type="text" name="manufacturer" value={formData.manufacturer} onChange={handleChange} className={`w-full bg-white border ${errors.manufacturer ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`} />
               {errors.manufacturer && <p id="err-manufacturer" className="mt-1 text-xs text-red-600">{errors.manufacturer}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Model / Serial No <span className="text-red-500">*</span></label>
-              <input required aria-required aria-invalid={!!errors.model_serial_no} aria-describedby={errors.model_serial_no ? 'err-model_serial_no' : undefined} type="text" name="model_serial_no" value={formData.model_serial_no} onChange={handleChange} className={`bg-white ${errors.model_serial_no ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
+              <input required aria-required aria-invalid={!!errors.model_serial_no} aria-describedby={errors.model_serial_no ? 'err-model_serial_no' : undefined} type="text" name="model_serial_no" value={formData.model_serial_no} onChange={handleChange} className={`w-full bg-white border ${errors.model_serial_no ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`} />
               {errors.model_serial_no && <p id="err-model_serial_no" className="mt-1 text-xs text-red-600">{errors.model_serial_no}</p>}
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Operating Range <span className="text-red-500">*</span></label>
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <input required aria-required aria-invalid={!!errors.range_min} aria-describedby={errors.range_min ? 'err-range_min' : undefined} type="number" name="range_min" value={formData.range_min as any} onChange={handleChange} placeholder="Min" className={`bg-white ${errors.range_min ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
+                  <input required aria-required aria-invalid={!!errors.range_min} aria-describedby={errors.range_min ? 'err-range_min' : undefined} type="number" name="range_min" value={formData.range_min as any} onChange={handleChange} placeholder="Min" className={`w-full bg-white border ${errors.range_min ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`} />
                   {errors.range_min && <p id="err-range_min" className="mt-1 text-xs text-red-600">{errors.range_min}</p>}
                 </div>
                 <span className="text-gray-400 font-bold">-</span>
                 <div className="flex-1">
-                  <input required aria-required aria-invalid={!!errors.range_max} aria-describedby={errors.range_max ? 'err-range_max' : undefined} type="number" name="range_max" value={formData.range_max as any} onChange={handleChange} placeholder="Max" className={`bg-white ${errors.range_max ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`} />
+                  <input required aria-required aria-invalid={!!errors.range_max} aria-describedby={errors.range_max ? 'err-range_max' : undefined} type="number" name="range_max" value={formData.range_max as any} onChange={handleChange} placeholder="Max" className={`w-full bg-white border ${errors.range_max ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`} />
                   {errors.range_max && <p id="err-range_max" className="mt-1 text-xs text-red-600">{errors.range_max}</p>}
                 </div>
                 <div className="w-32">
-                  <input required aria-required aria-invalid={!!errors.range_unit} aria-describedby={errors.range_unit ? 'err-range_unit' : undefined} type="text" name="range_unit" value={formData.range_unit} onChange={handleChange} placeholder="e.g. Nm, bar" className={`w-full bg-white ${errors.range_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5`} />
+                  <input required aria-required aria-invalid={!!errors.range_unit} aria-describedby={errors.range_unit ? 'err-range_unit' : undefined} type="text" name="range_unit" value={formData.range_unit} onChange={handleChange} placeholder="e.g. Nm, bar" className={`w-full bg-white border ${errors.range_unit ? 'border-red-500' : 'border-gray-500'} text-gray-900 text-sm rounded-lg block p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`} />
                   {errors.range_unit && <p id="err-range_unit" className="mt-1 text-xs text-red-600">{errors.range_unit}</p>}
                 </div>
               </div>
@@ -968,8 +965,9 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                   name="uncertainty"
                   value={formData.uncertainty as any}
                   onChange={handleChange}
-                  className={`bg-white ${errors.uncertainty ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-                />
+className={`bg-white border ${
+  errors.manufacturer ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}                />
                 <input
                   required
                   aria-required
@@ -980,8 +978,9 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                   value={formData.uncertainty_unit}
                   onChange={handleChange}
                   placeholder="e.g. %, Abs"
-                  className={`bg-white ${errors.uncertainty_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5 w-24`}
-                />
+className={`bg-white border ${
+  errors.uncertainty_unit ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
               </div>
               {errors.uncertainty && <p id="err-uncertainty" className="mt-1 text-xs text-red-600">{errors.uncertainty}</p>}
               {errors.uncertainty_unit && <p id="err-uncertainty_unit" className="mt-1 text-xs text-red-600">{errors.uncertainty_unit}</p>}
@@ -998,8 +997,9 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                 name="accuracy_of_master"
                 value={formData.accuracy_of_master}
                 onChange={handleChange}
-                className={`bg-white ${errors.accuracy_of_master ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-              />
+className={`bg-white border ${
+  errors.accuracy_of_master ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
               {errors.accuracy_of_master && <p id="err-accuracy_of_master" className="mt-1 text-xs text-red-600">{errors.accuracy_of_master}</p>}
             </div>
 
@@ -1015,23 +1015,25 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                   name="resolution"
                   value={formData.resolution as any}
                   onChange={handleChange}
-                  className={`bg-white ${errors.resolution ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-                />
+className={`bg-white border ${
+  errors.resolution ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
                 <input
                   required
                   aria-required
                   aria-invalid={!!errors.resolution_unit}
-                  aria-describedby={errors.resolution_unit ? 'err-resolution_unit' : undefined}
+                  aria-describedby={errors.resolution_unit ? 'err-uncertainty_unit' : undefined}
                   type="text"
                   name="resolution_unit"
                   value={formData.resolution_unit}
                   onChange={handleChange}
-                  placeholder="e.g. Nm, bar"
-                  className={`bg-white ${errors.resolution_unit ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block p-2.5 w-20`}
-                />
+                  placeholder="e.g. %, Abs"
+className={`bg-white border ${
+  errors.resolution_unit ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
               </div>
-              {errors.resolution && <p id="err-resolution" className="mt-1 text-xs text-red-600">{errors.resolution}</p>}
-              {errors.resolution_unit && <p id="err-resolution_unit" className="mt-1 text-xs text-red-600">{errors.resolution_unit}</p>}
+              {errors.resolution && <p id="err-uncertainty" className="mt-1 text-xs text-red-600">{errors.resolution}</p>}
+              {errors.resolution_unit && <p id="err-uncertainty_unit" className="mt-1 text-xs text-red-600">{errors.resolution_unit}</p>}
             </div>
 
             <div className="lg:col-span-3">
@@ -1045,8 +1047,9 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                 name="traceable_to_lab"
                 value={formData.traceable_to_lab}
                 onChange={handleChange}
-                className={`bg-white ${errors.traceable_to_lab ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5`}
-              />
+className={`bg-white border ${
+  errors.traceable_to_lab ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
               {errors.traceable_to_lab && <p id="err-traceable_to_lab" className="mt-1 text-xs text-red-600">{errors.traceable_to_lab}</p>}
             </div>
           </div>
@@ -1069,8 +1072,9 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                   name="certificate_no"
                   value={formData.certificate_no}
                   onChange={handleChange}
-                  className={`bg-white ${errors.certificate_no ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full p-2.5 pl-9`}
-                />
+className={`bg-white border ${
+  errors.certificate_no ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
                 <ShieldCheck size={16} className="absolute left-3 top-3 text-gray-400" />
                 {errors.certificate_no && <p id="err-certificate_no" className="mt-1 text-xs text-red-600">{errors.certificate_no}</p>}
               </div>
@@ -1089,8 +1093,9 @@ function MasterStandardForm({ onBack, initialData }: MasterStandardFormProps) {
                   name="calibration_valid_upto"
                   value={formData.calibration_valid_upto}
                   onChange={handleChange}
-                  className={`bg-white ${errors.calibration_valid_upto ? 'border-red-500' : 'border-gray-300'} text-gray-900 text-sm rounded-lg block w-full pl-10 p-2.5`}
-                />
+className={`bg-white border ${
+  errors.calibration_valid_upto ? 'border-red-500' : 'border-gray-500'
+} text-gray-900 text-sm rounded-lg block w-full p-2.5 outline-none transition-all focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}/>
               </div>
               <p className="text-xs text-gray-500 mt-1">System will automatically mark status as 'Expired' if date is past.</p>
               {errors.calibration_valid_upto && <p id="err-calibration_valid_upto" className="mt-1 text-xs text-red-600">{errors.calibration_valid_upto}</p>}

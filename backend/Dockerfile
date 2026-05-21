@@ -18,6 +18,9 @@ WORKDIR /app/backend
 # Ensure pip/wheel are fresh, then install
 RUN python -m pip install --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browser binaries
+RUN python -m playwright install --with-deps chromium
  
 # Copy backend source
 COPY backend /app/backend

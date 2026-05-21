@@ -370,7 +370,7 @@ const UncertaintyBudgetPage: React.FC = () => {
                             <th className={unitCellClass}>%</th>
                             <th className={unitCellClass}>%</th>
 
-                            <th className={unitCellClass}>%</th>
+                            <th className={unitCellClass}>Nm</th>
                             <th className={unitCellClass}>Nm</th>
                             <th className={unitCellClass}>%</th>
 

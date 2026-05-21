@@ -84,7 +84,11 @@ type InwardFormProps = {
   onDraftUpdate?: () => void;
   onBack?: () => void; 
 };
-
+interface FlowConfig {
+  id: number;
+  equipment_type: string;
+  is_active: boolean;
+}
 const INITIAL_MATERIAL_DESCRIPTIONS = [
   "Hydraulic Torque Wrench",
   "Pressure Gauge",
@@ -204,7 +208,24 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   
   const showEngineerRemarksColumn = isEditMode || equipmentList.some(eq => eq.inspe_status === 'Not OK' || (eq.engineer_remarks && eq.engineer_remarks.trim() !== ''));
   const showCustomerRemarksColumn = equipmentList.some(eq => eq.remarks_and_decision && eq.remarks_and_decision.trim() !== '');
-
+const [configuredTypes, setConfiguredTypes] = useState<string[]>([]);
+const fetchFlowConfigs = useCallback(async () => {
+  try {
+    // Calling the endpoint provided: /flow-configs
+    const response = await api.get<FlowConfig[]>('/flow-configs', {
+      params: { skip: 0, limit: 100 }
+    });
+    
+    // Extract only the names of equipment types that are active
+    const activeTypes = response.data
+      .filter(item => item.is_active)
+      .map(item => item.equipment_type);
+      
+    setConfiguredTypes(activeTypes);
+  } catch (error) {
+    console.error("Error fetching flow configs:", error);
+  }
+}, []);
   const hasFormData =
     (formData.customer_id !== null && formData.customer_id !== undefined) ||
     (formData.customer_dc_date ?? '').trim().length > 0 ||
@@ -607,7 +628,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         await fetchCustomers();
         await fetchMaterials();
         await fetchMakes(); 
-        
+        await fetchFlowConfigs();
         if (isEditMode && editId) {
           await loadInwardData(parseInt(editId));
         } else if (initialDraftId) {
@@ -1638,26 +1659,57 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                             className="w-full bg-slate-100 font-medium px-2 py-1.5 border border-slate-200 rounded-md" 
                           />
                         </td>
-                        <td className="p-2">
-                            <select 
-                              value={equipment.material_desc} 
-                              onChange={(e) => {
-                                if (e.target.value === 'ADD_NEW_CUSTOM') {
-                                    setActiveRowForNewMaterial(index);
-                                    setShowAddMaterialModal(true);
-                                } else {
-                                    handleEquipmentChange(index, 'material_desc', e.target.value);
-                                }
-                              }} 
-                              required 
-                              className="w-full px-4 py-2.5 text-sm font-medium text-gray-900 bg-white border border-gray-300 rounded-lg"
-                              disabled={isLocked}
-                            >
-                                <option value="">Select...</option>
-                                {materialOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                                <option value="ADD_NEW_CUSTOM" className="font-bold text-blue-600 bg-blue-50">+ Add New Item</option>
-                            </select>
-                        </td>
+                       <td className="p-2">
+  <select 
+    value={equipment.material_desc} 
+    onChange={(e) => {
+      if (e.target.value === 'ADD_NEW_CUSTOM') {
+        setActiveRowForNewMaterial(index);
+        setShowAddMaterialModal(true);
+      } else {
+        handleEquipmentChange(index, 'material_desc', e.target.value);
+      }
+    }} 
+    required 
+    className={`w-full px-4 py-2.5 text-sm font-semibold border rounded-lg transition-all outline-none ${
+      configuredTypes.includes(equipment.material_desc) 
+        ? 'bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-100' 
+        : 'bg-white border-gray-300 text-gray-900'
+    }`}
+    disabled={isLocked}
+  >
+    <option value="">Select Equipment...</option>
+    
+    {/* 1. HIGHLIGHTED ITEMS (Top of list + Amber Background) */}
+    {materialOptions
+      .filter(m => configuredTypes.includes(m))
+      .sort()
+      .map(d => (
+        <option 
+          key={d} 
+          value={d} 
+          className="bg-amber-100 font-bold text-amber-900"
+        >
+          {d} ★
+        </option>
+      ))}
+
+    {/* 2. REGULAR ITEMS */}
+    {materialOptions
+      .filter(m => !configuredTypes.includes(m))
+      .sort()
+      .map(d => (
+        <option key={d} value={d} className="bg-white">
+          {d}
+        </option>
+      ))}
+
+    {/* 3. ACTION ITEM */}
+    <option value="ADD_NEW_CUSTOM" className="font-bold text-blue-600 bg-blue-50">
+      + Add New Item
+    </option>
+  </select>
+</td>
 
                         <td className="p-2">
                           {isHydraulic ? (
