@@ -78,6 +78,14 @@ interface SrfGroup {
   equipments: SrfGroupEquipment[];
 }
 
+interface GenericInward {
+  inward_id: number;
+  srf_no: string;
+  customer_details?: string;
+  customer_name?: string; 
+  created_at?: string;
+}
+
 interface HtwJob {
   job_id: number;
   inward_eqp_id: number;
@@ -171,6 +179,8 @@ export const CertificatesPage: React.FC = () => {
   // Navigation / View State
   const activeSrfId = searchParams.get("srfId") ? Number(searchParams.get("srfId")) : null;
   const activeTab = (searchParams.get("tab") as CertTabKey) || "pending_gen";
+  const [listMode, setListMode] = useState<"certificates" | "inspection">("certificates");
+
 // Inside CertificatesPage component
 const [finalReportSrfId, setFinalReportSrfId] = useState<number | null>(null);
 const [finalReportData, setFinalReportData] = useState<any | null>(null);
@@ -182,7 +192,9 @@ const [isSendingReport, setIsSendingReport] = useState(false);
 const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "list");
   // Data State
   const [srfGroups, setSrfGroups] = useState<SrfGroup[]>([]);
+  const [allInwards, setAllInwards] = useState<GenericInward[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAllInwardsLoading, setIsAllInwardsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -225,10 +237,42 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
   const [bulkQrGenerating, setBulkQrGenerating] = useState(false);
   const [bulkQrPrinting, setBulkQrPrinting] = useState(false);
   
+  // --- Data Logic ---
+  const fetchAllInwards = useCallback(async () => {
+    setIsAllInwardsLoading(true);
+    try {
+      const res = await api.get<GenericInward[]>("/staff/inwards/");
+      setAllInwards(Array.isArray(res.data) ? res.data : []);
+    } catch (err: any) {
+      toast.error("Failed to load SRF database.");
+    } finally {
+      setIsAllInwardsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (listMode === "inspection") {
+      fetchAllInwards();
+    }
+  }, [listMode, fetchAllInwards]);
+
+  const filteredDisplayList = useMemo(() => {
+    const query = searchTerm.toLowerCase();
+    if (listMode === "inspection") {
+      return allInwards.filter(i => 
+        i.srf_no.toLowerCase().includes(query) || 
+        (i.customer_details && i.customer_details.toLowerCase().includes(query)) ||
+        (i.customer_name && i.customer_name.toLowerCase().includes(query))
+      );
+    }
+    return srfGroups.filter(g => 
+      g.srf_no.toLowerCase().includes(query) || 
+      (g.customer_details && g.customer_details.toLowerCase().includes(query))
+    );
+  }, [listMode, allInwards, srfGroups, searchTerm]);
+
   // --- Scrollbar Management (FIXED) ---
-  // Removed the padding-right calculation to prevent Header jumping/misalignment.
-  // --- Scrollbar Management (PREVENT HEADER SHIFT) ---
-useEffect(() => {
+  useEffect(() => {
   const isAnyModalOpen =
     showGenerateModal ||
     showEditModal ||
@@ -725,13 +769,9 @@ useEffect(() => {
         { responseType: "blob" }
       );
       const blob = new Blob([res.data], { type: "application/zip" });
-      const group = srfGroups.find((g) => g.inward_id === activeSrfId);
-      const zipName = group?.srf_no
-        ? `${String(group.srf_no).replace(/[/\\?*:]/g, "-")}.zip`
-        : "certificates.zip";
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = zipName;
+      link.download = "certificates.zip";
       link.click();
       URL.revokeObjectURL(link.href);
       setShowBulkDownloadModal(false);
@@ -757,14 +797,6 @@ useEffect(() => {
 
   // --- Filtering ---
 
-  const filteredGroups = useMemo(() => {
-    if (!searchTerm) return srfGroups;
-    const lower = searchTerm.toLowerCase();
-    return srfGroups.filter(g =>
-      g.srf_no.toLowerCase().includes(lower) ||
-      (g.customer_dc_no && g.customer_dc_no.toLowerCase().includes(lower))
-    );
-  }, [srfGroups, searchTerm]);
 
   // ==========================================
   // VIEW MODE: DETAIL
@@ -858,9 +890,9 @@ useEffect(() => {
 
           {/* Tabs & Table */}
           <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-            <div className="bg-gray-50 border-b border-gray-200 p-2">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex space-x-1 overflow-x-auto">
+            <div className="bg-gray-50 border-b border-gray-200 p-2 overflow-x-auto">
+              <div className="flex items-center justify-between min-w-max">
+                <div className="flex space-x-1">
                   <button onClick={() => handleTabChange("pending_gen")} className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "pending_gen" ? "bg-white text-gray-900 shadow-sm border border-gray-200" : "text-gray-500 hover:bg-gray-200"}`}>
                     <Plus className="h-4 w-4" /> Pending Generation <span className="ml-1 bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-xs">{counts.pending_gen}</span>
                   </button>
@@ -883,39 +915,41 @@ useEffect(() => {
                     <QrCode className="h-4 w-4" /> Generate QR <span className="ml-1 bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full text-xs">{counts.generate_qr}</span>
                   </button>
                 </div>
-                {isBulkDownloadTab && (
-                  <button
-                    type="button"
-                    onClick={handleBulkDownloadClick}
-                    disabled={bulkDownloading || selectedForBulkDownload.size === 0}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
-                  >
-                    {bulkDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    Download selected ({selectedForBulkDownload.size}) as ZIP
-                  </button>
-                )}
-                {activeTab === "generate_qr" && (
-                  <div className="flex items-center gap-2">
+                <div className="flex gap-2 ml-4">
+                  {isBulkDownloadTab && (
                     <button
                       type="button"
-                      onClick={() => bulkGenerateQrForSrf(selectedGroup.equipments)}
-                      disabled={bulkQrGenerating || bulkQrPrinting}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
+                      onClick={handleBulkDownloadClick}
+                      disabled={bulkDownloading || selectedForBulkDownload.size === 0}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
                     >
-                      {bulkQrGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                      Bulk Generate QR
+                      {bulkDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      Download selected ({selectedForBulkDownload.size}) as ZIP
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => printQrForSrfLot(selectedGroup.equipments)}
-                      disabled={bulkQrGenerating || bulkQrPrinting}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
-                    >
-                      {bulkQrPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                      Print QR (SRF Lot)
-                    </button>
-                  </div>
-                )}
+                  )}
+                  {activeTab === "generate_qr" && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => bulkGenerateQrForSrf(selectedGroup.equipments)}
+                        disabled={bulkQrGenerating || bulkQrPrinting}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
+                      >
+                        {bulkQrGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                        Bulk Generate QR
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printQrForSrfLot(selectedGroup.equipments)}
+                        disabled={bulkQrGenerating || bulkQrPrinting}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap"
+                      >
+                        {bulkQrPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                        Print QR (SRF Lot)
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1057,6 +1091,16 @@ useEffect(() => {
                                   )}
                                 </>
                               )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/engineer/final-inspection/${activeSrfId}`);
+                                }}
+                                className="inline-flex items-center px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-all shadow-sm"
+                              >
+                                <ClipboardCheck className="h-3.5 w-3.5 mr-1" />
+                                Final Inspection
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1134,7 +1178,7 @@ useEffect(() => {
                   </label>
 
                   <div className="flex gap-3">
-                    <button onClick={() => setShowBulkDownloadModal(false)} className="flex-1 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Cancel</button>
+                    <button onClick={() => setShowDownloadModal(false)} className="flex-1 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Cancel</button>
                     <button onClick={handleConfirmBulkDownload} disabled={bulkDownloading} className="flex-1 py-2.5 text-white bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
                       {bulkDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download
                     </button>
@@ -1273,19 +1317,38 @@ return (
       {/* Main Content Card */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
         {/* Toolbar */}
-        <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
-          <div className="relative max-w-md w-full">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-4 w-4 text-gray-400" />
-            </div>
-            <input type="text" placeholder="Search by SRF or Customer DC..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow bg-white" />
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={handleOpenGenerateModal} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 shadow-sm transition-colors" >
-              <Plus className="h-4 w-4" /> Generate Certificate
-            </button>
-          </div>
-        </div>
+       {/* Toolbar */}
+<div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
+  <div className="relative max-w-md w-full">
+    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+      <Search className="h-4 w-4 text-gray-400" />
+    </div>
+    <input 
+      type="text" 
+      placeholder={listMode === 'certificates' ? "Search Certificates..." : "Search SRFs for Inspection..."} 
+      value={searchTerm} 
+      onChange={(e) => setSearchTerm(e.target.value)} 
+      className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow bg-white" 
+    />
+  </div>
+  
+  <div className="flex items-center gap-2">
+    <button 
+      onClick={() => setListMode(listMode === 'certificates' ? 'inspection' : 'certificates')} 
+      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-sm transition-all border ${
+        listMode === 'inspection' 
+          ? "bg-emerald-600 text-white border-emerald-700" 
+          : "bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+      }`}
+    >
+      <ClipboardCheck className="h-4 w-4" />
+      {listMode === 'inspection' ? "Show SRFs for Certificates" : "Final Inspection List"}
+    </button>
+    <button onClick={handleOpenGenerateModal} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 shadow-sm transition-colors" >
+      <Plus className="h-4 w-4" /> Generate Certificate
+    </button>
+  </div>
+</div>
 
         {error && (
           <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
@@ -1294,69 +1357,85 @@ return (
         )}
 
         <div className="p-4 sm:p-6">
-          {isLoading ? (
+          {(isLoading || isAllInwardsLoading) ? (
             <CertificateListSkeleton />
-          ) : filteredGroups.length === 0 ? (
+          ) : filteredDisplayList.length === 0 ? (
             <div className="text-center py-16">
               <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
                 <FileText className="h-8 w-8 text-gray-300" />
               </div>
               <h3 className="text-lg font-medium text-gray-900">No SRFs found</h3>
               <p className="text-gray-500 mt-1 max-w-sm mx-auto">
-                Calibrate equipment first to see them appear here for certificate generation.
+                {listMode === 'inspection' ? "No records in the database." : "Calibrate equipment first to see them appear here."}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredGroups.map((group) => {
-                const total = group.equipments.length;
-                const issued = group.equipments.filter(e => e.certificate?.status === "ISSUED").length;
-                const drafts = group.equipments.filter(e => e.certificate?.status === "DRAFT" || e.certificate?.status === "REWORK").length;
-                const pending = group.equipments.filter(e => !e.certificate).length;
+{filteredDisplayList.map((item: any) => {
+  const isInspection = listMode === 'inspection';
+  
+  // For certificate mode data structure
+  const total = item.equipments?.length || 0;
+  const issued = item.equipments?.filter((e: any) => e.certificate?.status === "ISSUED").length || 0;
+  
+  // Logic for what happens when the row is clicked
+  const handleRowClick = () => {
+    if (isInspection) {
+      navigate(`/engineer/final-inspection/${item.inward_id}`);
+    } else {
+      handleOpenSrf(item.inward_id);
+    }
+  };
 
-                return (
-  <div
-    key={group.inward_id}
-    className="flex items-center justify-between p-5 bg-gray-50 hover:bg-indigo-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer"
-    onClick={() => handleOpenSrf(group.inward_id)}
-  >
-    <div className="flex items-start gap-4">
-      <div className="mt-1">
-        <div className="p-2 rounded-full bg-indigo-100 text-indigo-600">
-          <Package className="h-5 w-5" />
+  return (
+    <div
+      key={item.inward_id}
+      className={`flex items-center justify-between p-5 border rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer ${
+        isInspection 
+          ? "bg-emerald-50/20 border-emerald-100 hover:border-emerald-300" 
+          : "bg-gray-50 border-gray-200 hover:bg-indigo-50 hover:border-indigo-300"
+      }`}
+      onClick={handleRowClick}
+    >
+      <div className="flex items-start gap-4">
+        <div className="mt-1">
+          <div className={`p-2 rounded-full ${
+            isInspection ? "bg-emerald-100 text-emerald-600" : "bg-indigo-100 text-indigo-600"
+          }`}>
+            <Package className="h-5 w-5" />
+          </div>
         </div>
-      </div>
-      <div>
-        <div className="flex items-center gap-3">
-          <p className="font-semibold text-lg text-gray-800">
-            SRF No: {group.srf_no}
+        <div>
+          <div className="flex items-center gap-3">
+            <p className="font-semibold text-lg text-gray-800">
+              SRF No: {item.srf_no}
+            </p>
+          </div>
+          <p className="text-sm text-gray-600 mt-1">
+            Customer: <span className="font-medium text-gray-900">{item.customer_details || item.customer_name || "N/A"}</span>
+            {!isInspection && ` • ${total} Equipments • ${issued} Issued`}
           </p>
-          {/* ... existing pending/draft badges ... */}
         </div>
-        <p className="text-sm text-gray-600 mt-1">
-          <span className="font-medium text-gray-900">{total} Equipments</span> • {issued} Certificates Issued
-        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/engineer/final-inspection/${item.inward_id}`);
+          }}
+          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition-all shadow-sm"
+        >
+          <ClipboardCheck className="h-4 w-4" />
+          Final Inspection
+        </button>
+        {!isInspection && (
+           <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
+        )}
       </div>
     </div>
-
-    {/* NEW ACTION BUTTONS SECTION */}
-    <div className="flex items-center gap-3">
-      {/* THIS IS THE ROUTING BUTTON */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation(); // Prevents opening the Detail view
-          navigate(`/engineer/final-inspection/${group.inward_id}`);
-        }}
-        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition-all shadow-sm"
-      >
-        <ClipboardCheck className="h-4 w-4" />
-        Final Inspection
-      </button>
-      <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
-    </div>
-  </div>
-);
-              })}
+  );
+})}
             </div>
           )}
         </div>

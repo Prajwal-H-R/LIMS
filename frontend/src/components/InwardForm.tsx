@@ -208,6 +208,9 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   
   const showEngineerRemarksColumn = isEditMode || equipmentList.some(eq => eq.inspe_status === 'Not OK' || (eq.engineer_remarks && eq.engineer_remarks.trim() !== ''));
   const showCustomerRemarksColumn = equipmentList.some(eq => eq.remarks_and_decision && eq.remarks_and_decision.trim() !== '');
+  // Add this with your other useState hooks
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+const [includeOutsourceInPDF, setIncludeOutsourceInPDF] = useState(false);
 const [configuredTypes, setConfiguredTypes] = useState<string[]>([]);
 const fetchFlowConfigs = useCallback(async () => {
   try {
@@ -999,48 +1002,65 @@ const fetchFlowConfigs = useCallback(async () => {
   };
 
   const viewEquipmentDetails = (index: number) => setSelectedEquipment(equipmentList[index]);
-
+const handleSkipDownload = () => {
+  setShowDownloadModal(false);
+  
+  // If this was a new submission (not edit mode) and we have a saved ID,
+  // proceed to the Email modal even though they skipped the download.
+  if (!isEditMode && lastSavedInwardId && !showEmailModal) {
+    setShowEmailModal(true);
+  } else if (isEditMode) {
+    // If editing, just go back to the list
+    navigate('/engineer/view-inward');
+  }
+};
   // --- NEW: HANDLER FOR STANDARD PDF DOWNLOAD ---
-  const handleStandardDownload = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    
-    // [FIX] If SRF is TBD, fetch the next number just for PDF generation (do not save to state)
-    let displaySrf = formData.srf_no;
-    if (displaySrf === 'TBD' || displaySrf === 'Loading...') {
-       displaySrf = await fetchNextSrfNo();
-    }
+// 1. Just opens the modal
+const handleStandardDownload = (e: React.MouseEvent) => {
+  e.preventDefault();
+  setShowDownloadModal(true);
+};
 
-    if (!displaySrf || displaySrf === 'Loading...') {
-      showMessage('error', 'Cannot download PDF: SRF Number not ready.');
-      return;
-    }
-    
-    // Create a temporary list with correct NEPL IDs just for the PDF using the fetched SRF
-    const formattedList = equipmentList.map((eq, index) => ({
-      ...eq,
-      nepl_id: `${displaySrf}-${index + 1}`
-    }));
+// 2. Actually executes the generation (called from inside the modal)
+const handleConfirmDownload = async () => {
+  // Use the real SRF assigned by the backend if available, otherwise fallback to form state
+  let displaySrf = lastSavedSrfNo || formData.srf_no;
+  
+  if (displaySrf === 'TBD' || displaySrf === 'Loading...') {
+     displaySrf = await fetchNextSrfNo();
+  }
 
-    // Include full customer details from selectedCustomerData for PDF
-    const pdfFormData = {
-      ...formData,
-      srf_no: displaySrf, // Use the proper SRF No here
-      contact_person: selectedCustomerData?.contact_person || '',
-      phone: selectedCustomerData?.phone || '',
-      email: selectedCustomerData?.email || '',
-      ship_to_address: selectedCustomerData?.ship_to_address || '',
-      bill_to_address: selectedCustomerData?.bill_to_address || ''
-    };
+  const formattedList = equipmentList.map((eq, index) => ({
+    ...eq,
+    nepl_id: `${displaySrf}-${index + 1}`
+  }));
 
-    try {
-      generateStandardInwardPDF(pdfFormData, formattedList);
-      showMessage('success', 'Standard PDF downloaded successfully.');
-    } catch (error) {
-      console.error("PDF Generation Error:", error);
-      showMessage('error', 'Failed to generate PDF. Please check data.');
-    }
+  const pdfFormData = {
+    ...formData,
+    srf_no: displaySrf,
+    contact_person: selectedCustomerData?.contact_person || '',
+    phone: selectedCustomerData?.phone || '',
+    email: selectedCustomerData?.email || '',
+    ship_to_address: selectedCustomerData?.ship_to_address || '',
+    bill_to_address: selectedCustomerData?.bill_to_address || '',
+    includeOutsourceDetails: includeOutsourceInPDF 
   };
 
+  try {
+    generateStandardInwardPDF(pdfFormData, formattedList);
+    setShowDownloadModal(false); 
+    
+    // Proceed to Email Modal after download is triggered
+    if (!isEditMode && lastSavedInwardId && !showEmailModal) {
+        setShowEmailModal(true);
+    } else if (isEditMode) {
+        navigate('/engineer/view-inward');
+    }
+  } catch (error){
+    console.error("PDF Generation Error:", error);
+    showMessage('error', 'Failed to generate PDF.');
+  }
+};
   // --- SUBMIT HANDLERS ---
   const handlePreviewClick = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1064,140 +1084,122 @@ const fetchFlowConfigs = useCallback(async () => {
   };
 
   // Fixed: Removed unused 'source' parameter from payload generation logic inside here
-  const handleFinalSubmit = async () => {
-    if (isLocked) return; 
-    setShowPreviewModal(false);
-    setIsLoading(true);
-    
-    if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+const handleFinalSubmit = async () => {
+  if (isLocked) return;
+  setShowPreviewModal(false);
+  setIsLoading(true);
 
-    try {
-      const submissionData = new FormData();
-      const finalInwardDate = formData.material_inward_date || new Date().toISOString().split('T')[0];
+  if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
 
-      submissionData.append('srf_no', formData.srf_no); 
-      submissionData.append('material_inward_date', finalInwardDate);
-      submissionData.append('customer_dc_date', formData.customer_dc_date || "");
-      submissionData.append('customer_dc_no', formData.customer_dc_no);
-      submissionData.append('receiver', formData.receiver);
-      
-      if (!formData.customer_id) throw new Error("Customer ID is missing");
-      submissionData.append('customer_id', formData.customer_id.toString());
-      submissionData.append('customer_details', formData.customer_details);
+  try {
+    const submissionData = new FormData();
+    const finalInwardDate = formData.material_inward_date || new Date().toISOString().split('T')[0];
 
-      const formatItemForPayload = (item: EquipmentDetail, idx: number, shouldMarkAsUpdated: boolean) => {
-  const isOutsource = item.calibration_by === 'Outsource';
-  
-  // LOGIC: 
-  // 1. If shouldMarkAsUpdated is true (visible rows in edit mode), status is 'updated'
-  // 2. If it's a new inward (not edit mode), status is 'created'
-  // 3. Otherwise, preserve the existing status (for hidden rows)
-  let statusToSend = item.status || 'created';
-  
-  if (isEditMode && shouldMarkAsUpdated) {
-    statusToSend = 'updated';
-  } else if (!isEditMode) {
-    statusToSend = 'created';
-  }
+    submissionData.append('srf_no', formData.srf_no);
+    submissionData.append('material_inward_date', finalInwardDate);
+    submissionData.append('customer_dc_date', formData.customer_dc_date || "");
+    submissionData.append('customer_dc_no', formData.customer_dc_no);
+    submissionData.append('receiver', formData.receiver);
 
-  return {
-    inward_eqp_id: item.id, 
-    nepl_id: item.nepl_id || `${formData.srf_no}-${idx + 1}`,
-    material_desc: item.material_desc, 
-    make: item.make,
-    model: item.model,
-    range: item.range || "",
-    serial_no: item.serial_no || "",
-    qty: Number(item.qty), 
-    calibration_by: item.calibration_by,
-    visual_inspection_notes: item.inspe_status,
-    engineer_remarks: item.engineer_remarks || "",
-    accessories_included: item.accessories_included || "",
-    supplier: isOutsource ? ((item as any).supplier || "") : null, 
-    in_dc: isOutsource ? ((item as any).in_dc || "") : null,
-    out_dc: isOutsource ? ((item as any).out_dc || "") : null,
-    existing_photo_urls: (item.existingPhotoUrls || []).filter((url): url is string => Boolean(url?.trim())),
-    status: statusToSend // Uses the calculated status
-  };
-};
+    if (!formData.customer_id) throw new Error("Customer ID is missing");
+    submissionData.append('customer_id', formData.customer_id.toString());
+    submissionData.append('customer_details', formData.customer_details);
 
-      // Map visible items
-      const visiblePayload = equipmentList.map((eq, idx) => formatItemForPayload(eq, idx, true));
-      
-      // Map hidden items (from hiddenEquipmentsRef)
-      const hiddenPayload = hiddenEquipmentsRef.current.map((eq, idx) => {
-          // Adjust index for hidden items to continue sequence or handle as needed
-          // For simplicity in this fix, reusing the formatter, though index might clash if not careful.
-          // In real app, you might want to preserve their original NEPL IDs or append.
-          // Assuming strict append logic for now:
-          return formatItemForPayload(eq, equipmentList.length + idx, false);
-      });
-      
-      const fullPayload = [...visiblePayload, ...hiddenPayload];
-      submissionData.append('equipment_list', JSON.stringify(fullPayload));
+    const formatItemForPayload = (item: EquipmentDetail, idx: number, shouldMarkAsUpdated: boolean) => {
+      const isOutsource = item.calibration_by === 'Outsource';
+      let statusToSend = item.status || 'created';
 
-      equipmentList.forEach((equipment, index) => {
-        equipment.photos?.forEach((photoFile: File) => {
-            submissionData.append(`photos_${index}`, photoFile, photoFile.name)
-        });
-      });
-
-      let response;
-      if (isEditMode && editId) {
-        submissionData.append('inward_id', editId); 
-        response = await api.put<InwardResponse>(`${ENDPOINTS.STAFF.INWARDS}/${editId}`, submissionData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        showMessage('success', 'Inward updated successfully!');
-        notifyDraftUpdate(); 
-        navigate('/engineer/view-inward');
-      } else {
-        if (currentDraftId) submissionData.append('inward_id', currentDraftId.toString());
-        response = await api.post<InwardResponse>(ENDPOINTS.STAFF.SUBMIT, submissionData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        const realSrfNo = String(response.data.srf_no);
-        showMessage('success', `Inward Submitted! SRF Assigned: ${realSrfNo}`);
-        setLastSavedInwardId(response.data.inward_id);
-        setLastSavedSrfNo(realSrfNo);
-        setReportEmails([selectedCustomerEmail || '']);
-        setFormData(prev => ({ ...prev, srf_no: realSrfNo })); 
-        
-        notifyDraftUpdate(); 
-
-        setTimeout(() => { 
-          try { 
-            const pdfData = { 
-              ...formData, 
-              srf_no: realSrfNo,
-              contact_person: selectedCustomerData?.contact_person || '',
-              phone: selectedCustomerData?.phone || '',
-              email: selectedCustomerData?.email || '',
-              ship_to_address: selectedCustomerData?.ship_to_address || '',
-              bill_to_address: selectedCustomerData?.bill_to_address || ''
-            };
-            
-            const finalEquipmentList = equipmentList.map((eq, idx) => ({
-               ...eq,
-               nepl_id: `${realSrfNo}-${idx + 1}`
-            }));
-
-            generateStandardInwardPDF(pdfData, finalEquipmentList); 
-          } catch (err) { 
-            console.error("PDF Generation failed", err); 
-          } 
-        }, 500);
-        setShowEmailModal(true);
+      if (isEditMode && shouldMarkAsUpdated) {
+        statusToSend = 'updated';
+      } else if (!isEditMode) {
+        statusToSend = 'created';
       }
-    } catch (error: any) {
-        console.error("Submission Error", error);
-        let errorMsg = 'Submission failed';
-        if (error.response?.status === 422 && Array.isArray(error.response.data.detail)) {
-            errorMsg = `Validation Error: ${error.response.data.detail.map((d: any) => `${d.loc[d.loc.length-1]}: ${d.msg}`).join(' | ')}`;
-        } else if (error.response?.data?.detail) {
-            errorMsg = typeof error.response.data.detail === 'string' ? error.response.data.detail : JSON.stringify(error.response.data.detail);
-        } else if (error.message) errorMsg = error.message;
-        showMessage('error', errorMsg);
-    } finally {
-      setIsLoading(false);
+
+      return {
+        inward_eqp_id: item.id,
+        nepl_id: item.nepl_id || `${formData.srf_no}-${idx + 1}`,
+        material_desc: item.material_desc,
+        make: item.make,
+        model: item.model,
+        range: item.range || "",
+        serial_no: item.serial_no || "",
+        qty: Number(item.qty),
+        calibration_by: item.calibration_by,
+        visual_inspection_notes: item.inspe_status,
+        engineer_remarks: item.engineer_remarks || "",
+        accessories_included: item.accessories_included || "",
+        supplier: isOutsource ? ((item as any).supplier || "") : null,
+        in_dc: isOutsource ? ((item as any).in_dc || "") : null,
+        out_dc: isOutsource ? ((item as any).out_dc || "") : null,
+        existing_photo_urls: (item.existingPhotoUrls || []).filter((url): url is string => Boolean(url?.trim())),
+        status: statusToSend
+      };
+    };
+
+    // Map visible and hidden items
+    const visiblePayload = equipmentList.map((eq, idx) => formatItemForPayload(eq, idx, true));
+    const hiddenPayload = hiddenEquipmentsRef.current.map((eq, idx) => {
+      return formatItemForPayload(eq, equipmentList.length + idx, false);
+    });
+
+    const fullPayload = [...visiblePayload, ...hiddenPayload];
+    submissionData.append('equipment_list', JSON.stringify(fullPayload));
+
+    // Append Photos
+    equipmentList.forEach((equipment, index) => {
+      equipment.photos?.forEach((photoFile: File) => {
+        submissionData.append(`photos_${index}`, photoFile, photoFile.name);
+      });
+    });
+
+    let response;
+    if (isEditMode && editId) {
+      submissionData.append('inward_id', editId);
+      response = await api.put<InwardResponse>(`${ENDPOINTS.STAFF.INWARDS}/${editId}`, submissionData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      showMessage('success', 'Inward updated successfully!');
+      notifyDraftUpdate();
+      
+      // For Edit Mode, we show the download modal to allow them to get the updated PDF
+      setShowDownloadModal(true);
+    } else {
+      if (currentDraftId) submissionData.append('inward_id', currentDraftId.toString());
+      response = await api.post<InwardResponse>(ENDPOINTS.STAFF.SUBMIT, submissionData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      const realSrfNo = String(response.data.srf_no);
+      showMessage('success', `Inward Submitted! SRF Assigned: ${realSrfNo}`);
+      
+      // Update states for subsequent modals
+      setLastSavedInwardId(response.data.inward_id);
+      setLastSavedSrfNo(realSrfNo);
+      setReportEmails([selectedCustomerEmail || '']);
+      
+      // Update local form data so the PDF generator sees the real SRF No
+      setFormData(prev => ({ ...prev, srf_no: realSrfNo }));
+
+      notifyDraftUpdate();
+
+      // Trigger the selection modal instead of automatic download
+      // Note: We don't show the Email modal here yet; we trigger it 
+      // from handleConfirmDownload after they finish the PDF step.
+      setShowDownloadModal(true);
     }
-  };
+  } catch (error: any) {
+    console.error("Submission Error", error);
+    let errorMsg = 'Submission failed';
+    if (error.response?.status === 422 && Array.isArray(error.response.data.detail)) {
+      errorMsg = `Validation Error: ${error.response.data.detail.map((d: any) => `${d.loc[d.loc.length - 1]}: ${d.msg}`).join(' | ')}`;
+    } else if (error.response?.data?.detail) {
+      errorMsg = typeof error.response.data.detail === 'string' ? error.response.data.detail : JSON.stringify(error.response.data.detail);
+    } else if (error.message) errorMsg = error.message;
+    showMessage('error', errorMsg);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const addEmailField = () => {
     setReportEmails(prev => [...prev, '']);
@@ -1332,9 +1334,13 @@ const fetchFlowConfigs = useCallback(async () => {
             {/* UPDATED: Using the helper function here too */}
             <button onClick={handleClosePreview} className="px-6 py-3 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 font-medium">Cancel / Edit</button> 
             
-            <button onClick={handleFinalSubmit} className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold shadow-md"> 
-              <Download size={20} /> <span>{isEditMode ? 'Update' : 'Submit & Download PDF'}</span> 
-            </button> 
+<button 
+  onClick={handleFinalSubmit} 
+  className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold shadow-md"
+> 
+  <Save size={20} /> 
+  <span>{isEditMode ? 'Update Inward' : 'Submit & Configure PDF'}</span> 
+</button> 
           </div> 
         </div> 
       </div> 
@@ -1376,7 +1382,59 @@ const fetchFlowConfigs = useCallback(async () => {
         </div> 
     </div> 
   );
+const renderDownloadModal = () => {
+  if (!showDownloadModal) return null;
 
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-8 transform transition-all scale-100">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+            <Download size={24} />
+          </div>
+          <h3 className="text-xl font-bold text-gray-900">PDF Options</h3>
+        </div>
+        
+        <p className="text-sm text-gray-500 mb-6">
+          Your inward has been saved. Would you like to download the receipt PDF now?
+        </p>
+
+        <label className={`flex items-start gap-4 p-4 border rounded-xl cursor-pointer transition-all ${includeOutsourceInPDF ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:bg-gray-50'}`}>
+          <div className="pt-0.5">
+            <input
+              type="checkbox"
+              className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+              checked={includeOutsourceInPDF}
+              onChange={(e) => setIncludeOutsourceInPDF(e.target.checked)}
+            />
+          </div>
+          <div className="flex-1">
+            <span className="font-bold text-gray-900 block">Include Outsource Info</span>
+            <span className="text-[10px] text-gray-500 leading-tight">Supplier name and DC details</span>
+          </div>
+        </label>
+
+        <div className="flex flex-col gap-3 mt-8">
+          <button 
+            onClick={handleConfirmDownload} 
+            className="w-full py-3 text-white bg-blue-600 hover:bg-blue-700 rounded-xl font-bold shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
+          >
+            <Download className="h-5 w-5" /> 
+            <span>Download PDF</span>
+          </button>
+          
+          {/* Changed from simple Cancel to SkipDownload */}
+          <button 
+            onClick={handleSkipDownload} 
+            className="w-full py-3 text-gray-500 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl font-semibold transition-colors"
+          >
+            {isEditMode ? 'Close' : 'Skip Download & Continue'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
   const getModalEquipment = (): BaseEquipmentDetail | null => { if (!selectedEquipment) return null; const { inspe_status, inspe_remarks, accessories_included, ...rest } = selectedEquipment; const modalEquipment: BaseEquipmentDetail = { ...rest, calibration_by: selectedEquipment.calibration_by === 'On-Site' ? 'Out Lab' : selectedEquipment.calibration_by, inspe_notes: inspe_status === 'OK' ? 'OK' : (inspe_status === 'Not OK' ? 'Not OK' : inspe_remarks), }; return modalEquipment; }
 
   // --- [NEW] Style for Locked State ---
@@ -1893,26 +1951,27 @@ const fetchFlowConfigs = useCallback(async () => {
         </div>
 
         {/* Footer Actions */}
-        <div className="flex flex-wrap justify-end pt-6 border-t mt-8 gap-4 pointer-events-auto opacity-100"> 
-          <button
-            type="button"
-            onClick={handleStandardDownload}
-            disabled={!isFormReady}
-            className="flex items-center space-x-2 bg-slate-700 hover:bg-slate-800 disabled:bg-slate-300 text-white font-medium px-6 py-3 rounded-lg shadow transition-colors"
-          >
-            <FileText size={20} />
-            <span>Download Standard PDF</span>
-          </button>
+{/* Footer Actions */}
+<div className="flex flex-wrap justify-end pt-6 border-t mt-8 gap-4 pointer-events-auto opacity-100"> 
+  <button
+    type="button"
+    onClick={handleStandardDownload}
+    disabled={!isFormReady}
+    className="flex items-center space-x-2 bg-slate-700 hover:bg-slate-800 disabled:bg-slate-300 text-white font-medium px-6 py-3 rounded-lg shadow transition-colors"
+  >
+    <FileText size={20} />
+    <span>Download Standard PDF</span>
+  </button>
 
-          <button 
-            type="submit" 
-            disabled={!isFormReady || isLoading || isLocked} 
-            className="flex items-center space-x-3 bg-green-600 hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed text-white font-bold px-8 py-3 rounded-lg text-lg shadow-lg transition-all transform hover:scale-105"
-          >
-            {isLoading ? <Loader2 className="animate-spin" size={24} /> : <Save size={24} />}
-            <span>{isEditMode ? 'Update Inward' : 'Preview & Submit'}</span>
-          </button>
-        </div>
+  <button 
+    type="submit" 
+    disabled={!isFormReady || isLoading || isLocked} 
+    className="flex items-center space-x-3 bg-green-600 hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed text-white font-bold px-8 py-3 rounded-lg text-lg shadow-lg transition-all transform hover:scale-105"
+  >
+    {isLoading ? <Loader2 className="animate-spin" size={24} /> : <Save size={24} />}
+    <span>{isEditMode ? 'Update Inward' : 'Preview & Submit'}</span>
+  </button>
+</div>
       </form>
 
       {/* Modals */}
@@ -1921,7 +1980,7 @@ const fetchFlowConfigs = useCallback(async () => {
       {renderEmailModal()}
       {renderAddCustomerModal()}
       {renderAddMaterialModal()}
-
+      {renderDownloadModal()}
       {/* NEW: Delete Row Confirmation Modal */}
       {rowToDelete !== null && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
