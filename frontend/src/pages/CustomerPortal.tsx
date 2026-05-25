@@ -158,11 +158,11 @@ const NotificationCenter: React.FC<{ stats: DashboardStats }> = ({ stats }) => {
 
                                     <div className="flex-1">
                                         <p className="text-sm font-semibold">
-                                            Draft SRFs
+                                            Pending SRFs
                                         </p>
 
                                         <p className="text-xs text-gray-600">
-                                            You have {stats.draftSrfs} draft SRFs.
+                                            You have {stats.draftSrfs} pending SRFs.
                                         </p>
                                     </div>
                                 </div>

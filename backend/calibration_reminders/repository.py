@@ -1,15 +1,15 @@
 from __future__ import annotations
-
+ 
 from collections import defaultdict
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Literal
-
+ 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+ 
 SortBy = Literal["due_date", "certificate_no", "nepl_id", "serial_no", "srf_no"]
 SortOrder = Literal["asc", "desc"]
-
+ 
 SORT_COLUMN_MAP = {
     "due_date": "recommended_cal_due_date",
     "certificate_no": "certificate_no",
@@ -17,8 +17,8 @@ SORT_COLUMN_MAP = {
     "serial_no": "serial_no",
     "srf_no": "srf_no",
 }
-
-
+ 
+ 
 def _like_term(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -26,12 +26,12 @@ def _like_term(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     return f"%{value}%"
-
-
+ 
+ 
 def _build_due_rows_sql(sort_by: str, sort_order: str):
     sort_column = SORT_COLUMN_MAP.get(sort_by, SORT_COLUMN_MAP["due_date"])
     direction = "DESC" if str(sort_order).lower() == "desc" else "ASC"
-
+ 
     return text(
         f"""
         WITH due_rows AS (
@@ -70,15 +70,15 @@ def _build_due_rows_sql(sort_by: str, sort_order: str):
                   CURRENT_DATE + (:days_ahead || ' days')::interval
               )::date
               AND (:customer_id IS NULL OR cu.customer_id = :customer_id)
-
+ 
             UNION ALL
-
+ 
             SELECT
                 eu.id::int AS certificate_id,
                 COALESCE(ie.nepl_id, eu.certificate_file_name) AS certificate_no,
                 eu.recommended_cal_due_date,
                 NULL::text AS status,
-                NULL::timestamp with time zone AS issued_at,
+                eu.report_date AS issued_at,
                 NULL::int AS inward_id,
                 eu.inward_eqp_id,
                 i.srf_no,
@@ -158,8 +158,8 @@ def _build_due_rows_sql(sort_by: str, sort_order: str):
             certificate_no ASC
         """
     )
-
-
+ 
+ 
 EXISTING_NOTIFICATION_SQL = text(
     """
     SELECT 1
@@ -170,7 +170,7 @@ EXISTING_NOTIFICATION_SQL = text(
     LIMIT 1
     """
 )
-
+ 
 INSERT_NOTIFICATION_SQL = text(
     """
     INSERT INTO public.notifications
@@ -180,8 +180,8 @@ INSERT_NOTIFICATION_SQL = text(
     RETURNING id
     """
 )
-
-
+ 
+ 
 def fetch_due_certificates(
     db: Session,
     days_ahead: int = 7,
@@ -201,14 +201,14 @@ def fetch_due_certificates(
             "lot_like": _like_term(lot),
         },
     ).mappings().all()
-
+ 
     results: List[Dict[str, Any]] = []
     today = date.today()
-
+ 
     for row in rows:
         due_date = row["recommended_cal_due_date"]
         days_until_due = (due_date - today).days if due_date else None
-
+ 
         results.append(
             {
                 "certificate_id": row["certificate_id"],
@@ -235,21 +235,21 @@ def fetch_due_certificates(
             }
         )
     return results
-
-
+ 
+ 
 def group_by_customer(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     grouped = defaultdict(lambda: {"certificates": []})
-
+ 
     for row in rows:
         customer_id = row["customer_id"]
         key = customer_id if customer_id is not None else -1
         bucket = grouped[key]
-
+ 
         bucket["customer_id"] = customer_id
         bucket["customer_name"] = row.get("customer_name")
         bucket["customer_email"] = row.get("customer_email")
         bucket["certificates"].append(row)
-
+ 
     out: List[Dict[str, Any]] = []
     for bucket in grouped.values():
         out.append(
@@ -261,16 +261,16 @@ def group_by_customer(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "certificates": bucket["certificates"],
             }
         )
-
+ 
     out.sort(key=lambda x: (x["customer_name"] or "", x["customer_id"] or 0))
     return out
-
-
+ 
+ 
 def notification_exists(db: Session, to_email: str, subject: str) -> bool:
     result = db.execute(EXISTING_NOTIFICATION_SQL, {"to_email": to_email, "subject": subject}).first()
     return result is not None
-
-
+ 
+ 
 def insert_notification(
     db: Session,
     *,
@@ -297,3 +297,5 @@ def insert_notification(
         },
     ).first()
     return int(row[0]) if row else 0
+ 
+ 

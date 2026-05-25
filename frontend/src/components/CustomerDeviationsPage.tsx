@@ -104,9 +104,6 @@ const CustomerDeviationsPage: React.FC = () => {
  
     return (
       <div className="space-y-3">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
-          {title} ({sectionRows.length})
-        </div>
         {srfKeys.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm border border-slate-200 rounded-lg bg-white">{emptyText}</div>
         ) : (
@@ -292,7 +289,7 @@ const CustomerDeviationsPage: React.FC = () => {
                   : "border-slate-200 bg-white hover:bg-slate-50"
               }`}
             >
-              <h3 className="font-bold text-red-800">OOT - Out of Tolerance</h3>
+              <h3 className="font-bold text-red-800">Deviation - OOT</h3>
               <p className="text-sm text-red-700 mt-1">Grouped by SRF number. {ootRows.length} record(s).</p>
             </button>
             <button
@@ -304,7 +301,7 @@ const CustomerDeviationsPage: React.FC = () => {
                   : "border-slate-200 bg-white hover:bg-slate-50"
               }`}
             >
-              <h3 className="font-bold text-slate-800">Manual Deviation</h3>
+              <h3 className="font-bold text-slate-800">Deviation - NC</h3>
               <p className="text-sm text-slate-600 mt-1">Grouped by SRF number. {manualRows.length} record(s).</p>
             </button>
           </div>
