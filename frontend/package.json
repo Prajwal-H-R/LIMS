@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "axios": "^1.13.2",
+    "framer-motion": "^12.39.0",
     "jsbarcode": "^3.12.1",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.2",

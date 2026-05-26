@@ -47,4 +47,5 @@ from .equipment_flow_config import EquipmentFlowConfig
 from .external_upload import ExternalUpload
 from .external_deviation import ExternalDeviation
 from .external_deviation_attachments import ExternalDeviationAttachment
+from .final_inspection import FinalInspection
 from backend.db import Base

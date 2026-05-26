@@ -1,6 +1,7 @@
 # models.py
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -11,7 +12,7 @@ from sqlalchemy import (
     func
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped,mapped_column,relationship
 
 from backend.db import Base
 from backend.models.users import User
@@ -42,7 +43,11 @@ class ExternalDeviation(Base):
     engineer_remarks = Column(Text, nullable=True)
     customer_decision = Column(Text, nullable=True)
     report = Column(Date, nullable=True)
-
+    hide_customer_visibility: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     

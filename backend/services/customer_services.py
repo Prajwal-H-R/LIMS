@@ -196,29 +196,115 @@ class CustomerPortalService:
     @staticmethod
     def _check_htw_deviation_state(
         deviation_records: List[Any],
-    ) -> tuple[bool, bool]:
-        if not deviation_records:
-            return False, False
+    ) -> tuple[bool, bool, bool]:
+        """
+        Evaluates HTW deviation records respecting hide_customer_visibility.
 
+        Returns:
+            (has_active_visible_deviation, deviation_was_closed_visible, all_hidden)
+
+        - all_hidden=True  means every deviation has hide_customer_visibility=True
+          (or there are no deviations at all).  The OOT branch uses this to decide
+          whether to show "Calibration Completed" (hidden) or "Completed (OOT)" (visible).
+        - has_active_visible_deviation=True  → show "Deviation Raised" in timeline.
+        - deviation_was_closed_visible=True  → all visible deviations are resolved.
+        """
+        if not deviation_records:
+            logger.debug("[DEV-STATE-HTW] No records → (False, False, True)")
+            return False, False, True
+
+        visible_records = [
+            dev for dev in deviation_records
+            if not getattr(dev, "hide_customer_visibility", False)
+        ]
+
+        hidden_count  = len(deviation_records) - len(visible_records)
+        visible_count = len(visible_records)
+
+        logger.debug(
+            "[DEV-STATE-HTW] total=%d visible=%d hidden=%d",
+            len(deviation_records), visible_count, hidden_count,
+        )
+
+        if not visible_records:
+            # Every deviation is hidden from customer → behave as no deviation
+            logger.info(
+                "[DEV-STATE-HTW] All %d deviation(s) hidden → (False, False, True)",
+                len(deviation_records),
+            )
+            return False, False, True
+
+        # Among visible records check if any are still active
         has_active = False
-        for dev in deviation_records:
+        for dev in visible_records:
             raw  = (getattr(dev, "status", None) or "").strip().lower()
             norm = raw.replace(" ", "_")
-            if norm in DeviationStatus.ACTIVE_SET or (
+            is_active = norm in DeviationStatus.ACTIVE_SET or (
                 norm and norm not in DeviationStatus.CLOSED_SET
-            ):
+            )
+            logger.debug(
+                "[DEV-STATE-HTW] dev_id=%s status=%r norm=%r is_active=%s hide=%s",
+                getattr(dev, "id", "?"), raw, norm, is_active,
+                getattr(dev, "hide_customer_visibility", False),
+            )
+            if is_active:
                 has_active = True
                 break
 
-        return has_active, not has_active
+        deviation_was_closed = not has_active
+
+        logger.info(
+            "[DEV-STATE-HTW] RESULT has_active=%s was_closed=%s all_hidden=False "
+            "(visible=%d hidden=%d)",
+            has_active, deviation_was_closed, visible_count, hidden_count,
+        )
+        # all_hidden=False because we DO have visible records
+        return has_active, deviation_was_closed, False
 
     @staticmethod
     def _check_external_deviation_state(
         has_deviation_record:     bool,
         has_certificate_uploaded: bool,
+        deviation_records:        Optional[List[Any]] = None,
     ) -> tuple[bool, bool]:
+        """
+        Evaluates external deviation state respecting hide_customer_visibility.
+
+        Returns:
+            (has_active_visible_deviation, ext_dev_resolved_visible)
+        """
         if not has_deviation_record:
+            logger.debug("[DEV-STATE-EXT] No deviation record → (False, False)")
             return False, False
+
+        if deviation_records:
+            visible_records = [
+                dev for dev in deviation_records
+                if not getattr(dev, "hide_customer_visibility", False)
+            ]
+            hidden_count  = len(deviation_records) - len(visible_records)
+            visible_count = len(visible_records)
+
+            logger.debug(
+                "[DEV-STATE-EXT] total=%d visible=%d hidden=%d",
+                len(deviation_records), visible_count, hidden_count,
+            )
+
+            if not visible_records:
+                logger.info(
+                    "[DEV-STATE-EXT] All %d ext deviation(s) hidden → (False, False)",
+                    len(deviation_records),
+                )
+                return False, False
+
+            if has_certificate_uploaded:
+                logger.info("[DEV-STATE-EXT] Visible + cert → resolved (False, True)")
+                return False, True
+
+            logger.info("[DEV-STATE-EXT] Visible + no cert → active (True, False)")
+            return True, False
+
+        # Legacy fallback (no records list provided)
         if has_certificate_uploaded:
             return False, True
         return True, False
@@ -500,17 +586,24 @@ class CustomerPortalService:
         cert:                 Optional[HTWCertificate],
         has_active_deviation: bool,
         deviation_was_closed: bool,
+        all_dev_hidden:       bool = True,
     ) -> Dict[str, Any]:
         """
-        HTW timeline: 6 steps.
+        HTW 6-step timeline.
 
-        Step indices:
-          0 = Received
-          1 = Inward
-          2 = Calibration In Progress   (label OVERWRITTEN dynamically)
-          3 = Calibration Completed     (label OVERWRITTEN to "Completed (OOT)" on OOT)
-          4 = Certificate Ready
-          5 = Certificate Dispatched
+        OOT visibility rule
+        ───────────────────
+        Job status = completed_oot (or any OOT variant):
+          • all_dev_hidden=True  (hide_customer_visibility=True on every record,
+                                  OR no deviation records at all)
+              → show "Calibration Completed"  (customer must NOT see OOT)
+          • all_dev_hidden=False (at least one record has hide_customer_visibility=False)
+              → show "Completed (OOT)"  with alert  (customer CAN see OOT)
+
+        Deviation-on-hold rule (job = on_hold):
+          • has_active_deviation=True   → "Deviation Raised"
+          • deviation_was_closed=True   → "Calibration In Progress" (resuming)
+          • neither                     → plain "Calibration On Hold"
         """
 
         steps = [
@@ -549,7 +642,6 @@ class CustomerPortalService:
         current_step   = 1
         display_status = "Inward Generated"
         alert_message: Optional[str] = None
-
         eqp_id = getattr(equipment, "inward_eqp_id", None)
 
         # ── Job logic ──────────────────────────────────────────────────
@@ -558,10 +650,6 @@ class CustomerPortalService:
             norm   = raw.replace(" ", "_").replace("-", "_")
             job_ts = _safe_strftime(job.created_at, "%Y-%m-%d %H:%M", now_str)
 
-            # ✅ Robust OOT detection — catches all variants:
-            #    "completed_oot", "completed oot", "completed-oot",
-            #    "oot", "out_of_tolerance", "out of tolerance",
-            #    "completed (oot)", etc.
             is_oot = (
                 norm in JobStatus.OOT_SET
                 or "oot" in norm
@@ -570,73 +658,100 @@ class CustomerPortalService:
             )
 
             logger.info(
-                "[HTW-TIMELINE] eqp_id=%s job_id=%s raw=%r norm=%r is_oot=%s",
-                eqp_id, getattr(job, "job_id", None), raw, norm, is_oot,
+                "[HTW-TIMELINE] eqp_id=%s job_id=%s raw=%r norm=%r is_oot=%s "
+                "has_active_dev=%s dev_closed=%s all_dev_hidden=%s",
+                eqp_id, getattr(job, "job_id", None),
+                raw, norm, is_oot,
+                has_active_deviation, deviation_was_closed, all_dev_hidden,
             )
 
             # ── 1. TERMINATED ─────────────────────────────────────────
             if norm in JobStatus.TERMINATED_SET:
-                current_step          = 2
-                steps[2]["label"]     = "Terminated"
-                steps[2]["icon"]      = "x"
-                display_status        = "Terminated"
-                alert_message         = (
+                current_step      = 2
+                steps[2]["label"] = "Terminated"
+                steps[2]["icon"]  = "x"
+                display_status    = "Terminated"
+                alert_message     = (
                     "The calibration job for this equipment has been terminated. "
                     "Please contact the lab for further assistance."
                 )
                 logger.info(
-                    "[HTW-TIMELINE] eqp_id=%s STATE=TERMINATED step=%d",
-                    eqp_id, current_step,
+                    "[HTW-TIMELINE] eqp_id=%s STATE=TERMINATED", eqp_id
                 )
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job was assigned.",
+                    "description": "Job was assigned.",
                     "type":        "info",
                 })
                 activity_log.append({
                     "date":        now_str,
                     "title":       "Calibration Terminated",
-                    "description": (
-                        "The calibration process was terminated. "
-                        "Please contact the lab."
-                    ),
+                    "description": "The calibration process was terminated. Please contact the lab.",
                     "type":        "error",
                 })
 
-            # ── 2. COMPLETED OOT ✅ (CHECK BEFORE on_hold / completed) ──
+            # ── 2. COMPLETED OOT — visibility-aware ───────────────────
             elif is_oot:
-                current_step          = 3                     # ✅ Calibration Completed step
-                steps[3]["label"]     = "Completed (OOT)"
-                steps[3]["icon"]      = "gauge"
-                display_status        = "Calibration Completed – Out Of Tolerance"
-                alert_message         = (
-                    "⚠️ Calibration has been completed, however the instrument "
-                    "readings are Out Of Tolerance (OOT). The results fall outside "
-                    "the acceptable calibration range. Please review the calibration "
-                    "report carefully and contact the lab to discuss next steps such "
-                    "as repair, adjustment, or retirement of this instrument."
-                )
-                logger.info(
-                    "[HTW-TIMELINE] OOT BRANCH HIT eqp_id=%s step=%d display=%r",
-                    eqp_id, current_step, display_status,
-                )
-                activity_log.append({
-                    "date":        job_ts,
-                    "title":       "Calibration Started",
-                    "description": f"Job was assigned to technician.",
-                    "type":        "info",
-                })
-                activity_log.append({
-                    "date":        now_str,
-                    "title":       "Calibration Completed – Out Of Tolerance ⚠️",
-                    "description": (
-                        "Calibration process completed. Final readings recorded. "
-                        "Instrument is Out Of Tolerance (OOT) — values exceed "
-                        "acceptable calibration limits."
-                    ),
-                    "type":        "warning",
-                })
+                current_step = 3
+
+                if all_dev_hidden:
+                    # ── hide_customer_visibility = TRUE on all deviations
+                    #    (or no deviation records) → mask OOT from customer
+                    steps[3]["label"] = "Calibration Completed"
+                    steps[3]["icon"]  = "check"
+                    display_status    = "Calibration Completed"
+                    alert_message     = None
+                    logger.info(
+                        "[HTW-TIMELINE] eqp_id=%s OOT but all_dev_hidden=True "
+                        "→ showing plain 'Calibration Completed'",
+                        eqp_id,
+                    )
+                    activity_log.append({
+                        "date":        job_ts,
+                        "title":       "Calibration Started",
+                        "description": "Job was assigned to technician.",
+                        "type":        "info",
+                    })
+                    activity_log.append({
+                        "date":        now_str,
+                        "title":       "Calibration Completed",
+                        "description": "Final readings recorded and verified.",
+                        "type":        "success",
+                    })
+                else:
+                    # ── hide_customer_visibility = FALSE → show OOT
+                    steps[3]["label"] = "Completed (OOT)"
+                    steps[3]["icon"]  = "gauge"
+                    display_status    = "Calibration Completed – Out Of Tolerance"
+                    alert_message     = (
+                        "⚠️ Calibration has been completed, however the instrument "
+                        "readings are Out Of Tolerance (OOT). The results fall outside "
+                        "the acceptable calibration range. Please review the calibration "
+                        "report carefully and contact the lab to discuss next steps such "
+                        "as repair, adjustment, or retirement of this instrument."
+                    )
+                    logger.info(
+                        "[HTW-TIMELINE] eqp_id=%s OOT and all_dev_hidden=False "
+                        "→ showing 'Completed (OOT)'",
+                        eqp_id,
+                    )
+                    activity_log.append({
+                        "date":        job_ts,
+                        "title":       "Calibration Started",
+                        "description": "Job was assigned to technician.",
+                        "type":        "info",
+                    })
+                    activity_log.append({
+                        "date":        now_str,
+                        "title":       "Calibration Completed – Out Of Tolerance ⚠️",
+                        "description": (
+                            "Calibration process completed. Final readings recorded. "
+                            "Instrument is Out Of Tolerance (OOT) — values exceed "
+                            "acceptable calibration limits."
+                        ),
+                        "type": "warning",
+                    })
 
             # ── 3. ON HOLD ────────────────────────────────────────────
             elif norm in JobStatus.ON_HOLD_SET:
@@ -644,11 +759,12 @@ class CustomerPortalService:
                 activity_log.append({
                     "date":        job_ts,
                     "title":       "Calibration Started",
-                    "description": f"Job was assigned.",
+                    "description": "Job was assigned.",
                     "type":        "info",
                 })
 
                 if has_active_deviation:
+                    # Visible active deviation
                     steps[2]["label"] = "Deviation Raised"
                     steps[2]["icon"]  = "alert"
                     display_status    = "Deviation Raised"
@@ -657,8 +773,7 @@ class CustomerPortalService:
                         "currently on hold. Our team will contact you shortly."
                     )
                     logger.info(
-                        "[HTW-TIMELINE] eqp_id=%s STATE=DEVIATION step=%d",
-                        eqp_id, current_step,
+                        "[HTW-TIMELINE] eqp_id=%s STATE=DEVIATION (visible)", eqp_id
                     )
                     activity_log.append({
                         "date":        now_str,
@@ -667,24 +782,24 @@ class CustomerPortalService:
                             "Equipment is on hold due to an active deviation. "
                             "Awaiting decision."
                         ),
-                        "type":        "warning",
+                        "type": "warning",
                     })
+
                 elif deviation_was_closed:
+                    # Visible deviation was resolved
                     display_status = "Calibration In Progress"
                     logger.info(
-                        "[HTW-TIMELINE] eqp_id=%s STATE=DEVIATION_RESOLVED step=%d",
-                        eqp_id, current_step,
+                        "[HTW-TIMELINE] eqp_id=%s STATE=DEVIATION_RESOLVED", eqp_id
                     )
                     activity_log.append({
                         "date":        now_str,
                         "title":       "Deviation Resolved – Calibration Resuming",
-                        "description": (
-                            "The deviation has been closed. "
-                            "Calibration is resuming."
-                        ),
+                        "description": "The deviation has been closed. Calibration is resuming.",
                         "type":        "success",
                     })
+
                 else:
+                    # No visible deviation (hidden or none) → plain on-hold
                     steps[2]["label"] = "On Hold"
                     steps[2]["icon"]  = "pause"
                     display_status    = "Calibration On Hold"
@@ -693,8 +808,8 @@ class CustomerPortalService:
                         "Please contact the lab for more information."
                     )
                     logger.info(
-                        "[HTW-TIMELINE] eqp_id=%s STATE=ON_HOLD step=%d",
-                        eqp_id, current_step,
+                        "[HTW-TIMELINE] eqp_id=%s STATE=ON_HOLD (no visible deviation)",
+                        eqp_id,
                     )
                     activity_log.append({
                         "date":        now_str,
@@ -708,8 +823,7 @@ class CustomerPortalService:
                 current_step   = 3
                 display_status = "Calibration Completed"
                 logger.info(
-                    "[HTW-TIMELINE] eqp_id=%s STATE=COMPLETED step=%d",
-                    eqp_id, current_step,
+                    "[HTW-TIMELINE] eqp_id=%s STATE=COMPLETED", eqp_id
                 )
                 activity_log.append({
                     "date":        job_ts,
@@ -724,13 +838,12 @@ class CustomerPortalService:
                     "type":        "success",
                 })
 
-            # ── 5. ACTIVE (created / in_progress / any other raw value) ──
+            # ── 5. ACTIVE / IN-PROGRESS ───────────────────────────────
             elif norm in JobStatus.ACTIVE_SET or raw:
                 current_step   = 2
                 display_status = "Calibration In Progress"
                 logger.info(
-                    "[HTW-TIMELINE] eqp_id=%s STATE=IN_PROGRESS step=%d",
-                    eqp_id, current_step,
+                    "[HTW-TIMELINE] eqp_id=%s STATE=IN_PROGRESS", eqp_id
                 )
                 activity_log.append({
                     "date":        job_ts,
@@ -738,6 +851,7 @@ class CustomerPortalService:
                     "description": "Job assigned to technician.",
                     "type":        "info",
                 })
+
         else:
             logger.info("[HTW-TIMELINE] eqp_id=%s STATE=NO_JOB", eqp_id)
 
@@ -784,8 +898,8 @@ class CustomerPortalService:
                 })
 
         logger.info(
-            "[HTW-TIMELINE] eqp_id=%s FINAL current_step=%d display=%r alert=%s "
-            "step_labels=%s",
+            "[HTW-TIMELINE] eqp_id=%s FINAL current_step=%d display=%r "
+            "alert=%s step_labels=%s",
             eqp_id, current_step, display_status,
             bool(alert_message), [s["label"] for s in steps],
         )
@@ -809,10 +923,12 @@ class CustomerPortalService:
         deviation_resolved:   bool,
     ) -> Dict[str, Any]:
         """
-        Non-HTW (external lab) timeline: 4 steps.
+        Non-HTW (external lab) 4-step timeline.
 
-        ✅ NO "Certificate Ready" step — goes straight to "Dispatched"
-        once external_uploads.certificate_file_url is populated.
+        Deviation visibility:
+          - has_active_deviation=True  → show "Deviation Raised"
+          - has_active_deviation=False → follow normal external flow
+          - deviation_resolved=True    → show resolution note only
         """
 
         steps = [
@@ -849,30 +965,27 @@ class CustomerPortalService:
         current_step   = 1
         display_status = "Inward Generated"
         alert_message: Optional[str] = None
-
         eqp_id = getattr(equipment, "inward_eqp_id", None)
 
         upload_ts = _safe_strftime(
-            getattr(ext_upload, "updated_at", None),
-            "%Y-%m-%d %H:%M", now_str,
+            getattr(ext_upload, "updated_at", None), "%Y-%m-%d %H:%M", now_str,
         )
 
         has_calibration_doc = bool(
-            ext_upload
-            and getattr(ext_upload, "calibration_worksheet_file_url", None)
+            ext_upload and getattr(ext_upload, "calibration_worksheet_file_url", None)
         )
         has_certificate_doc = bool(
-            ext_upload
-            and getattr(ext_upload, "certificate_file_url", None)
+            ext_upload and getattr(ext_upload, "certificate_file_url", None)
         )
 
         logger.info(
-            "[EXT-TIMELINE] eqp_id=%s has_calibration_doc=%s "
-            "has_certificate_doc=%s active_dev=%s dev_resolved=%s",
+            "[EXT-TIMELINE] eqp_id=%s has_cal_doc=%s has_cert_doc=%s "
+            "active_dev=%s dev_resolved=%s",
             eqp_id, has_calibration_doc, has_certificate_doc,
             has_active_deviation, deviation_resolved,
         )
 
+        # Step 1: calibration worksheet uploaded
         if has_calibration_doc:
             current_step   = 2
             display_status = "Calibration In Progress"
@@ -883,6 +996,7 @@ class CustomerPortalService:
                 "type":        "info",
             })
 
+        # Step 2: deviation state (only if visible)
         if has_active_deviation:
             current_step      = 2
             steps[2]["label"] = "Deviation Raised"
@@ -893,8 +1007,7 @@ class CustomerPortalService:
                 "Our team will contact you shortly regarding the next steps."
             )
             logger.info(
-                "[EXT-TIMELINE] eqp_id=%s STATE=DEVIATION step=%d",
-                eqp_id, current_step,
+                "[EXT-TIMELINE] eqp_id=%s STATE=DEVIATION (visible)", eqp_id
             )
             activity_log.append({
                 "date":        now_str,
@@ -906,6 +1019,9 @@ class CustomerPortalService:
                 "type": "warning",
             })
         elif deviation_resolved:
+            logger.info(
+                "[EXT-TIMELINE] eqp_id=%s STATE=DEVIATION_RESOLVED", eqp_id
+            )
             activity_log.append({
                 "date":        upload_ts,
                 "title":       "Deviation Resolved",
@@ -915,14 +1031,15 @@ class CustomerPortalService:
                 ),
                 "type": "success",
             })
+        # else: no visible deviation → no mention at all
 
+        # Step 3: certificate file uploaded
         if has_certificate_doc:
             current_step   = 3
             display_status = "Certificate Dispatched"
             alert_message  = None
             logger.info(
-                "[EXT-TIMELINE] eqp_id=%s STATE=DISPATCHED (cert file uploaded) step=%d",
-                eqp_id, current_step,
+                "[EXT-TIMELINE] eqp_id=%s STATE=DISPATCHED (cert file)", eqp_id
             )
             activity_log.append({
                 "date":        upload_ts,
@@ -934,13 +1051,13 @@ class CustomerPortalService:
                 "type": "success",
             })
 
+        # Step 4: HTWCertificate issued override
         if cert:
             cert_status = (cert.status or "").strip().lower()
             logger.info(
                 "[EXT-TIMELINE] eqp_id=%s cert_id=%s cert_status=%r",
                 eqp_id, getattr(cert, "certificate_id", None), cert_status,
             )
-
             if cert_status in CertStatus.DISPATCHED_SET:
                 current_step   = 3
                 display_status = "Certificate Dispatched"
@@ -959,8 +1076,8 @@ class CustomerPortalService:
                 })
 
         logger.info(
-            "[EXT-TIMELINE] eqp_id=%s FINAL current_step=%d display=%r alert=%s "
-            "step_labels=%s",
+            "[EXT-TIMELINE] eqp_id=%s FINAL current_step=%d display=%r "
+            "alert=%s step_labels=%s",
             eqp_id, current_step, display_status,
             bool(alert_message), [s["label"] for s in steps],
         )
@@ -991,7 +1108,6 @@ class CustomerPortalService:
             if idx < current_step:
                 step_status = "completed"
             elif idx == current_step:
-                # Order matters — most-specific checks first
                 if "terminated" in ds:
                     step_status = "terminated"
                 elif "out of tolerance" in ds or "oot" in ds:
@@ -1008,7 +1124,7 @@ class CustomerPortalService:
             step_date: Optional[str] = None
             if idx == 0:
                 step_date = received_date
-            if idx == 1:
+            elif idx == 1:
                 step_date = inward_date
 
             timeline.append({
@@ -1044,15 +1160,15 @@ class CustomerPortalService:
         cert:                 Optional[HTWCertificate] = None,
         has_active_deviation: bool = False,
         deviation_was_closed: bool = False,
+        all_dev_hidden:       bool = True,
         has_active_ext_dev:   bool = False,
         ext_dev_resolved:     bool = False,
     ) -> Dict[str, Any]:
         is_htw = self._is_htw_equipment(equipment)
-
         if is_htw:
             return self._build_htw_timeline(
                 equipment, inward, job, cert,
-                has_active_deviation, deviation_was_closed,
+                has_active_deviation, deviation_was_closed, all_dev_hidden,
             )
         return self._build_external_timeline(
             equipment, inward, ext_upload, cert,
@@ -1093,6 +1209,7 @@ class CustomerPortalService:
             ):
                 found_via = "DC Number"
         else:
+            # ── Strategy 2: NEPL ID ───────────────────────────────────
             eq_match = self.db.execute(
                 select(InwardEquipment.inward_id, InwardEquipment.nepl_id)
                 .join(Inward, InwardEquipment.inward_id == Inward.inward_id)
@@ -1150,33 +1267,24 @@ class CustomerPortalService:
                 )
             ).scalars().unique().all()
         }
-        logger.info(
-            "[TRACK] ExternalUploads found: %d / %d",
-            len(ext_upload_map), len(eqp_ids),
-        )
 
-        # ── Batch 2: ExternalDeviation IDs ───────────────────────────
-        ext_deviation_eqp_ids: set = set(
-            self.db.execute(
-                select(ExternalDeviation.inward_eqp_id)
-                .where(ExternalDeviation.inward_eqp_id.in_(eqp_ids))
-                .distinct()
-            ).scalars().all()
-        )
-        logger.info(
-            "[TRACK] External deviations on eqp_ids: %s", ext_deviation_eqp_ids,
-        )
+        # ── Batch 2: ExternalDeviation records (full objects) ─────────
+        ext_deviation_map: Dict[int, List[Any]] = {i: [] for i in eqp_ids}
+        for ext_dev in self.db.execute(
+            select(ExternalDeviation).where(
+                ExternalDeviation.inward_eqp_id.in_(eqp_ids)
+            )
+        ).scalars().unique().all():
+            ext_deviation_map[ext_dev.inward_eqp_id].append(ext_dev)
 
-        # ── Batch 3: HTW Deviation records ───────────────────────────
+        # ── Batch 3: HTW Deviation records (full objects) ─────────────
         htw_dev_map: Dict[int, List[Any]] = {i: [] for i in eqp_ids}
         for dev in self.db.execute(
-            select(Deviation).where(Deviation.inward_eqp_id.in_(eqp_ids))
+            select(Deviation).where(
+                Deviation.inward_eqp_id.in_(eqp_ids)
+            )
         ).scalars().unique().all():
             htw_dev_map[dev.inward_eqp_id].append(dev)
-        logger.info(
-            "[TRACK] HTW deviation counts: %s",
-            {k: len(v) for k, v in htw_dev_map.items() if v},
-        )
 
         # ── Batch 4: Certificates ─────────────────────────────────────
         cert_map: Dict[int, HTWCertificate] = {}
@@ -1187,42 +1295,27 @@ class CustomerPortalService:
                 )
             ).scalars().unique().all()
 
-            wanted_statuses: set = (
-                CertStatus.READY_SET | CertStatus.DISPATCHED_SET
-            )
+            wanted_statuses: set = CertStatus.READY_SET | CertStatus.DISPATCHED_SET
 
-            cert_rows = [
-                c for c in sorted(
-                    all_certs,
-                    key=lambda c: c.certificate_id,
-                    reverse=True,
-                )
-                if (c.status or "").strip().lower() in wanted_statuses
-            ]
-
-            for c in cert_rows:
+            for c in sorted(all_certs, key=lambda c: c.certificate_id, reverse=True):
+                if (c.status or "").strip().lower() not in wanted_statuses:
+                    continue
                 eqp_id = c.inward_eqp_id
                 if eqp_id is None:
                     continue
-
                 existing = cert_map.get(eqp_id)
                 if existing is None:
                     cert_map[eqp_id] = c
                 else:
-                    new_prio = CertStatus.PRIORITY.get(
-                        (c.status or "").lower(), 0
-                    )
-                    old_prio = CertStatus.PRIORITY.get(
-                        (existing.status or "").lower(), 0
-                    )
+                    new_prio = CertStatus.PRIORITY.get((c.status or "").lower(), 0)
+                    old_prio = CertStatus.PRIORITY.get((existing.status or "").lower(), 0)
                     if new_prio > old_prio:
                         cert_map[eqp_id] = c
 
             logger.info(
-                "[TRACK] HTW certs picked: %s",
+                "[TRACK] Certs picked: %s",
                 {k: (v.certificate_id, v.status) for k, v in cert_map.items()},
             )
-
         except Exception as e:
             logger.error(
                 "Exception fetching certificates for eqp_ids=%s: %s",
@@ -1238,17 +1331,23 @@ class CustomerPortalService:
             cert   = cert_map.get(eq.inward_eqp_id)
 
             if is_htw:
+                # ── HTW path ──────────────────────────────────────────
                 htw_devs = htw_dev_map.get(eq.inward_eqp_id, [])
-                has_active_dev, dev_was_closed = self._check_htw_deviation_state(
-                    htw_devs
+
+                # Returns (has_active, was_closed, all_hidden)
+                has_active_dev, dev_was_closed, all_dev_hidden = (
+                    self._check_htw_deviation_state(htw_devs)
                 )
+
                 logger.info(
-                    "[TRACK] eqp_id=%s HTW path: has_active_dev=%s dev_closed=%s "
-                    "job_status=%r cert=%s",
-                    eq.inward_eqp_id, has_active_dev, dev_was_closed,
+                    "[TRACK] eqp_id=%s HTW: total_devs=%d has_active=%s "
+                    "closed=%s all_hidden=%s job=%r cert=%s",
+                    eq.inward_eqp_id, len(htw_devs),
+                    has_active_dev, dev_was_closed, all_dev_hidden,
                     getattr(job, "job_status", None),
                     getattr(cert, "status", None) if cert else None,
                 )
+
                 result = self._determine_timeline_and_status(
                     equipment=eq,
                     inward=inward,
@@ -1257,27 +1356,30 @@ class CustomerPortalService:
                     cert=cert,
                     has_active_deviation=has_active_dev,
                     deviation_was_closed=dev_was_closed,
+                    all_dev_hidden=all_dev_hidden,
                 )
-            else:
-                ext_upload = ext_upload_map.get(eq.inward_eqp_id) or _UploadSentinel()
 
-                has_ext_dev_record = eq.inward_eqp_id in ext_deviation_eqp_ids
-                has_cert_doc       = bool(
-                    getattr(ext_upload, "certificate_file_url", None)
-                )
+            else:
+                # ── External path ─────────────────────────────────────
+                ext_upload     = ext_upload_map.get(eq.inward_eqp_id) or _UploadSentinel()
+                ext_dev_records = ext_deviation_map.get(eq.inward_eqp_id, [])
+                has_cert_doc   = bool(getattr(ext_upload, "certificate_file_url", None))
 
                 has_active_ext_dev, ext_dev_resolved = (
                     self._check_external_deviation_state(
-                        has_deviation_record=has_ext_dev_record,
+                        has_deviation_record=bool(ext_dev_records),
                         has_certificate_uploaded=has_cert_doc,
+                        deviation_records=ext_dev_records,
                     )
                 )
+
                 logger.info(
-                    "[TRACK] eqp_id=%s EXT path: has_dev_rec=%s has_cert_doc=%s "
-                    "active_ext_dev=%s ext_dev_resolved=%s",
-                    eq.inward_eqp_id, has_ext_dev_record, has_cert_doc,
-                    has_active_ext_dev, ext_dev_resolved,
+                    "[TRACK] eqp_id=%s EXT: total_devs=%d has_cert_doc=%s "
+                    "active_ext=%s resolved=%s",
+                    eq.inward_eqp_id, len(ext_dev_records),
+                    has_cert_doc, has_active_ext_dev, ext_dev_resolved,
                 )
+
                 result = self._determine_timeline_and_status(
                     equipment=eq,
                     inward=inward,
@@ -1288,14 +1390,16 @@ class CustomerPortalService:
                     ext_dev_resolved=ext_dev_resolved,
                 )
 
+            # ── Build the entry dict with ALL required schema fields ──
             entry: Dict[str, Any] = {
+                # ── Required fields (must match your response schema) ──
                 "nepl_id":             eq.nepl_id,
-                "inward_eqp_id":       eq.inward_eqp_id,
+                "inward_eqp_id":       eq.inward_eqp_id,       # ← was missing
                 "srf_no":              inward.srf_no,
-                "customer_name":       cust.customer_details,
+                "customer_name":       cust.customer_details,   # ← was missing
                 "dc_number":           inward.customer_dc_no,
-                "qty":                 1,
-                "current_status":      eq.status or "received",
+                "qty":                 eq.quantity or 1,        # ← was missing
+                "current_status":      eq.status or "received", # ← was missing
                 "display_status":      result["display_status"],
                 "timeline":            result["timeline"],
                 "activity_log":        result["activity_log"],
@@ -1306,13 +1410,11 @@ class CustomerPortalService:
 
             formatted_equipments.append(entry)
 
-        logger.info(
-            "[TRACK] Returning %d equipment entries", len(formatted_equipments),
-        )
+        logger.info("[TRACK] Returning %d entries", len(formatted_equipments))
 
         return {
             "search_query": clean_query,
-            "found_via":    found_via,
+            "found_via":    found_via,          # ← was missing from top-level
             "equipments":   formatted_equipments,
         }
 

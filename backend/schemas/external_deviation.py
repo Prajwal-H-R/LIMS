@@ -20,6 +20,7 @@ class ExternalDeviationBase(BaseModel):
     step_per_deviation: Dict[str, Any]
     created_by: Optional[int] = None
     engineer_remarks: Optional[str] = None
+    hide_customer_visibility: Optional[bool] = False
     customer_decision: Optional[str] = None
     report: Optional[date] = None
 
@@ -37,6 +38,7 @@ class ExternalDeviationUpdate(BaseModel):
     engineer_remarks: Optional[str] = None
     customer_decision: Optional[str] = None
     report: Optional[date] = None
+    hide_customer_visibility: Optional[bool] = None
 
 # Schema for reading/returning a deviation from the API (includes DB-generated fields)
 class ExternalDeviation(ExternalDeviationBase):

@@ -26,3 +26,7 @@ class Customer(Base):
     
     # One-to-Many: A customer can be linked in multiple invitations.
     invitations = relationship("Invitation", back_populates="customer")
+    final_inspections = relationship(
+    "FinalInspection",
+    back_populates="customer"
+)

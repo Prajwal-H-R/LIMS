@@ -5,7 +5,7 @@ from typing import List
 
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, asc, func
-from datetime import datetime
+from datetime import datetime,timezone
 
 # --- MODELS ---
 from backend.models import (
@@ -70,6 +70,9 @@ def finalize_htw_job(db: Session, job_id: int, threshold: float = 4.0):
                 inward_eqp_id=job.inward_eqp_id,
                 job_id=job.job_id,
                 status="OPEN",
+                calibration_status="calibrated", # OOT is always calibrated
+                report=datetime.now(timezone.utc).date(),
+                hide_customer_visibility=True
             )
             db.add(new_deviation)
         else:

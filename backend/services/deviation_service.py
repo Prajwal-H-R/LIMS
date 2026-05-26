@@ -6,7 +6,7 @@ from pathlib import Path
 import uuid
 from typing import Dict, List, Optional
 import fastapi.encoders
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from backend.models.deviation import Deviation
@@ -45,60 +45,126 @@ def safe_bytes_encoder(obj: bytes):
 fastapi.encoders.ENCODERS_BY_TYPE[bytes] = safe_bytes_encoder
 
 def _derive_deviation_type(d: Deviation) -> str:
-    if d.job_id is not None and d.created_by is None: return "OOT"
+    """
+    STRICT CLASSIFICATION:
+    - OOT: System-generated (has job_id AND created_by is NULL)
+    - MANUAL: Human-generated (created_by is NOT NULL)
+    """
+    if d.job_id is not None and d.created_by is None:
+        return "OOT"
     return "MANUAL"
 
 def _derive_calibration_status(job_status: Optional[str], deviation_type: str) -> str:
     return "calibrated" if deviation_type == "OOT" else "not calibrated"
 
 def _get_job_for_deviation(db: Session, d: Deviation) -> Optional[HTWJob]:
-    if d.job_id is not None: return db.query(HTWJob).filter(HTWJob.job_id == d.job_id).first()
-    return db.query(HTWJob).filter(HTWJob.inward_eqp_id == d.inward_eqp_id).order_by(HTWJob.job_id.desc()).first()
+    """
+    Finds the specific job for this deviation.
+    If it's an OOT record, it MUST have a job_id or be the latest job.
+    If it's MANUAL, we only link it to a job if job_id is explicitly set.
+    """
+    if d.job_id is not None:
+        return db.query(HTWJob).filter(HTWJob.job_id == d.job_id).first()
+    
+    # Only fallback to 'latest job' for OOT types. 
+    # Manual deviations shouldn't 'steal' job info unless linked.
+    if _derive_deviation_type(d) == "OOT":
+        return db.query(HTWJob).filter(HTWJob.inward_eqp_id == d.inward_eqp_id).order_by(HTWJob.job_id.desc()).first()
+    
+    return None
 
 def sync_deviation_calibration_status(db: Session, d: Deviation) -> bool:
-    job = _get_job_for_deviation(db, d)
-    desired = _derive_calibration_status(job.job_status if job else None, _derive_deviation_type(d))
-    if (d.calibration_status or "").strip().lower() != desired:
-        d.calibration_status = desired; d.updated_at = datetime.now(timezone.utc); return True
-    return False
+    """Updates status and ensures the 'report' date is filled from 'created_at'."""
+    changed = False
+    
+    # 1. Fill the report date if missing (Critical for your requirement)
+    if d.report is None and d.created_at:
+        d.report = d.created_at.date()
+        changed = True
+    
+    # 2. Ensure calibration status is correct based on type
+    dev_type = _derive_deviation_type(d)
+    desired = "calibrated" if dev_type == "OOT" else "not calibrated"
+    
+    if (d.calibration_status or "").lower() != desired:
+        d.calibration_status = desired
+        changed = True
+            
+    if changed:
+        d.updated_at = datetime.now(timezone.utc)
+    return changed
 
 def sync_job_status_from_deviation(db: Session, d: Deviation, terminate: bool = False) -> None:
-    logging.debug(f"Entering for deviation_id={d.id}, inward_eqp_id={d.inward_eqp_id}, terminate={terminate}")
+    # IMPORTANT: Flush the session so the DB query 'active_count' sees the current status change
+    db.flush()
+    
     job = _get_job_for_deviation(db, d)
-    if not job: logging.warning(f"No associated job found for deviation_id={d.id}. Aborting status sync."); return
-    logging.debug(f"Found job_id={job.job_id}. Current job_status BEFORE check is: '{job.job_status}'")
+    if not job: 
+        logging.warning(f"No associated job found for deviation_id={d.id}. Aborting status sync.")
+        return
+
+    # Guard Clause: Don't change status if it's already in a final state
     FINAL_JOB_STATUSES = ["Completed", "Certificate Issued", "Shipped", "Terminated", "Calibrated", "Completed - OOT"]
     current_job_status = (job.job_status or "").strip()
-    is_job_final = any(status.lower() == current_job_status.lower() for status in FINAL_JOB_STATUSES)
-    logging.debug(f"Guard clause check: is_job_final = {is_job_final}")
-    if not terminate and is_job_final:
-        logging.info(f"Guard clause ACTIVATED. Job {job.job_id} is in a final state ('{current_job_status}'). No status change will be made."); return
-    else: logging.debug("Guard clause PASSED. Proceeding with status evaluation.")
-    if terminate: logging.warning(f"Termination requested. Setting job {job.job_id} status to 'Terminated'."); job.job_status = "Terminated"; return
-    active_count = db.query(Deviation).filter(Deviation.inward_eqp_id == d.inward_eqp_id, Deviation.status.in_(["OPEN", "IN_PROGRESS"]),).count()
-    logging.debug(f"Found {active_count} active deviations for inward_eqp_id={d.inward_eqp_id}.")
-    if active_count > 0:
-        if current_job_status.lower() != "on hold": logging.info(f"Changing job {job.job_id} status from '{current_job_status}' to 'On Hold'."); job.job_status = "On Hold"
-    elif current_job_status.lower() == "on hold":
-        new_status = "Calibrated" if _derive_deviation_type(d) == "OOT" else "In Progress"
-        logging.info(f"Last active deviation closed. Changing job {job.job_id} status from 'On Hold' to '{new_status}'."); job.job_status = new_status
+    if not terminate and any(status.lower() == current_job_status.lower() for status in FINAL_JOB_STATUSES):
+        return
 
+    if terminate: 
+        job.job_status = "Terminated"
+        return
+
+    # Check for other active deviations specifically for THIS job or general tool NCs
+    active_count = db.query(Deviation).filter(
+        Deviation.inward_eqp_id == d.inward_eqp_id,
+        Deviation.status.in_(["OPEN", "IN_PROGRESS"]),
+        # Only count deviations linked to this specific job or ones with no job_id (General NCs)
+        or_(Deviation.job_id == job.job_id, Deviation.job_id.is_(None))
+    ).count()
+
+    logging.debug(f"Job {job.job_id} current status: '{current_job_status}', Active Deviations: {active_count}")
+
+    if active_count > 0:
+        if current_job_status.lower() != "on hold":
+            job.job_status = "On Hold"
+    else:
+        # NO ACTIVE DEVIATIONS LEFT
+        if current_job_status.lower() == "on hold":
+            dev_type = _derive_deviation_type(d)
+            
+            # Logic: If it was a Manual NC, we go back to 'Created'
+            # If it was an OOT, we go to 'Calibrated'
+            if dev_type == "MANUAL":
+                job.job_status = "Created"
+            else:
+                job.job_status = "Calibrated"
+            
+            logging.info(f"Setting Job {job.job_id} status to {job.job_status}")
 def _sync_legacy_deviation_statuses(db: Session) -> None:
-    logging.debug("Entering _sync_legacy_deviation_statuses (SAFE VERSION).")
+    """Synchronizes status, calibration status, and populates missing report dates."""
     rows = db.query(Deviation).all()
-    changed = False
+    changed_total = False
     for d in rows:
-        status_raw = (d.status or "").strip(); status = status_raw.upper(); decision = (d.customer_decision or "").strip()
-        if not status: d.status = "OPEN"; status = "OPEN"; changed = True
-        if decision and status == "OPEN": d.status = "IN_PROGRESS"; status = "IN_PROGRESS"; d.updated_at = datetime.now(timezone.utc); changed = True
+        row_changed = False
+        status_raw = (d.status or "").strip().upper()
+        decision = (d.customer_decision or "").strip()
         
-        # >>> CHANGE: Populate the 'report' date from 'created_at' if it is NULL.
-        if d.report is None and d.created_at:
-            d.report = d.created_at.date()
-            changed = True
+        if not status_raw: 
+            d.status = "OPEN"
+            row_changed = True
         
-        if sync_deviation_calibration_status(db, d): changed = True
-    if changed: logging.info("[Legacy Sync] Committed changes to DEVIATION records only."); db.commit()
+        if decision and d.status == "OPEN": 
+            d.status = "IN_PROGRESS"
+            row_changed = True
+        
+        if sync_deviation_calibration_status(db, d): 
+            row_changed = True
+            
+        if row_changed:
+            d.updated_at = datetime.now(timezone.utc)
+            changed_total = True
+            
+    if changed_total: 
+        db.commit()
 
 def _row_to_customer_item(
     d: Deviation, eq: InwardEquipment, srf_no: Optional[str], customer_dc_no: Optional[str], customer_dc_date: Optional[str],
@@ -146,68 +212,133 @@ def _get_oot_steps_for_job(db: Session, job_id: Optional[int]) -> List[HTWRepeat
     return db.query(HTWRepeatability).filter(HTWRepeatability.job_id == job_id, HTWRepeatability.deviation_percent.isnot(None)).order_by(HTWRepeatability.step_percent.asc().nullslast()).all()
 
 def _collapse_manual_items(items: List[CustomerDeviationItem]) -> List[CustomerDeviationItem]:
+    """
+    Only collapses MANUAL items per inward_eqp_id. 
+    This ensures we only show the most relevant manual NC for a tool, 
+    but OOT items (system driven) are handled outside this to prevent conflict.
+    """
     by_eqp: Dict[int, CustomerDeviationItem] = {}
     for item in items:
-        key = item.inward_eqp_id; current = by_eqp.get(key)
-        if current is None: by_eqp[key] = item; continue
+        key = item.inward_eqp_id
+        current = by_eqp.get(key)
+        if current is None:
+            by_eqp[key] = item
+            continue
+        
+        # Priority 1: Show Active (OPEN/IN_PROGRESS) over CLOSED
         item_active = (item.status or "").strip().upper() in ("OPEN", "IN_PROGRESS")
         current_active = (current.status or "").strip().upper() in ("OPEN", "IN_PROGRESS")
+        
         if item_active != current_active:
             if item_active: by_eqp[key] = item
             continue
-        item_ts = item.created_at; current_ts = current.created_at
-        if item_ts and (current_ts is None or item_ts > current_ts): by_eqp[key] = item; continue
-        item_id = abs(item.deviation_id or 0); current_id = abs(current.deviation_id or 0)
-        item_is_external = (item.deviation_id or 0) < 0; current_is_external = (current.deviation_id or 0) < 0
-        if item_ts == current_ts:
-            if item_is_external == current_is_external:
-                if item_id > current_id: by_eqp[key] = item
-            elif not item_is_external: by_eqp[key] = item
+            
+        # Priority 2: Show Newer record
+        item_ts = item.created_at or datetime.min.replace(tzinfo=timezone.utc)
+        current_ts = current.created_at or datetime.min.replace(tzinfo=timezone.utc)
+        if item_ts > current_ts:
+            by_eqp[key] = item
+            
     return sorted(by_eqp.values(), key=lambda x: (x.created_at or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 
 def list_all_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
-    # sync_oot_deviation_records(db) # <<< REMOVED
     _sync_legacy_deviation_statuses(db)
-    all_items: List[CustomerDeviationItem] = []
-    rows = db.query(Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id,).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).all()
-    changed = False
-    for d, *_ in rows:
-        if sync_deviation_calibration_status(db, d): changed = True
-    if changed:
-        db.commit()
-        rows = db.query(Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id,).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).all()
+    
+    # Fetch all internal records
+    rows = db.query(Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id).join(
+        InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id
+    ).join(
+        Inward, Inward.inward_id == InwardEquipment.inward_id
+    ).all()
+    
+    manual_list: List[CustomerDeviationItem] = []
+    oot_list: List[CustomerDeviationItem] = []
+    
     for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id in rows:
         primary_rep = _get_primary_oot_step(db, d.job_id)
-        all_items.append(_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, primary_rep, d.job_id))
-    external_rows = db.query(ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id,).join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).all()
+        item = _row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, primary_rep, d.job_id)
+        
+        if item.deviation_type == "OOT":
+            oot_list.append(item)
+        else:
+            manual_list.append(item)
+            
+    # Fetch External Records
+    external_rows = db.query(ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id).join(
+        InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id
+    ).join(
+        Inward, Inward.inward_id == InwardEquipment.inward_id
+    ).all()
+    
     for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id in external_rows:
-        all_items.append(_external_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id))
-    manual_items = [i for i in all_items if (i.deviation_type or "").upper() == "MANUAL"]
-    non_manual_items = [i for i in all_items if (i.deviation_type or "").upper() != "MANUAL"]
-    collapsed_manual = _collapse_manual_items(manual_items)
-    merged = non_manual_items + collapsed_manual
+        item = _external_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id)
+        if item.deviation_type == "OOT":
+            oot_list.append(item)
+        else:
+            manual_list.append(item)
+
+    # Collapse ONLY manual items. System-driven OOT items are shown for every job/instance.
+    collapsed_manual = _collapse_manual_items(manual_list)
+    
+    # Merge and sort by date
+    merged = oot_list + collapsed_manual
     return sorted(merged, key=lambda x: (x.created_at or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 
 def list_deviations_for_customer(db: Session, customer_id: int) -> List[CustomerDeviationItem]:
-    # sync_oot_deviation_records(db) # <<< REMOVED
     _sync_legacy_deviation_statuses(db)
-    all_items: List[CustomerDeviationItem] = []
-    rows = db.query(Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id,).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(Inward.customer_id == customer_id).all()
-    changed = False
-    for d, *_ in rows:
-        if sync_deviation_calibration_status(db, d): changed = True
-    if changed:
-        db.commit(); db.refresh(d)
-    for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id in rows:
-        primary_rep = _get_primary_oot_step(db, d.job_id)
-        all_items.append(_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id, primary_rep, d.job_id))
-    external_rows = db.query(ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id,).join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(Inward.customer_id == customer_id).all()
-    for d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id in external_rows:
-        all_items.append(_external_row_to_customer_item(d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id))
-    manual_items = [i for i in all_items if (i.deviation_type or "").upper() == "MANUAL"]
-    non_manual_items = [i for i in all_items if (i.deviation_type or "").upper() != "MANUAL"]
-    collapsed_manual = _collapse_manual_items(manual_items)
-    merged = non_manual_items + collapsed_manual
+    
+    # 1. Fetch Internal Records
+    rows = db.query(
+        Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, 
+        Inward.customer_dc_date, Inward.inward_id
+    ).join(
+        InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id
+    ).join(
+        Inward, Inward.inward_id == InwardEquipment.inward_id
+    ).filter(Inward.customer_id == customer_id).all()
+
+    manual_list: List[CustomerDeviationItem] = []
+    oot_list: List[CustomerDeviationItem] = []
+
+    for d, eq, srf_no, dc_no, dc_date, inward_id in rows:
+        sync_deviation_calibration_status(db, d) # Ensures report date is filled
+        dtype = _derive_deviation_type(d)
+        
+        if dtype == "OOT":
+            # OOT VISIBILITY: Only show if flag is True
+            if d.hide_customer_visibility is False:
+                primary_rep = _get_primary_oot_step(db, d.job_id)
+                oot_list.append(_row_to_customer_item(d, eq, srf_no, dc_no, dc_date, inward_id, primary_rep, d.job_id))
+        else:
+            # MANUAL VISIBILITY: Always show human-created NCs
+            manual_list.append(_row_to_customer_item(d, eq, srf_no, dc_no, dc_date, inward_id, None, d.job_id))
+
+    # 2. Fetch External Records (Respecting their visibility flag)
+    external_rows = db.query(
+        ExternalDeviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, 
+        Inward.customer_dc_date, Inward.inward_id
+    ).join(
+        InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id
+    ).join(
+        Inward, Inward.inward_id == InwardEquipment.inward_id
+    ).filter(
+        Inward.customer_id == customer_id,
+        ExternalDeviation.hide_customer_visibility == False
+    ).all()
+
+    for d, eq, srf_no, dc_no, dc_date, inward_id in external_rows:
+        item = _external_row_to_customer_item(d, eq, srf_no, dc_no, dc_date, inward_id)
+        if item.deviation_type == "OOT":
+            oot_list.append(item)
+        else:
+            manual_list.append(item)
+
+    # 3. COLLAPSE ONLY THE MANUALS
+    # This prevents Manual NCs from conflicting with OOT records
+    collapsed_manual = _collapse_manual_items(manual_list)
+    
+    # 4. Merge but keep them distinct
+    merged = oot_list + collapsed_manual
     return sorted(merged, key=lambda x: (x.created_at or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
 
 def list_manual_deviations_for_staff(db: Session) -> List[CustomerDeviationItem]:
@@ -303,65 +434,156 @@ def _external_row_to_detail_out(db: Session, d: ExternalDeviation, eq: InwardEqu
         engineer_remarks=d.engineer_remarks, customer_decision=d.customer_decision,
         # >>> CHANGE: Add fallback for report date.
         report=d.report or (d.created_at.date() if d.created_at else None),
+            hide_customer_visibility=d.hide_customer_visibility, # <--- ADD THIS LINE
+
         created_at=d.created_at, updated_at=d.updated_at, oot_steps=oot_steps, attachments=safe_attachments,
     )
 
 def get_deviation_detail_for_staff(db: Session, deviation_id: int) -> Optional[DeviationDetailOut]:
-    # sync_oot_deviation_records(db) # <<< REMOVED
     _sync_legacy_deviation_statuses(db)
+    
+    # Handle External
     if deviation_id < 0:
         ext_id = abs(deviation_id)
-        row = db.query(ExternalDeviation, InwardEquipment, Inward).join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).options(joinedload(ExternalDeviation.attachments)).filter(ExternalDeviation.id == ext_id).first()
+        row = db.query(ExternalDeviation, InwardEquipment, Inward).join(
+            InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id
+        ).join(
+            Inward, Inward.inward_id == InwardEquipment.inward_id
+        ).options(joinedload(ExternalDeviation.attachments)).filter(ExternalDeviation.id == ext_id).first()
         if not row: return None
-        d, eq, inward = row; return _external_row_to_detail_out(db, d, eq, inward)
-    row = db.query(Deviation, InwardEquipment, Inward).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(Deviation.id == deviation_id).first()
+        d, eq, inward = row
+        return _external_row_to_detail_out(db, d, eq, inward)
+
+    # Handle Internal
+    row = db.query(Deviation, InwardEquipment, Inward).join(
+        InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id
+    ).join(
+        Inward, Inward.inward_id == InwardEquipment.inward_id
+    ).filter(Deviation.id == deviation_id).first()
+    
     if not row: return None
     d, eq, inward = row
-    if sync_deviation_calibration_status(db, d): db.commit(); db.refresh(d)
-    oot_steps = _get_oot_steps_for_job(db, d.job_id)
+    
+    # 1. Determine type first
+    dev_type = _derive_deviation_type(d)
+    
+    # 2. Sync and check report date
+    if sync_deviation_calibration_status(db, d): 
+        db.commit()
+        db.refresh(d)
+
+    # 3. GET DATA EXCLUSIVELY BASED ON TYPE
+    oot_steps_data = []
+    job = _get_job_for_deviation(db, d)
+    
+    # CONFLICT FIX: Only fetch OOT steps if the deviation is actually an OOT type
+    if dev_type == "OOT" and job:
+        steps = _get_oot_steps_for_job(db, job.job_id)
+        oot_steps_data = [{"step_percent": float(s.step_percent), "deviation_percent": float(s.deviation_percent)} 
+                          for s in steps if s.step_percent is not None]
+
     atts = db.query(DeviationAttachment).filter(DeviationAttachment.deviation_id == deviation_id).order_by(DeviationAttachment.created_at.desc()).all()
+
     return DeviationDetailOut(
-        deviation_id=d.id, inward_id=inward.inward_id, inward_eqp_id=d.inward_eqp_id, srf_no=inward.srf_no,
-        customer_dc_no=inward.customer_dc_no, customer_dc_date=str(inward.customer_dc_date) if inward.customer_dc_date else None,
-        customer_details=inward.customer_details, nepl_id=eq.nepl_id, make=eq.make, model=eq.model, serial_no=eq.serial_no,
-        job_id=d.job_id, deviation_type=_derive_deviation_type(d), status=d.status or "OPEN",
-        calibration_status=d.calibration_status or "not calibrated", engineer_remarks=d.engineer_remarks,
+        deviation_id=d.id,
+        inward_id=inward.inward_id,
+        inward_eqp_id=d.inward_eqp_id,
+        srf_no=inward.srf_no,
+        customer_dc_no=inward.customer_dc_no,
+        customer_dc_date=str(inward.customer_dc_date) if inward.customer_dc_date else None,
+        customer_details=inward.customer_details,
+        nepl_id=eq.nepl_id,
+        make=eq.make,
+        model=eq.model,
+        serial_no=eq.serial_no,
+        job_id=job.job_id if job else d.job_id,
+        deviation_type=dev_type,
+        status=d.status or "OPEN",
+        calibration_status=d.calibration_status or "not calibrated",
+        engineer_remarks=d.engineer_remarks,
         customer_decision=d.customer_decision,
-        # >>> CHANGE: Add fallback for report date.
+        # Ensure report date is returned
         report=d.report or (d.created_at.date() if d.created_at else None),
-        created_at=d.created_at, updated_at=d.updated_at,
-        oot_steps=[{"step_percent": float(s.step_percent), "deviation_percent": float(s.deviation_percent)} for s in oot_steps if s.step_percent is not None],
-        attachments=[DeviationAttachmentOut.model_validate(a) for a in atts])
+        created_at=d.created_at,
+        updated_at=d.updated_at,
+        hide_customer_visibility=d.hide_customer_visibility,
+        oot_steps=oot_steps_data, # This is now empty for Manual NCs
+        attachments=[DeviationAttachmentOut.model_validate(a) for a in atts]
+    )
 
 def get_deviation_detail_for_customer(db: Session, deviation_id: int, customer_id: int) -> Optional[DeviationDetailOut]:
-    # sync_oot_deviation_records(db) # <<< REMOVED
     _sync_legacy_deviation_statuses(db)
+    
+    # Handle External
     if deviation_id < 0:
         ext_id = abs(deviation_id)
-        row = db.query(ExternalDeviation, InwardEquipment, Inward).join(InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).options(joinedload(ExternalDeviation.attachments)).filter(ExternalDeviation.id == ext_id, Inward.customer_id == customer_id).first()
-        if not row: return None
-        d, eq, inward = row; return _external_row_to_detail_out(db, d, eq, inward)
+        row = db.query(ExternalDeviation, InwardEquipment, Inward).join(
+            InwardEquipment, InwardEquipment.inward_eqp_id == ExternalDeviation.inward_eqp_id
+        ).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(
+            ExternalDeviation.id == ext_id, 
+            Inward.customer_id == customer_id,
+            ExternalDeviation.hide_customer_visibility == False
+        ).first()
+        return _external_row_to_detail_out(db, row[0], row[1], row[2]) if row else None
     
-    # >>> FIX: The function was incomplete. Completed it by mirroring the 'staff' version with a customer_id filter.
-    row = db.query(Deviation, InwardEquipment, Inward).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(Deviation.id == deviation_id, Inward.customer_id == customer_id).first()
+    # Handle Internal
+    row = db.query(Deviation, InwardEquipment, Inward).join(
+        InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id
+    ).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(
+        Deviation.id == deviation_id, 
+        Inward.customer_id == customer_id
+    ).first()
+    
     if not row: return None
     d, eq, inward = row
-    if sync_deviation_calibration_status(db, d): db.commit(); db.refresh(d)
-    oot_steps = _get_oot_steps_for_job(db, d.job_id)
-    atts = db.query(DeviationAttachment).filter(DeviationAttachment.deviation_id == deviation_id).order_by(DeviationAttachment.created_at.desc()).all()
-    return DeviationDetailOut(
-        deviation_id=d.id, inward_id=inward.inward_id, inward_eqp_id=d.inward_eqp_id, srf_no=inward.srf_no,
-        customer_dc_no=inward.customer_dc_no, customer_dc_date=str(inward.customer_dc_date) if inward.customer_dc_date else None,
-        customer_details=inward.customer_details, nepl_id=eq.nepl_id, make=eq.make, model=eq.model, serial_no=eq.serial_no,
-        job_id=d.job_id, deviation_type=_derive_deviation_type(d), status=d.status or "OPEN",
-        calibration_status=d.calibration_status or "not calibrated", engineer_remarks=d.engineer_remarks,
-        customer_decision=d.customer_decision,
-        # >>> CHANGE: Add fallback for report date.
-        report=d.report or (d.created_at.date() if d.created_at else None),
-        created_at=d.created_at, updated_at=d.updated_at,
-        oot_steps=[{"step_percent": float(s.step_percent), "deviation_percent": float(s.deviation_percent)} for s in oot_steps if s.step_percent is not None],
-        attachments=[DeviationAttachmentOut.model_validate(a) for a in atts])
+    
+    dtype = _derive_deviation_type(d)
+    
+    # SECURITY CHECK: If it's an OOT record and visibility is FALSE, deny access
+    if dtype == "OOT" and d.hide_customer_visibility is True:
+        return None
 
+    # Sync report date on the fly
+    if sync_deviation_calibration_status(db, d):
+        db.commit()
+        db.refresh(d)
+
+    # ISOLATION LOGIC: Only get OOT steps if this specific record IS an OOT deviation
+    oot_steps_data = []
+    if dtype == "OOT":
+        job = _get_job_for_deviation(db, d)
+        if job:
+            steps = _get_oot_steps_for_job(db, job.job_id)
+            oot_steps_data = [{"step_percent": float(s.step_percent), "deviation_percent": float(s.deviation_percent)} 
+                              for s in steps if s.step_percent is not None]
+
+    atts = db.query(DeviationAttachment).filter(DeviationAttachment.deviation_id == deviation_id).all()
+    
+    return DeviationDetailOut(
+        deviation_id=d.id,
+        inward_id=inward.inward_id,
+        inward_eqp_id=d.inward_eqp_id,
+        srf_no=inward.srf_no,
+        customer_dc_no=inward.customer_dc_no,
+        customer_dc_date=str(inward.customer_dc_date) if inward.customer_dc_date else None,
+        customer_details=inward.customer_details,
+        nepl_id=eq.nepl_id,
+        make=eq.make,
+        model=eq.model,
+        serial_no=eq.serial_no,
+        job_id=d.job_id,
+        deviation_type=dtype,
+        status=d.status or "OPEN",
+        calibration_status=d.calibration_status,
+        engineer_remarks=d.engineer_remarks,
+        customer_decision=d.customer_decision,
+        # Fix: report column fill
+        report=d.report or (d.created_at.date() if d.created_at else None),
+        created_at=d.created_at,
+        updated_at=d.updated_at,
+        oot_steps=oot_steps_data, # Strictly isolated to OOT types
+        attachments=[DeviationAttachmentOut.model_validate(a) for a in atts]
+    )
 
 def update_engineer_remarks(db: Session, deviation_id: int, remarks: str) -> Optional[DeviationDetailOut]:
     d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
@@ -394,5 +616,20 @@ def terminate_deviation_job(db: Session, deviation_id: int) -> Optional[Deviatio
     db.commit()
     return get_deviation_detail_for_staff(db, deviation_id)
 
-
+def update_deviation_visibility(db: Session, deviation_id: int, hide: bool) -> Optional[DeviationDetailOut]:
+    d = db.query(Deviation).filter(Deviation.id == deviation_id).first()
+    if not d:
+        return None
+    
+    # Update the database field
+    d.hide_customer_visibility = hide
+    d.updated_at = datetime.now(timezone.utc)
+    
+    # Ensure report date exists
+    if d.report is None and d.created_at:
+        d.report = d.created_at.date()
+        
+    db.commit()
+    # Refresh to return the full updated object
+    return get_deviation_detail_for_staff(db, deviation_id)
 # REPORT COLUMN FILLING NULL STORE THE CREATED AT DATE ONLY TO THE REPORT COLUMN TO IDETIFY THE DEVIATION REPORT DATE

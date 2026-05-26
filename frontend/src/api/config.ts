@@ -91,19 +91,19 @@ export const ENDPOINTS = {
 
   // ── Staff ───────────────────────────────────────────────────────── //
   STAFF: {
-    SRFS:                        `/staff/srfs`,
-    INWARDS:                     `/staff/inwards`,
-    INWARDS_UPDATED:             `/staff/inwards/updated`,
-    INWARDS_EXPORTABLE:          `/staff/inwards/exportable-list`,
-    INWARD_EXPORT:               (id: number) => `/staff/inwards/${id}/export`,
-    INWARD_EXPORT_BATCH:         `/staff/inwards/export-batch`,
+    SRFS:                            `/staff/srfs`,
+    INWARDS:                         `/staff/inwards`,
+    INWARDS_UPDATED:                 `/staff/inwards/updated`,
+    INWARDS_EXPORTABLE:              `/staff/inwards/exportable-list`,
+    INWARD_EXPORT:                   (id: number) => `/staff/inwards/${id}/export`,
+    INWARD_EXPORT_BATCH:             `/staff/inwards/export-batch`,
     INWARD_EXPORT_BATCH_INWARD_ONLY: `/staff/inwards/export-batch-inward-only`,
-    INWARD_SEND_REPORT:          (id: number) => `/staff/inwards/${id}/send-report`,
-    DRAFTS:                      `/staff/inwards/drafts`,
-    DRAFT:                       `/staff/inwards/draft`,
-    SUBMIT:                      `/staff/inwards/submit`,
-    DRAFT_DELETE:                (id: number) => `/staff/inwards/drafts/${id}`,
-    INWARD_DETAILS:              (id: number) => `/staff/inwards/${id}`,
+    INWARD_SEND_REPORT:              (id: number) => `/staff/inwards/${id}/send-report`,
+    DRAFTS:                          `/staff/inwards/drafts`,
+    DRAFT:                           `/staff/inwards/draft`,
+    SUBMIT:                          `/staff/inwards/submit`,
+    DRAFT_DELETE:                    (id: number) => `/staff/inwards/drafts/${id}`,
+    INWARD_DETAILS:                  (id: number) => `/staff/inwards/${id}`,
   },
 
   // ── Customer Portal ─────────────────────────────────────────────── //
@@ -231,7 +231,7 @@ export const ENDPOINTS = {
     GET:       (jobId: number) => `/htw-calculations/reproducibility/${jobId}`,
   },
 
-  // ── HTW Calculations (output drive / drive interface / loading point) //
+  // ── HTW Calculations ────────────────────────────────────────────── //
   HTW_CALCULATIONS: {
     OUTPUT_DRIVE:              `/htw-calculations/output-drive`,
     OUTPUT_DRIVE_CALCULATE:    `/htw-calculations/output-drive/calculate`,
@@ -306,7 +306,129 @@ export const ENDPOINTS = {
     VIEW_BY_QR_CERT:   (id: number) => `/certificates/qr/certificate/${id}`,
     JOB_PREVIEW:       (jobId: number) => `/certificates/jobs/${jobId}/preview-data`,
   },
+
+  // ── Final Inspections (Restored from old file) ──────────────────── //
+  FINAL_INSPECTIONS: {
+    DASHBOARD:      `/final-inspections/customer/dashboard-reports`,
+    LIST:           `/final-inspections/`,
+    DETAIL:         (id: number) => `/final-inspections/${id}`,
+    GET_DETAILS:    (inwardId: number) => `/final-inspections/inward/${inwardId}/details`,
+    SEND_REPORT:    (inwardId: number) => `/final-inspections/inward/${inwardId}/send-report`,
+    CUSTOMER_VIEW:  (inwardId: number) => `/final-inspections/inward/${inwardId}/customer-view`,
+  },
+
+  // ── Manual Calibration Uploads (From new file) ──────────────────── //
+  MANUAL_CALIBRATION: {
+    /**
+     * GET — fetch file metadata, lock flags, and unlock_request JSONB.
+     */
+    DOCUMENTS: (inwardEqpId: number) =>
+      `/manual-calibration/equipment/${inwardEqpId}/documents`,
+
+    /**
+     * POST (multipart/form-data) — upload a single document.
+     */
+    UPLOAD: (inwardEqpId: number) =>
+      `/manual-calibration/equipment/${inwardEqpId}/upload`,
+
+    /**
+     * DELETE — nullify a specific document's fields.
+     */
+    DELETE_DOCUMENT: (inwardEqpId: number, docType: "result" | "certificate") =>
+      `/manual-calibration/equipment/${inwardEqpId}/document/${docType}`,
+
+    /**
+     * POST — engineer submits a reason to unlock a locked file.
+     */
+    REQUEST_UNLOCK: (inwardEqpId: number) =>
+      `/manual-calibration/equipment/${inwardEqpId}/request-unlock`,
+
+    /**
+     * POST — admin approves or rejects an engineer's unlock request.
+     */
+    ACTION_UNLOCK: (inwardEqpId: number) =>
+      `/manual-calibration/equipment/${inwardEqpId}/action-unlock`,
+
+    /**
+     * GET — list all SRF groups assigned for manual calibration.
+     */
+    SRF_GROUPS: `/flow-configs/manual-calibration-groups`,
+
+    /**
+     * GET — list all equipment under a specific SRF group.
+     */
+    SRF_GROUP_EQUIPMENT: (srfNo: string) =>
+      `/flow-configs/manual-calibration-groups/${srfNo}/equipment`,
+  },
 } as const;
+
+// ================================================================== //
+//  TYPE HELPERS                                                        //
+// ================================================================== //
+
+/** Valid document types for manual calibration uploads. */
+export type ManualCalDocType = "result" | "certificate";
+
+/** Possible states of an unlock request stored in the JSONB column. */
+export type UnlockRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+/** Shape of a single past request stored in history[]. */
+export interface UnlockRequestHistory {
+  status: UnlockRequestStatus;
+  engineer_reason: string;
+  admin_comment:   string | null;
+  requested_at:    string;
+  actioned_at:     string | null;
+}
+
+/** Full unlock request object returned by the API. */
+export interface UnlockRequest {
+  status:          UnlockRequestStatus;
+  engineer_reason: string;
+  requested_by:    number;
+  requested_at:    string;
+  admin_comment:   string | null;
+  actioned_by:     number | null;
+  actioned_at:     string | null;
+  history:         UnlockRequestHistory[];
+}
+
+/** Full document record returned by GET /documents and all lock/unlock endpoints. */
+export interface ExternalUploadRecord {
+  id:            number;
+  inward_eqp_id: number;
+
+  // Calibration Worksheet
+  calibration_worksheet_file_name:      string | null;
+  calibration_worksheet_file_type:      string | null;
+  calibration_worksheet_file_url:       string | null;
+  calibration_worksheet_locked:         boolean;
+  calibration_worksheet_unlock_request: UnlockRequest | null;
+
+  // Certificate
+  certificate_file_name:      string | null;
+  certificate_file_type:      string | null;
+  certificate_file_url:       string | null;
+  certificate_locked:         boolean;
+  certificate_unlock_request: UnlockRequest | null;
+
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body sent to REQUEST_UNLOCK. */
+export interface RequestUnlockPayload {
+  doc_type: ManualCalDocType;
+  reason:   string;
+}
+
+/** Body sent to ACTION_UNLOCK. */
+export interface ActionUnlockPayload {
+  doc_type: ManualCalDocType;
+  action:   "APPROVED" | "REJECTED";
+  comment?: string;
+}
 
 // ================================================================== //
 //  INTERCEPTORS                                                        //

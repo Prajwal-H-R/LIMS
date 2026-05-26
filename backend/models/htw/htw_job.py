@@ -1,10 +1,10 @@
 from sqlalchemy import (
     Column, Integer, Numeric, Text, Date, TIMESTAMP, 
-    ForeignKey, UniqueConstraint, func
+    ForeignKey, UniqueConstraint, func, String
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship,Mapped, mapped_column
 from backend.db import Base
-
+from typing import Optional
 class HTWJob(Base):
     __tablename__ = "htw_job"
 
@@ -43,8 +43,7 @@ class HTWJob(Base):
     # Default values as per SQL 'server_default'
     type = Column(Text, server_default="indicating")
     classification = Column(Text, server_default="Type I Class C")
-    job_status = Column(Text)
-    
+    job_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)    
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     # --- RELATIONSHIPS ---
