@@ -23,7 +23,7 @@ interface ShinyTextProps {
   spread?: number;
   yoyo?: boolean;
   pauseOnHover?: boolean;
-  direction?: "left" | "right";
+  direction?: "left";
   delay?: number;
 }
 
@@ -35,7 +35,6 @@ const ShinyText: React.FC<ShinyTextProps> = ({
   color = "#8b5cf6",
   shineColor = "#ffffff",
   spread = 120,
-  yoyo = false,
   pauseOnHover = false,
   direction = "left",
   delay = 0,
@@ -51,49 +50,31 @@ const ShinyText: React.FC<ShinyTextProps> = ({
   const delayDuration = delay * 1000;
 
   useAnimationFrame((time) => {
-    if (disabled || isPaused) {
-      lastTimeRef.current = null;
-      return;
-    }
-
-    if (lastTimeRef.current === null) {
-      lastTimeRef.current = time;
-      return;
-    }
-
-    const deltaTime = time - lastTimeRef.current;
+  if (disabled || isPaused) {
+    lastTimeRef.current = null;
+    return;
+  }
+ 
+  if (lastTimeRef.current === null) {
     lastTimeRef.current = time;
-    elapsedRef.current += deltaTime;
-
-    if (yoyo) {
-      const cycleDuration = animationDuration + delayDuration;
-      const fullCycle = cycleDuration * 2;
-      const cycleTime = elapsedRef.current % fullCycle;
-
-      if (cycleTime < animationDuration) {
-        const p = (cycleTime / animationDuration) * 100;
-        progress.set(directionRef.current === 1 ? p : 100 - p);
-      } else if (cycleTime < cycleDuration) {
-        progress.set(directionRef.current === 1 ? 100 : 0);
-      } else if (cycleTime < cycleDuration + animationDuration) {
-        const reverseTime = cycleTime - cycleDuration;
-        const p = 100 - (reverseTime / animationDuration) * 100;
-        progress.set(directionRef.current === 1 ? p : 100 - p);
-      } else {
-        progress.set(directionRef.current === 1 ? 0 : 100);
-      }
-    } else {
-      const cycleDuration = animationDuration + delayDuration;
-      const cycleTime = elapsedRef.current % cycleDuration;
-
-      if (cycleTime < animationDuration) {
-        const p = (cycleTime / animationDuration) * 100;
-        progress.set(directionRef.current === 1 ? p : 100 - p);
-      } else {
-        progress.set(directionRef.current === 1 ? 100 : 0);
-      }
-    }
-  });
+    return;
+  }
+ 
+  const deltaTime = time - lastTimeRef.current;
+  lastTimeRef.current = time;
+ 
+  elapsedRef.current += deltaTime;
+ 
+  const cycleDuration = animationDuration + delayDuration;
+  const cycleTime = elapsedRef.current % cycleDuration;
+ 
+  if (cycleTime < animationDuration) {
+    const p = (cycleTime / animationDuration) * 100;
+    progress.set(p); // 👈 always left → right
+  } else {
+    progress.set(0); // reset after delay
+  }
+});
 
   useEffect(() => {
     directionRef.current = direction === "left" ? 1 : -1;

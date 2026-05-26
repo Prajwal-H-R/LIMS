@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import {
   ChevronLeft, Loader2, Eye, Save, FileText,
-  Paperclip, ExternalLink, EyeOff, AlertTriangle
+  Paperclip, ExternalLink, EyeOff
 } from "lucide-react";
 import { api, ENDPOINTS } from "../api/config";
 
