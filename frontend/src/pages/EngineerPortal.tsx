@@ -565,7 +565,10 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
 
   useEffect(() => {
     fetchProfileUpdateNotifications();
-    const interval = setInterval(fetchProfileUpdateNotifications, 30000);
+    const interval = setInterval(
+      fetchProfileUpdateNotifications,
+      30000
+    );
     return () => clearInterval(interval);
   }, [fetchProfileUpdateNotifications]);
 
@@ -630,11 +633,18 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-6 w-6 text-red-600 mt-1 flex-shrink-0" />
               <div>
-                <h3 className="text-lg font-bold text-gray-900">New Customer Profile Update</h3>
+                <h3 className="text-lg font-bold text-gray-900">
+                  New Customer Profile Update
+                </h3>
                 <p className="text-gray-600 mt-2 text-sm">
                   {latestPopupCompany ? (
                     <>
-                      <span className="font-semibold text-gray-900">{latestPopupCompany}</span> updated customer profile details. Open Notifications to review the changes.
+                      <span className="font-semibold text-gray-900">
+                        {latestPopupCompany}
+                      </span>{" "}
+                      updated customer profile
+                      details. Open Notifications to
+                      review the changes.
                     </>
                   ) : (
                     "A customer updated their profile details. Open Notifications to review the changes."
