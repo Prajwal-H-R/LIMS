@@ -123,3 +123,8 @@ class HTWCertificate(Base):
         "HTWJob",
         backref="certificates"
     )
+
+    equipment: Mapped["InwardEquipment"] = relationship(
+    "InwardEquipment",
+    back_populates="certificate"
+)

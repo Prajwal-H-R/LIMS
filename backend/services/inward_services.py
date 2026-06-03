@@ -97,6 +97,7 @@ class InwardService:
         base_row = {
             "Inward ID": inward.inward_id,
             "SRF No": inward.srf_no or "",
+            "received_date": inward.received_date or "",
             "Material Inward Date": inward.material_inward_date,
             "Customer DC No": inward.customer_dc_no or "",
             "Customer DC Date": inward.customer_dc_date or "",
@@ -236,6 +237,7 @@ class InwardService:
         base_row = {
             "Inward ID": inward.inward_id,
             "SRF No": inward.srf_no or "",
+            "received_date": inward.received_date or "",
             "Material Inward Date": inward.material_inward_date,
             "Customer DC No": inward.customer_dc_no or "",
             "Customer DC Date": inward.customer_dc_date or "",
@@ -370,6 +372,7 @@ class InwardService:
                 
                 draft.srf_no = srf_to_save
                 draft.customer_id = draft_data.get('customer_id')
+                draft.received_date = draft_data.get('received_date')
                 draft.material_inward_date = material_date or draft.material_inward_date
                 draft.customer_dc_date = draft_data.get('customer_dc_date')
                 draft.customer_dc_no = draft_data.get('customer_dc_no')
@@ -386,6 +389,7 @@ class InwardService:
                     customer_dc_date=draft_data.get('customer_dc_date'),
                     customer_dc_no=draft_data.get('customer_dc_no'),
                     received_by=draft_data.get('receiver'),
+                    received_date=draft_data.get('received_date'),
                 )
                 self.db.add(draft)
 
@@ -435,6 +439,7 @@ class InwardService:
                 
                 db_inward.srf_no = authoritative_srf_no
                 db_inward.material_inward_date = inward_data.material_inward_date
+                db_inward.received_date = inward_data.received_date
                 db_inward.customer_dc_date = inward_data.customer_dc_date
                 db_inward.customer_dc_no = inward_data.customer_dc_no
                 db_inward.customer_id = inward_data.customer_id
@@ -448,6 +453,7 @@ class InwardService:
             else:
                 db_inward = Inward(
                     srf_no=authoritative_srf_no,
+                    received_date=inward_data.received_date,
                     material_inward_date=inward_data.material_inward_date,
                     customer_dc_date=inward_data.customer_dc_date,
                     customer_dc_no=inward_data.customer_dc_no,
@@ -485,6 +491,7 @@ class InwardService:
                 raise HTTPException(status_code=404, detail="Inward record not found.")
 
             # 1. Update Basic Inward Info
+            db_inward.received_date = inward_data.received_date
             db_inward.material_inward_date = inward_data.material_inward_date
             db_inward.customer_dc_date = inward_data.customer_dc_date
             db_inward.customer_dc_no = inward_data.customer_dc_no

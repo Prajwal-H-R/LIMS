@@ -53,6 +53,11 @@ class InwardEquipment(Base):
     )
 
     # ✅ ADDED: Relationship to HTWJob
+    certificate = relationship(
+    "HTWCertificate",
+    back_populates="equipment",
+    uselist=False
+)
     # This matches 'equipment_rel' defined in htw_job.py
     jobs: Mapped[List["HTWJob"]] = relationship("HTWJob", back_populates="equipment_rel")
     deviations: Mapped[List["ExternalDeviation"]] = relationship(

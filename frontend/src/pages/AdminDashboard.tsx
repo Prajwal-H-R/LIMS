@@ -29,10 +29,10 @@ import {
 } from '../components/AdminComponents/AdminUserManagements';
 
 import {
-  AlertCircle, Settings, Info, Loader2,
-  Bell, Users, Shield, UserPlus, UserCog,
+  AlertCircle, Settings, Info,
+  Bell, Users, UserPlus, UserCog,
   Ruler, Building2, Award, Thermometer,
-  ChevronLeft, Menu, Wrench, Briefcase,
+  ChevronLeft, Menu,
   LayoutDashboard,
 } from 'lucide-react';
 
@@ -590,14 +590,10 @@ const AdminDashboard: React.FC = () => {
   const userRole = user?.role || 'Admin';
 
   // Latest company for popup
-  const latestPopupCompany = (() => {
-    const n = profileNotifications[0];
-    if (!n) return null;
-    const { extractCompanyFromNotification } = require(
-      '../components/AdminComponents/AdminNotifications'
-    );
-    return extractCompanyFromNotification(n);
-  })();
+const latestPopupCompany =
+  profileNotifications[0]
+    ? extractCompanyFromNotification(profileNotifications[0])
+    : null;
 
   // ====================================================================
   // RENDER

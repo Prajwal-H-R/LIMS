@@ -3,7 +3,7 @@ import time
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-
+from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -61,6 +61,7 @@ from backend.routes.external_upload import router as external_upload
 from backend.routes.external_deviation import router as external_deviation
 from backend.routes.external_deviation_attachments import router as external_deviation_attachments
 from backend.routes.final_inspection_router import router as final_inspection_router
+from backend.routes.scan_routes import router as scan_router
 
 from backend.calibration_reminders.routes import router as calibration_reminder_router
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -97,37 +98,26 @@ async def automated_daily_maintenance():
 async def lifespan(app: FastAPI):
     logger.info("Starting up server, initializing background tasks...")
  
-    # Existing report scheduler
     start_scheduler()
  
-    # -----------------------------------
-    # Calibration Reminder Scheduler
-    # -----------------------------------
     calibration_scheduler = BackgroundScheduler()
  
+    # Change: Add next_run_time=datetime.now() to trigger immediately on start
     calibration_scheduler.add_job(
-        lambda: run_daily_calibration_reminder_job(
-            SessionLocal,
-            days_ahead=7
-        ),
+        run_daily_calibration_reminder_job,
         trigger="interval",
         days=1,
-        # for testing minutes=4,
+        args=[SessionLocal, 45], # Pass 45 here
         id="calibration_reminder_job",
         replace_existing=True,
+        next_run_time=datetime.now() # <--- THIS RUNS IT IMMEDIATELY
     )
  
     calibration_scheduler.start()
- 
     logger.info("Calibration reminder scheduler started successfully.")
- 
-    # Existing 12-hour maintenance task
+    
     asyncio.create_task(automated_daily_maintenance())
- 
     yield
- 
-    logger.info("Server shutting down, stopping background tasks...")
- 
     calibration_scheduler.shutdown()
 
 
@@ -218,6 +208,7 @@ app.include_router(final_inspection_router, prefix="/api")
 
 
 app.include_router(calibration_reminder_router, prefix="/api")
+app.include_router(scan_router, prefix="/api")
 # --- ROOT ENDPOINT ---
 @app.get("/")
 def root():

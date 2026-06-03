@@ -143,6 +143,7 @@ async def update_draft(
 async def submit_inward(
     req: Request,
     material_inward_date: date = Form(...),
+    received_date: date = Form(...),
     customer_dc_date: str = Form(...),
     customer_dc_no: str = Form(...),
     customer_id: int = Form(...),
@@ -163,7 +164,8 @@ async def submit_inward(
             customer_details=customer_details,
             receiver=receiver,
             equipment_list=json.loads(equipment_list),
-            srf_no=srf_no
+            srf_no=srf_no,
+            received_date = received_date
         )
     except (ValidationError, ValueError, json.JSONDecodeError) as e:
         logger.error(f"Validation error on submit: {e}")
@@ -447,6 +449,7 @@ async def partial_update_inward(
 async def update_inward(
     inward_id: int,
     req: Request,
+    received_date: date = Form(...),
     material_inward_date: date = Form(...),
     customer_dc_date: str = Form(...),
     customer_dc_no: str = Form(...),
@@ -469,7 +472,8 @@ async def update_inward(
             customer_id=customer_id,
             customer_details=customer_details,
             receiver=receiver,
-            equipment_list=raw_list
+            equipment_list=raw_list,
+            received_date=received_date
         )
     except (ValidationError, ValueError, json.JSONDecodeError) as e:
         logger.error(f"Validation error on update: {e}")

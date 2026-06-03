@@ -91,7 +91,7 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
 }) => {
   const totalDue = data?.total_due_count ?? 0;
   const customerCount = data?.customer_count ?? 0;
-  const windowDays = data?.window_days ?? 7;
+  const windowDays = data?.window_days ?? 45;
 
   const latestCertificateId = useMemo(() => {
     const all = data?.groups.flatMap((g) => g.certificates) ?? [];
@@ -273,8 +273,10 @@ export const useCalibrationReminder = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get<CalibrationReminderResponse>(API_ENDPOINT);
-      const payload = res.data || null;
+ const res = await api.get<CalibrationReminderResponse>(API_ENDPOINT, {
+        params: { days_ahead: 45 }
+      });
+       const payload = res.data || null;
       setData(payload);
 
       const newestId =

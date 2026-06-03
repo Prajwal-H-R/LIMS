@@ -122,3 +122,9 @@ class LockGuard:
                 )
         
         return True
+    
+def release_all_user_locks(db: Session, user_id: int):
+        """Deletes all locks held by a specific user (used on logout)"""
+        db.query(RecordLock).filter(RecordLock.locked_by_user_id == user_id).delete()
+        db.commit()
+        return {"status": "success", "message": "All user locks released"}
