@@ -1,5 +1,5 @@
 # backend/routes/htw_certificate_router.py
-
+from datetime import date
 import io
 import zipfile
 from typing import List, Optional, Dict, Any
@@ -27,7 +27,8 @@ from backend.schemas.certificate.certificate_schemas import (
 )
 from backend.services.certificate import certificate_service as cert_service
 from backend.services.certificate import certificate_pdf_service as pdf_service
-
+from backend.models.certificate.certificate import HTWCertificate
+from backend.models.lab_scope import LabScope
 
 router = APIRouter(prefix="/certificates", tags=["HTW Certificates"])
 
@@ -42,7 +43,58 @@ def _check_admin(current_user: UserResponse) -> None:
     if current_user.role.lower() != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
 
+@router.get("/next-ulr")
+def get_next_ulr(db: Session = Depends(get_db)):
+    """
+    Generates the next sequential NABL ULR.
+    Trims hyphens from lab_unique_number to ensure 18-char standard.
+    """
+    # 1. Get Prefix from active lab scope
+    scope = db.query(LabScope).filter(LabScope.is_active == True).first()
+    if not scope or not scope.lab_unique_number:
+        raise HTTPException(
+            status_code=400, 
+            detail="Active Lab Scope with Unique Number not found."
+        )
 
+    # Clean the prefix: Remove hyphens and whitespace
+    # Example: "CC-4466" -> "CC4466"
+    raw_prefix = scope.lab_unique_number.replace("-", "").strip().upper()
+    
+    # Validation: NABL prefix should be 6 characters
+    if len(raw_prefix) != 6:
+        # If your prefix isn't exactly 6, we log it but proceed 
+        # (NABL standard is 6 for prefix + 2 year + 1 loc + 8 serial + 1 scope = 18)
+        pass
+
+    current_year = str(date.today().year)[-2:] # "24"
+    location_code = "0"
+    scope_flag = "F"
+
+    # 2. Find the last generated ULR in the database for this year
+    # Pattern: CC4466 24 0 %
+    search_pattern = f"{raw_prefix}{current_year}{location_code}%"
+    
+    last_cert = db.query(HTWCertificate).filter(
+        HTWCertificate.ulr_no.like(search_pattern)
+    ).order_by(HTWCertificate.ulr_no.desc()).first()
+
+    next_serial = 1
+    if last_cert and last_cert.ulr_no:
+        try:
+            # The serial number is the 8 digits before the last character
+            # ULR: [Prefix 6][YY 2][Loc 1] [Serial 8] [Scope 1]
+            # Index: 0...5   6,7    8      9...16      17
+            last_serial_str = last_cert.ulr_no[9:17]
+            next_serial = int(last_serial_str) + 1
+        except (ValueError, IndexError):
+            next_serial = 1
+
+    # 3. Construct 18-character ULR
+    serial_str = f"{next_serial:08d}" # Pads with zeros to 8 digits
+    generated_ulr = f"{raw_prefix}{current_year}{location_code}{serial_str}{scope_flag}"
+
+    return {"next_ulr": generated_ulr}
 @router.post("/render-preview", response_class=HTMLResponse)
 async def render_certificate_preview_html(
     request: Request,

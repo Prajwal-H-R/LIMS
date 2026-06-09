@@ -1,5 +1,5 @@
 // src/components/CalibrationAIBot.tsx
-import React, { useState, useCallback } from "react";
+import React, { useState } from "react";
 import {
   Bot,
   Zap,
@@ -206,9 +206,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState("ideal");
   const [fillDelay, setFillDelay] = useState(60);
-  const [enabledSections, setEnabledSections] = useState<
-    Record<string, boolean>
-  >({
+  const [enabledSections, setEnabledSections] = useState<Record<string, boolean>>({
     repeatability: true,
     reproducibility: true,
     outputDrive: true,
@@ -216,42 +214,44 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
     loadingPoint: true,
   });
 
-  // Hide in production
-  if (process.env.NODE_ENV === "production") return null;
-  if (!isVisible) return null;
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
   const sleep = (ms: number) =>
-    new Promise<void>((r) => setTimeout(r, ms));
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-  const generateReadings = useCallback(
-    (
-      rows: Array<{
-        set_torque: number;
-        readingCount: number;
-        rowIndex: number;
-      }>
-    ): Array<{ rowIndex: number; readings: string[] }> => {
-      const profile = READING_PROFILES[selectedProfile];
-      return rows
-        .filter((r) => r.set_torque !== 0)
-        .map((row) => ({
-          rowIndex: row.rowIndex,
-          readings: Array.from({ length: row.readingCount }, (_, i) =>
-            profile.generator(row.set_torque, i).toString()
-          ),
-        }));
-    },
-    [selectedProfile]
-  );
+  const generateReadings = (
+    rows: Array<{
+      set_torque: number;
+      readingCount: number;
+      rowIndex: number;
+    }>
+  ): Array<{ rowIndex: number; readings: string[] }> => {
+    const profile = READING_PROFILES[selectedProfile];
 
-  const getActiveSections = useCallback(
-    () =>
-      SECTION_CONFIGS.filter(
-        (cfg) => enabledSections[cfg.id] && sectionRefs[cfg.id]?.current
-      ),
-    [enabledSections, sectionRefs]
-  );
+    return rows
+      .filter((r) => r.set_torque !== 0)
+      .map((row) => ({
+        rowIndex: row.rowIndex,
+        readings: Array.from({ length: row.readingCount }, (_, i) =>
+          profile.generator(row.set_torque, i).toString()
+        ),
+      }));
+  };
+
+  const getActiveSections = () =>
+    SECTION_CONFIGS.filter(
+      (cfg) => enabledSections[cfg.id] && sectionRefs[cfg.id]?.current
+    );
+
+  const currentSectionLabel =
+    SECTION_CONFIGS.find((c) => c.stepId === activeStepId)?.label ?? null;
+  const profile = READING_PROFILES[selectedProfile];
+  const colors = profileColors[profile.color];
+  const readySections = SECTION_CONFIGS.filter(
+    (c) => !!sectionRefs[c.id]?.current
+  ).length;
+
+  // Hide in production / when invisible
+  if (import.meta.env.PROD) return null;
+  if (!isVisible) return null;
 
   // ── Animated Fill ──────────────────────────────────────────────────────────
   const handleAnimatedFill = async () => {
@@ -272,7 +272,9 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
     activeSections.forEach((cfg) => {
       const ref = sectionRefs[cfg.id]?.current;
       if (!ref) return;
-      ref.getRows().forEach((r) => (totalReadings += r.readingCount));
+      ref.getRows().forEach((r) => {
+        totalReadings += r.readingCount;
+      });
     });
 
     try {
@@ -288,18 +290,18 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
             ref.applyReadings([
               {
                 rowIndex: item.rowIndex,
-                readings: item.readings.map((v, i) =>
-                  i <= rIdx ? v : ""
-                ),
+                readings: item.readings.map((v, i) => (i <= rIdx ? v : "")),
               },
             ]);
+
             filledCount++;
             setFillProgress(
-              Math.round(
-                (filledCount / Math.max(totalReadings, 1)) * 100
-              )
+              Math.round((filledCount / Math.max(totalReadings, 1)) * 100)
             );
-            if (fillDelay > 0) await sleep(fillDelay);
+
+            if (fillDelay > 0) {
+              await sleep(fillDelay);
+            }
           }
           ref.applyReadings([item]);
         }
@@ -320,42 +322,49 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
   // ── Instant Fill ───────────────────────────────────────────────────────────
   const handleInstantFill = () => {
     setStatusMsg(null);
+
     const activeSections = getActiveSections();
     let totalFilled = 0;
 
     activeSections.forEach((cfg) => {
       const ref = sectionRefs[cfg.id]?.current;
       if (!ref) return;
+
       const generated = generateReadings(ref.getRows());
       ref.applyReadings(generated);
-      generated.forEach((g) => (totalFilled += g.readings.length));
+      generated.forEach((g) => {
+        totalFilled += g.readings.length;
+      });
     });
 
     if (totalFilled === 0) {
-      setStatusMsg(
-        "⚠️ No data found. Navigate to a calibration tab first."
-      );
+      setStatusMsg("⚠️ No data found. Navigate to a calibration tab first.");
       return;
     }
+
     setStatusMsg(`⚡ Instantly filled ${totalFilled} readings`);
   };
 
   // ── Fill Current Section Only ──────────────────────────────────────────────
   const handleFillCurrentSection = () => {
     setStatusMsg(null);
+
     const cfg = SECTION_CONFIGS.find((c) => c.stepId === activeStepId);
     if (!cfg) {
       setStatusMsg("⚠️ Current tab has no fillable readings.");
       return;
     }
+
     const ref = sectionRefs[cfg.id]?.current;
     if (!ref) {
       setStatusMsg("⚠️ Section not mounted yet. Navigate to this tab.");
       return;
     }
+
     const generated = generateReadings(ref.getRows());
     ref.applyReadings(generated);
-    const count = generated.reduce((s, g) => s + g.readings.length, 0);
+
+    const count = generated.reduce((sum, g) => sum + g.readings.length, 0);
     setStatusMsg(
       count > 0
         ? `⚡ Filled ${cfg.label}: ${count} readings`
@@ -375,6 +384,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
   const handleClearCurrent = () => {
     const cfg = SECTION_CONFIGS.find((c) => c.stepId === activeStepId);
     if (!cfg) return;
+
     const ref = sectionRefs[cfg.id]?.current;
     if (ref) {
       ref.clearReadings();
@@ -384,17 +394,9 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
     }
   };
 
-  const currentSectionLabel =
-    SECTION_CONFIGS.find((c) => c.stepId === activeStepId)?.label ?? null;
-  const profile = READING_PROFILES[selectedProfile];
-  const colors = profileColors[profile.color];
-  const readySections = SECTION_CONFIGS.filter(
-    (c) => !!sectionRefs[c.id]?.current
-  ).length;
-
   return (
     <>
-      {/* ── Floating Button — Right Center (vertical middle) ─────────── */}
+      {/* Floating Button */}
       {!isOpen && (
         <div className="fixed right-3 top-1/2 -translate-y-1/2 z-[100] group">
           <button
@@ -409,7 +411,6 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                        border-2 border-white/80"
           >
             <Bot className="w-4 h-4" />
-            {/* Tiny live dot */}
             <span
               className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5
                          bg-green-400 rounded-full border border-white
@@ -417,7 +418,6 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
             />
           </button>
 
-          {/* Hover label — slides out from the left */}
           <div
             className="absolute right-12 top-1/2 -translate-y-1/2
                        bg-gray-900 text-white text-[10px] font-semibold
@@ -435,7 +435,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
         </div>
       )}
 
-      {/* ── Bot Panel — Right Center, smaller width ──────────────────── */}
+      {/* Bot Panel */}
       {isOpen && (
         <div
           className="fixed right-3 top-1/2 -translate-y-1/2 z-[100]
@@ -473,6 +473,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                 </p>
               </div>
             </div>
+
             <div className="flex items-center gap-0.5 flex-shrink-0">
               <button
                 onClick={() => setIsExpanded((p) => !p)}
@@ -508,33 +509,31 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
             </div>
           )}
 
-          {/* Body — Scrollable */}
+          {/* Body */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             {/* Profile Selection */}
             <div>
-              <p className="text-[9px] font-bold text-gray-500
-                            uppercase tracking-wider mb-1.5">
+              <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                 Reading Profile
               </p>
+
               <div className="grid grid-cols-1 gap-1">
                 {Object.entries(READING_PROFILES).map(([key, p]) => {
                   const c = profileColors[p.color];
                   const isSelected = selectedProfile === key;
+
                   return (
                     <button
                       key={key}
                       onClick={() => setSelectedProfile(key)}
-                      className={`flex items-center gap-2 px-2 py-1.5
-                                 rounded-md border text-left transition-all
-                                 ${
-                                   isSelected
-                                     ? `${c.border} ${c.bg}`
-                                     : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                                 }`}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-md border text-left transition-all
+                        ${
+                          isSelected
+                            ? `${c.border} ${c.bg}`
+                            : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                        }`}
                     >
-                      <span
-                        className={isSelected ? c.text : "text-gray-400"}
-                      >
+                      <span className={isSelected ? c.text : "text-gray-400"}>
                         {p.icon}
                       </span>
                       <div className="flex-1 min-w-0">
@@ -565,27 +564,26 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
               <>
                 {/* Section Toggles */}
                 <div className="border-t pt-2.5">
-                  <p className="text-[9px] font-bold text-gray-500
-                                uppercase tracking-wider mb-1.5">
+                  <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                     Target Sections (for "Fill All")
                   </p>
+
                   <div className="grid grid-cols-2 gap-1">
                     {SECTION_CONFIGS.map((cfg) => {
                       const hasRef = !!sectionRefs[cfg.id]?.current;
                       const enabled = enabledSections[cfg.id];
+
                       return (
                         <label
                           key={cfg.id}
-                          className={`flex items-center gap-1.5 px-2 py-1.5
-                                     rounded-md border cursor-pointer
-                                     text-[10px] transition-all select-none
-                                     ${
-                                       !hasRef
-                                         ? "opacity-40 cursor-not-allowed"
-                                         : enabled
-                                         ? "border-green-300 bg-green-50"
-                                         : "border-gray-200 bg-gray-50"
-                                     }`}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border cursor-pointer text-[10px] transition-all select-none
+                            ${
+                              !hasRef
+                                ? "opacity-40 cursor-not-allowed"
+                                : enabled
+                                ? "border-green-300 bg-green-50"
+                                : "border-gray-200 bg-gray-50"
+                            }`}
                         >
                           <input
                             type="checkbox"
@@ -611,9 +609,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                           </span>
                           {cfg.stepId === activeStepId && (
                             <span
-                              className="ml-auto text-[8px] font-bold
-                                         bg-blue-100 text-blue-600
-                                         px-1 rounded flex-shrink-0"
+                              className="ml-auto text-[8px] font-bold bg-blue-100 text-blue-600 px-1 rounded flex-shrink-0"
                             >
                               NOW
                             </span>
@@ -627,14 +623,14 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                 {/* Fill Speed */}
                 <div className="border-t pt-2.5">
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[9px] font-bold text-gray-500
-                                  uppercase tracking-wider">
+                    <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">
                       Fill Speed
                     </p>
                     <span className="text-[9px] text-gray-500 font-mono bg-gray-100 px-1.5 py-0.5 rounded">
                       {fillDelay === 0 ? "Instant" : `${fillDelay}ms`}
                     </span>
                   </div>
+
                   <input
                     type="range"
                     min={0}
@@ -642,8 +638,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                     step={10}
                     value={fillDelay}
                     onChange={(e) => setFillDelay(Number(e.target.value))}
-                    className="w-full h-1 bg-gray-200 rounded-full
-                               accent-violet-600 cursor-pointer"
+                    className="w-full h-1 bg-gray-200 rounded-full accent-violet-600 cursor-pointer"
                   />
                   <div className="flex justify-between mt-0.5">
                     <span className="text-[8px] text-gray-400">Fast</span>
@@ -653,10 +648,10 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
 
                 {/* Quick Stats */}
                 <div className="border-t pt-2.5">
-                  <p className="text-[9px] font-bold text-gray-500
-                                uppercase tracking-wider mb-1.5">
+                  <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                     Status
                   </p>
+
                   <div className="grid grid-cols-3 gap-1.5 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-md p-2 border border-violet-100">
                     <div className="text-center">
                       <div className="text-sm font-black text-violet-700">
@@ -693,44 +688,28 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
             )}
           </div>
 
-          {/* Action Buttons — Sticky Footer */}
+          {/* Action Buttons */}
           <div className="flex-shrink-0 p-2.5 space-y-1.5 border-t border-gray-100 bg-white">
-            {/* Current Section */}
             {currentSectionLabel && (
               <button
                 onClick={handleFillCurrentSection}
                 disabled={isFilling}
-                className="w-full flex items-center justify-center gap-1.5
-                           px-3 py-1.5 bg-blue-50 text-blue-700
-                           border border-blue-200 rounded-md font-semibold
-                           text-[11px] hover:bg-blue-100
-                           disabled:opacity-50 disabled:cursor-not-allowed
-                           transition-all"
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-semibold text-[11px] hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Zap className="w-3 h-3" />
                 Fill "{currentSectionLabel}" Only
               </button>
             )}
 
-            {/* Fill All + Instant */}
             <div className="flex gap-1.5">
               <button
                 onClick={handleAnimatedFill}
                 disabled={isFilling}
-                className="flex-1 flex items-center justify-center gap-1.5
-                           px-3 py-2
-                           bg-gradient-to-r from-violet-600 to-indigo-600
-                           text-white rounded-md font-bold text-xs
-                           hover:from-violet-700 hover:to-indigo-700
-                           disabled:opacity-50 disabled:cursor-not-allowed
-                           transition-all shadow-sm"
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-md font-bold text-xs hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
               >
                 {isFilling ? (
                   <>
-                    <div
-                      className="w-3 h-3 border-2 border-white/30
-                                 border-t-white rounded-full animate-spin"
-                    />
+                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     {fillProgress}%
                   </>
                 ) : (
@@ -745,52 +724,34 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                 onClick={handleInstantFill}
                 disabled={isFilling}
                 title="Instant fill — no animation"
-                className="flex items-center justify-center
-                           px-2.5 py-2 bg-amber-50 text-amber-700
-                           border border-amber-200 rounded-md font-bold
-                           hover:bg-amber-100
-                           disabled:opacity-50 disabled:cursor-not-allowed
-                           transition-all"
+                className="flex items-center justify-center px-2.5 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-md font-bold hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Zap className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Clear Buttons */}
             <div className="flex gap-1.5">
               {currentSectionLabel && (
                 <button
                   onClick={handleClearCurrent}
                   disabled={isFilling}
-                  className="flex-1 flex items-center justify-center gap-1
-                             px-2 py-1.5 bg-gray-50 text-gray-600
-                             border border-gray-200 rounded-md
-                             font-medium text-[10px]
-                             hover:bg-orange-50 hover:text-orange-600
-                             hover:border-orange-200
-                             disabled:opacity-50 transition-all"
+                  className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-md font-medium text-[10px] hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 disabled:opacity-50 transition-all"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
                   Clear Current
                 </button>
               )}
+
               <button
                 onClick={handleClearAll}
                 disabled={isFilling}
-                className="flex-1 flex items-center justify-center gap-1
-                           px-2 py-1.5 bg-gray-50 text-gray-600
-                           border border-gray-200 rounded-md
-                           font-medium text-[10px]
-                           hover:bg-red-50 hover:text-red-600
-                           hover:border-red-200
-                           disabled:opacity-50 transition-all"
+                className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-md font-medium text-[10px] hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-all"
               >
                 <RotateCcw className="w-2.5 h-2.5" />
                 Clear All
               </button>
             </div>
 
-            {/* Footer Note */}
             <p className="text-[8px] text-gray-400 text-center pt-0.5">
               🔧 Dev-only · Hidden in production
             </p>
