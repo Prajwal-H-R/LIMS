@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { User, LogOut, ChevronDown, UserCircle } from "lucide-react";
+import { api } from '../api/config'; 
 
 interface HeaderProps {
   username?: string;
@@ -22,7 +23,19 @@ const Header: React.FC<HeaderProps> = ({
 
   // Public URL path to your logo
   const logoUrl = "/images/logo.png";
-
+const handleLogoutClick = async () => {
+  if (onLogout) {
+    try {
+      // Call backend to release all locks for this user
+      await api.post('/locks/release-all');
+    } catch (error) {
+      console.error("Failed to release locks on logout", error);
+    } finally {
+      // Proceed with the standard logout logic
+      onLogout();
+    }
+  }
+};
   return (
     <header className="relative z-[100] overflow-visible
                   bg-gradient-to-r from-blue-500 to-blue-700
@@ -93,15 +106,16 @@ const Header: React.FC<HeaderProps> = ({
                   )}
                   {onLogout && (
                     <button
-                      onClick={() => {
-                        onLogout();
-                        setShowDropdown(false);
-                      }}
-                      className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors duration-200"
-                    >
-                      <LogOut className="h-4 w-4 mr-3" />
-                      Logout
-                    </button>
+  onClick={(e) => {
+    e.preventDefault();
+    handleLogoutClick(); // Use our new wrapper function
+    setShowDropdown(false);
+  }}
+  className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors duration-200"
+>
+  <LogOut className="h-4 w-4 mr-3" />
+  Logout
+</button>
                   )}
                 </div>
               )}

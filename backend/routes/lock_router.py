@@ -93,3 +93,22 @@ def release(req: LockRequest, db: Session = Depends(get_db), current_user = Depe
         # We don't want to break the UI on release failure, usually log and ignore
         # But returning 500 helps debug
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/release-all")
+def release_all(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    user_id = (
+        get_user_attr(current_user, "user_id")
+        or get_user_attr(current_user, "id")
+    )
+
+    if user_id is None:
+        logger.error("❌ [RELEASE ALL FAILED] No User ID found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user"
+        )
+
+    return lock_service.release_all_user_locks(db, int(user_id))

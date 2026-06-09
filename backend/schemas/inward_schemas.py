@@ -164,7 +164,7 @@ class DraftResponse(BaseModel):
 # === Core Inward Schemas ===
 class InwardCreate(BaseModel):
     srf_no: Optional[str] = None
-    
+    received_date: Optional[datetime.date] = None
     material_inward_date: datetime.date = Field(default_factory=datetime.date.today)
     customer_dc_date: Optional[str] = "" 
     
@@ -195,6 +195,7 @@ class InwardUpdate(InwardCreate):
 class InwardResponse(BaseModel):
     inward_id: int
     srf_no: str
+    received_date: Optional[datetime.date] = None
     material_inward_date: datetime.date = Field(alias='material_inward_date')
     customer_dc_no: Optional[str] = None
     customer_dc_date: Optional[str] = None

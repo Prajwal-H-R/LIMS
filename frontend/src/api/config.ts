@@ -306,7 +306,9 @@ export const ENDPOINTS = {
     VIEW_BY_QR_CERT:   (id: number) => `/certificates/qr/certificate/${id}`,
     JOB_PREVIEW:       (jobId: number) => `/certificates/jobs/${jobId}/preview-data`,
   },
-
+EQUIPMENT: {
+    SCAN: (neplId: string) => `/equipment/scan/${neplId}`,
+  },
   // ── Final Inspections (Restored from old file) ──────────────────── //
   FINAL_INSPECTIONS: {
     DASHBOARD:      `/final-inspections/customer/dashboard-reports`,

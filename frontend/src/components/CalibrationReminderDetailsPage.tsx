@@ -15,7 +15,7 @@ type SortMode =
   | "serial_asc"
   | "srf_asc";
 
-type DaysMode = "7" | "14" | "30" | "60" | "90" | "custom";
+type DaysMode = "7" | "14" | "30" | "45" | "60" | "90" | "custom";
 
 const SORT_MODE_MAP: Record<
   SortMode,
@@ -37,6 +37,7 @@ const DAYS_PRESETS: Array<{ value: Exclude<DaysMode, "custom">; label: string }>
   { value: "7", label: "Next 7 days" },
   { value: "14", label: "Next 14 days" },
   { value: "30", label: "Next 30 days" },
+  { value: "45", label: "Next 45 days" },
   { value: "60", label: "Next 60 days" },
   { value: "90", label: "Next 90 days" },
 ];
@@ -118,8 +119,8 @@ const CalibrationReminderDetailsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
-  const [daysMode, setDaysMode] = useState<DaysMode>("7");
-  const [customDays, setCustomDays] = useState<number>(7);
+  const [daysMode, setDaysMode] = useState<DaysMode>("45");
+  const [customDays, setCustomDays] = useState<number>(45);
   const [sortMode, setSortMode] = useState<SortMode>("due_asc");
 
   const customerIdNum = useMemo(() => {

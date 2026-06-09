@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { 
   Plus, Trash2, Eye, Save, FileText, Loader2, X, ArrowLeft, 
   Camera, Clock, Send, Wrench, AlertCircle, CheckCircle2, 
-  Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, Lock,Settings
+  Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, Lock,Settings,Pencil, Search, ChevronDown,Star
 } from 'lucide-react';
 import { InwardForm as InwardFormType, EquipmentDetail as BaseEquipmentDetail, InwardDetail } from '../types/inward';
 // import { EquipmentDetailsModal } from './EquipmentDetailsModal';
@@ -16,6 +16,7 @@ import { HTWManufacturerSpecsManager } from './AdminComponents/HTWManufacturerSp
 
 interface ExtendedInwardFormType extends InwardFormType {
   customer_dc_no: string;
+  received_date: string;
 }
 
 interface EquipmentDetail extends Omit<BaseEquipmentDetail, 'inspe_notes' | 'calibration_by'> {
@@ -66,6 +67,7 @@ interface DraftSaveResponse {
 
 interface LoadedDraftData {
   srf_no: string;
+  received_date: string;
   material_inward_date: string;
   customer_dc_date: string;
   customer_dc_no: string;
@@ -120,6 +122,126 @@ const TruncatedTooltip = ({ text }: { text: string; type: 'input' | 'display' })
     </div>
   );
 };
+// Helper Component for Searchable Material Selection
+const MaterialSearchSelect = ({ 
+  value, options, configuredTypes, onChange, onAddNew, onEditCustom, disabled 
+}: { 
+  value: string; options: string[]; configuredTypes: string[]; 
+  onChange: (val: string) => void; onAddNew: () => void; 
+  onEditCustom: (val: string) => void; disabled?: boolean;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Position calculation to "break out" of the table overflow
+  const updatePosition = () => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setCoords({ top: rect.bottom, left: rect.left, width: rect.width });
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('scroll', updatePosition, true);
+    }
+    return () => window.removeEventListener('scroll', updatePosition, true);
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const filteredOptions = options.filter(opt => 
+    opt.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const isCurrentValueConfigured = configuredTypes.includes(value);
+
+  return (
+    <div className="relative w-full" ref={containerRef}>
+      {/* TRIGGER: Matches Old UI Select styling */}
+      <div 
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full px-4 py-2.5 text-sm font-semibold border rounded-lg transition-all flex justify-between items-center cursor-pointer ${
+          disabled ? 'bg-gray-100 cursor-not-allowed' : 
+          isCurrentValueConfigured 
+            ? 'bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-100' 
+            : 'bg-white border-gray-300 text-gray-900'
+        }`}
+      >
+        <span className="truncate">
+          {value || "Select Equipment..."} {isCurrentValueConfigured && "★"}
+        </span>
+        <ChevronDown size={16} className={isCurrentValueConfigured ? 'text-amber-600' : 'text-gray-400'} />
+      </div>
+
+      {/* DROPDOWN: Fixed positioning to appear above everything */}
+      {isOpen && (
+        <div 
+          style={{ position: 'fixed', top: coords.top + 4, left: coords.left, width: coords.width, zIndex: 9999 }}
+          className="bg-white border border-gray-300 rounded-lg shadow-2xl overflow-hidden flex flex-col"
+        >
+          <div className="p-2 border-b bg-gray-50 flex items-center gap-2">
+            <Search size={14} className="text-gray-400 ml-1" />
+            <input
+              autoFocus
+              className="w-full px-2 py-1 text-sm outline-none bg-transparent"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+
+          <div className="max-h-64 overflow-y-auto">
+            {/* 1. HIGHLIGHTED ITEMS (Starred) - NO PENCIL */}
+            {filteredOptions.filter(m => configuredTypes.includes(m)).sort().map(opt => (
+              <div
+                key={opt}
+                onClick={() => { onChange(opt); setIsOpen(false); }}
+                className="px-4 py-2.5 text-sm font-bold bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer flex justify-between items-center border-b border-amber-100"
+              >
+                {opt} <Star size={14} className="fill-amber-500 text-amber-500" />
+              </div>
+            ))}
+
+            {/* 2. REGULAR ITEMS - SHOW PENCIL */}
+            {filteredOptions.filter(m => !configuredTypes.includes(m)).sort().map(opt => (
+              <div
+                key={opt}
+                className="group px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b border-gray-50 last:border-0"
+                onClick={() => { onChange(opt); setIsOpen(false); }}
+              >
+                <span className="truncate flex-1">{opt}</span>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onEditCustom(opt); setIsOpen(false); }}
+                  className="p-1 hover:bg-amber-200 rounded text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+            ))}
+
+            {/* ADD NEW ACTION */}
+            <div
+              onClick={() => { onAddNew(); setIsOpen(false); }}
+              className="px-4 py-2.5 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 flex items-center gap-2 border-t"
+            >
+              <Plus size={14} /> Add New Item
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- COMPONENT ---
 export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftUpdate, onBack }) => {
@@ -136,6 +258,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
 
   const [formData, setFormData] = useState<ExtendedInwardFormType>({
     srf_no: 'Loading...', 
+    received_date: new Date().toISOString().split('T')[0],
     material_inward_date: new Date().toISOString().split('T')[0],
     customer_dc_date: '',
     customer_dc_no: '',
@@ -172,7 +295,8 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   // Manufacturer dropdown state
   const [makeOptions, setMakeOptions] = useState<string[]>([]);
   const [modelCache, setModelCache] = useState<Record<string, string[]>>({});
-
+// Inside InwardForm component, near other state hooks:
+const [editingMaterialValue, setEditingMaterialValue] = useState<string | null>(null);
   const [newCustomerData, setNewCustomerData] = useState<NewCustomerForm>({
     company_name: '',
     contact_person: '',
@@ -382,6 +506,7 @@ const fetchFlowConfigs = useCallback(async () => {
 
       setFormData({
         srf_no: inward.srf_no.toString(),
+        received_date: safeDate(inward.received_date),
         material_inward_date: safeDate(inward.material_inward_date),
         customer_dc_date: safeDate(inward.customer_dc_date),
         customer_dc_no: (inward as any).customer_dc_no ?? '',
@@ -491,6 +616,7 @@ const fetchFlowConfigs = useCallback(async () => {
       if (draftData) {
         const newFormData: ExtendedInwardFormType = {
           srf_no: nextSrf,
+          received_date: safeDate(draftData.received_date),
           material_inward_date: safeDate(draftData.material_inward_date),
           customer_dc_date: safeDate(draftData.customer_dc_date),
           customer_dc_no: draftData.customer_dc_no ?? '',
@@ -562,6 +688,7 @@ const fetchFlowConfigs = useCallback(async () => {
       
       const newFormData: ExtendedInwardFormType = {
         srf_no: displaySrf,
+        received_date: safeDate(new Date().toISOString()),
         material_inward_date: safeDate(new Date().toISOString()),
         customer_dc_date: '',
         customer_dc_no: '',
@@ -756,23 +883,34 @@ const fetchFlowConfigs = useCallback(async () => {
   };
 
   // ... [Standard Form Handlers] ...
-  const handleAddCustomMaterial = (e: React.FormEvent) => {
-    if (isLocked) return; 
-    e.preventDefault();
-    if (!newMaterialInput.trim()) return;
-    const newItem = newMaterialInput.trim();
-    setMaterialOptions(prev => {
-        if(prev.some(item => item.toLowerCase() === newItem.toLowerCase())) return prev;
-        return [...prev, newItem].sort();
-    });
-    if (activeRowForNewMaterial !== null) {
-        handleEquipmentChange(activeRowForNewMaterial, 'material_desc', newItem);
+const handleAddCustomMaterial = (e: React.FormEvent) => {
+  if (isLocked) return;
+  e.preventDefault();
+  const isEditing = Boolean(editingMaterialValue);
+  const newItem = newMaterialInput.trim();
+  if (!newItem) return;
+
+  setMaterialOptions(prev => {
+    if (editingMaterialValue) {
+      // Find the old name and swap it with the new name
+      return prev.map(item => item === editingMaterialValue ? newItem : item).sort();
     }
-    setNewMaterialInput("");
-    setShowAddMaterialModal(false);
-    setActiveRowForNewMaterial(null);
-    showMessage('success', 'Item added! Submit this form to save it permanently.');
-  };
+    // Standard Add Logic
+    if (prev.some(item => item.toLowerCase() === newItem.toLowerCase())) return prev;
+    return [...prev, newItem].sort();
+  });
+
+  if (activeRowForNewMaterial !== null) {
+    handleEquipmentChange(activeRowForNewMaterial, 'material_desc', newItem);
+  }
+
+  // RESET ALL STATES
+  setNewMaterialInput("");
+  setEditingMaterialValue(null);
+  setShowAddMaterialModal(false);
+  setActiveRowForNewMaterial(null);
+  showMessage('success', isEditing ? 'Material updated!' : 'Material added!');
+};
 
   const handleNewCustomerChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (isLocked) return; 
@@ -1096,6 +1234,7 @@ const handleFinalSubmit = async () => {
     const finalInwardDate = formData.material_inward_date || new Date().toISOString().split('T')[0];
 
     submissionData.append('srf_no', formData.srf_no);
+    submissionData.append('received_date',formData.received_date);
     submissionData.append('material_inward_date', finalInwardDate);
     submissionData.append('customer_dc_date', formData.customer_dc_date || "");
     submissionData.append('customer_dc_no', formData.customer_dc_no);
@@ -1238,8 +1377,85 @@ const handleFinalSubmit = async () => {
   };
 
   // ... [Render Helpers] ...
-  const renderAddMaterialModal = () => { if (!showAddMaterialModal) return null; return ( <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-60 p-4"> <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-y-auto relative"> <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl"> <div className="flex items-center gap-2"> <PackagePlus className="text-blue-600" size={20} /> <h2 className="text-lg font-bold text-gray-800">Add New Material</h2> </div> <button onClick={() => setShowAddMaterialModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"> <X size={20} /> </button> </div> <form onSubmit={handleAddCustomMaterial} className="p-6 space-y-4"> <div> <label className="block text-sm font-semibold text-gray-700 mb-2">Material Name</label> <input type="text" autoFocus value={newMaterialInput} onChange={(e) => setNewMaterialInput(e.target.value)} placeholder="e.g. Digital Multimeter" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> <p className="text-xs text-gray-500 mt-2">This will be added to the history list after you submit the form.</p> </div> <div className="flex gap-2 pt-2"> <button type="button" onClick={() => setShowAddMaterialModal(false)} className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-gray-700">Cancel</button> <button type="submit" disabled={!newMaterialInput.trim()} className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-blue-300">Add Item</button> </div> </form> </div> </div> ); };
-  const renderAddCustomerModal = () => { if (!showAddCustomerModal) return null; return ( <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4"> <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto relative"> <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl"> <div className="flex items-center gap-3"> <UserPlus className="text-blue-600" size={24} /> <h2 className="text-xl font-bold text-gray-800">Register New Company</h2> </div> <button onClick={() => setShowAddCustomerModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"> <X size={24} /> </button> </div> <form onSubmit={handleCreateCustomer} className="p-6 space-y-5"> <div className="space-y-4"> <div> <label className="block text-sm font-semibold text-gray-700 mb-1">Company Name *</label> <input name="company_name" required value={newCustomerData.company_name} onChange={handleNewCustomerChange} placeholder="e.g., ACME Industries Pvt Ltd" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> </div> <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"> <div><label className="block text-sm font-semibold text-gray-700 mb-1">Contact Person *</label><input name="contact_person" required value={newCustomerData.contact_person} onChange={handleNewCustomerChange} placeholder="Full Name" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /></div> <div><label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label><input name="phone" required value={newCustomerData.phone} onChange={handleNewCustomerChange} placeholder="Mobile/Landline" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /></div> </div> <div> <label className="block text-sm font-semibold text-gray-700 mb-1">Email (for Invitation) *</label> <input type="email" name="email" required value={newCustomerData.email} onChange={handleNewCustomerChange} placeholder="admin@company.com" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> <p className="text-xs text-gray-500 mt-1">An invitation to access the portal will be sent here.</p> </div> <div className="pt-2 border-t"> <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><MapPin size={16} className="text-gray-500"/> Ship To Address *</label> <textarea name="ship_to_address" required value={newCustomerData.ship_to_address} onChange={handleNewCustomerChange} rows={2} placeholder="Shipping location..." className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none resize-none" /> </div> <div> <div className="flex items-center justify-between mb-1"> <label className="block text-sm font-semibold text-gray-700">Bill To Address *</label> <label className="flex items-center space-x-2 text-sm text-blue-600 cursor-pointer"> <input type="checkbox" name="same_as_ship" checked={newCustomerData.same_as_ship} onChange={handleNewCustomerChange} className="rounded text-blue-600 focus:ring-blue-500" /> <span>Same as Ship To</span> </label> </div> <textarea name="bill_to_address" required value={newCustomerData.bill_to_address} onChange={handleNewCustomerChange} disabled={newCustomerData.same_as_ship} rows={2} placeholder="Billing location..." className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none resize-none ${newCustomerData.same_as_ship ? 'bg-gray-100 text-gray-500' : ''}`} /> </div> </div> <div className="flex gap-3 pt-2"> <button type="button" onClick={() => setShowAddCustomerModal(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-gray-700">Cancel</button> <button type="submit" disabled={isCreatingCustomer} className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-blue-400 flex justify-center items-center gap-2"> {isCreatingCustomer ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />} <span>Register & Invite</span> </button> </div> </form> </div> </div> ); };
+const renderAddMaterialModal = () => {
+  if (!showAddMaterialModal) return null;
+
+  // Determine if we are in Edit mode or Add mode
+  const isEditing = Boolean(editingMaterialValue);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-60 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-y-auto relative">
+        {/* Header Section */}
+        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl">
+          <div className="flex items-center gap-2">
+            {isEditing ? (
+              <Pencil className="text-blue-600" size={20} />
+            ) : (
+              <PackagePlus className="text-blue-600" size={20} />
+            )}
+            <h2 className="text-lg font-bold text-gray-800">
+              {isEditing ? 'Edit Material Name' : 'Add New Material'}
+            </h2>
+          </div>
+          <button 
+            onClick={() => {
+              setShowAddMaterialModal(false);
+              setEditingMaterialValue(null); // Reset editing state on close
+            }} 
+            className="text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Form Section */}
+        <form onSubmit={handleAddCustomMaterial} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Material Name
+            </label>
+            <input 
+              type="text" 
+              autoFocus 
+              value={newMaterialInput} 
+              onChange={(e) => setNewMaterialInput(e.target.value)} 
+              placeholder="e.g. Digital Multimeter" 
+              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" 
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              {isEditing 
+                ? "Change the name and click update to modify this specific entry." 
+                : "This will be added to the history list after you submit the form."}
+            </p>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button 
+              type="button" 
+              onClick={() => {
+                setShowAddMaterialModal(false);
+                setEditingMaterialValue(null); // Reset editing state on cancel
+              }} 
+              className="flex-1 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-gray-700"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              disabled={!newMaterialInput.trim()} 
+              className={`flex-1 py-2 text-white rounded-lg font-medium transition-colors ${
+                isEditing ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+              } disabled:bg-gray-300`}
+            >
+              {isEditing ? 'Update Item' : 'Add Item'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};  const renderAddCustomerModal = () => { if (!showAddCustomerModal) return null; return ( <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4"> <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto relative"> <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl"> <div className="flex items-center gap-3"> <UserPlus className="text-blue-600" size={24} /> <h2 className="text-xl font-bold text-gray-800">Register New Company</h2> </div> <button onClick={() => setShowAddCustomerModal(false)} className="text-gray-400 hover:text-red-500 transition-colors"> <X size={24} /> </button> </div> <form onSubmit={handleCreateCustomer} className="p-6 space-y-5"> <div className="space-y-4"> <div> <label className="block text-sm font-semibold text-gray-700 mb-1">Company Name *</label> <input name="company_name" required value={newCustomerData.company_name} onChange={handleNewCustomerChange} placeholder="e.g., ACME Industries Pvt Ltd" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> </div> <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"> <div><label className="block text-sm font-semibold text-gray-700 mb-1">Contact Person *</label><input name="contact_person" required value={newCustomerData.contact_person} onChange={handleNewCustomerChange} placeholder="Full Name" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /></div> <div><label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label><input name="phone" required value={newCustomerData.phone} onChange={handleNewCustomerChange} placeholder="Mobile/Landline" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /></div> </div> <div> <label className="block text-sm font-semibold text-gray-700 mb-1">Email (for Invitation) *</label> <input type="email" name="email" required value={newCustomerData.email} onChange={handleNewCustomerChange} placeholder="admin@company.com" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" /> <p className="text-xs text-gray-500 mt-1">An invitation to access the portal will be sent here.</p> </div> <div className="pt-2 border-t"> <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><MapPin size={16} className="text-gray-500"/> Ship To Address *</label> <textarea name="ship_to_address" required value={newCustomerData.ship_to_address} onChange={handleNewCustomerChange} rows={2} placeholder="Shipping location..." className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none resize-none" /> </div> <div> <div className="flex items-center justify-between mb-1"> <label className="block text-sm font-semibold text-gray-700">Bill To Address *</label> <label className="flex items-center space-x-2 text-sm text-blue-600 cursor-pointer"> <input type="checkbox" name="same_as_ship" checked={newCustomerData.same_as_ship} onChange={handleNewCustomerChange} className="rounded text-blue-600 focus:ring-blue-500" /> <span>Same as Ship To</span> </label> </div> <textarea name="bill_to_address" required value={newCustomerData.bill_to_address} onChange={handleNewCustomerChange} disabled={newCustomerData.same_as_ship} rows={2} placeholder="Billing location..." className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none resize-none ${newCustomerData.same_as_ship ? 'bg-gray-100 text-gray-500' : ''}`} /> </div> </div> <div className="flex gap-3 pt-2"> <button type="button" onClick={() => setShowAddCustomerModal(false)} className="flex-1 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-gray-700">Cancel</button> <button type="submit" disabled={isCreatingCustomer} className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-blue-400 flex justify-center items-center gap-2"> {isCreatingCustomer ? <Loader2 className="animate-spin" size={18} /> : <UserPlus size={18} />} <span>Register & Invite</span> </button> </div> </form> </div> </div> ); };
   const renderPreviewModal = () => { 
     if (!showPreviewModal) return null; 
     
@@ -1280,6 +1496,7 @@ const handleFinalSubmit = async () => {
               <div className="text-center border-b pb-4 mb-6"><h1 className="text-2xl font-bold text-blue-900 uppercase tracking-wider">NextAge Engineering Pvt Ltd</h1><p className="text-gray-600 text-sm mt-1">Material Inward Receipt</p></div> 
               <div className="flex justify-between text-sm mb-8 gap-8"> 
                 <div className="w-1/2 space-y-2"> 
+                  <div className="flex"><span className="font-semibold w-32">Received Date:</span> <span>{formData.received_date}</span></div> 
                   <div className="flex"><span className="font-semibold w-32">Inward Date:</span> <span>{formData.material_inward_date}</span></div> 
                   <div className="flex"><span className="font-semibold w-32">SRF No:</span> <span className="text-blue-600 font-bold">{formData.srf_no} (Provisional)</span></div> 
                   <div className="flex"><span className="font-semibold w-32">Received By:</span> <span>{formData.receiver}</span></div> 
@@ -1597,6 +1814,7 @@ const renderDownloadModal = () => {
              </div>
              
              {/* Other Fields */}
+            <div><label className="block text-sm font-semibold text-gray-700 mb-2">Received Date *</label><input type="date" name="received_date" value={formData.received_date} onChange={handleFormChange} required className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Material Inward Date *</label><input type="date" name="material_inward_date" value={formData.material_inward_date} onChange={handleFormChange} required className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Customer DC No. *</label><input type="text" name="customer_dc_no" value={formData.customer_dc_no} onChange={handleFormChange} required placeholder="Enter Customer DC Number" className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
              <div><label className="block text-sm font-semibold text-gray-700 mb-2">Customer DC Date</label><input type="date" name="customer_dc_date" value={formData.customer_dc_date} onChange={handleFormChange} className="w-full px-4 py-2 border rounded-lg" disabled={isLocked} /></div>
@@ -1717,56 +1935,26 @@ const renderDownloadModal = () => {
                             className="w-full bg-slate-100 font-medium px-2 py-1.5 border border-slate-200 rounded-md" 
                           />
                         </td>
-                       <td className="p-2">
-  <select 
-    value={equipment.material_desc} 
-    onChange={(e) => {
-      if (e.target.value === 'ADD_NEW_CUSTOM') {
-        setActiveRowForNewMaterial(index);
-        setShowAddMaterialModal(true);
-      } else {
-        handleEquipmentChange(index, 'material_desc', e.target.value);
-      }
-    }} 
-    required 
-    className={`w-full px-4 py-2.5 text-sm font-semibold border rounded-lg transition-all outline-none ${
-      configuredTypes.includes(equipment.material_desc) 
-        ? 'bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-100' 
-        : 'bg-white border-gray-300 text-gray-900'
-    }`}
+                     <td className="p-2">
+  <MaterialSearchSelect
+    value={equipment.material_desc}
+    options={materialOptions}
+    configuredTypes={configuredTypes}
     disabled={isLocked}
-  >
-    <option value="">Select Equipment...</option>
-    
-    {/* 1. HIGHLIGHTED ITEMS (Top of list + Amber Background) */}
-    {materialOptions
-      .filter(m => configuredTypes.includes(m))
-      .sort()
-      .map(d => (
-        <option 
-          key={d} 
-          value={d} 
-          className="bg-amber-100 font-bold text-amber-900"
-        >
-          {d} ★
-        </option>
-      ))}
-
-    {/* 2. REGULAR ITEMS */}
-    {materialOptions
-      .filter(m => !configuredTypes.includes(m))
-      .sort()
-      .map(d => (
-        <option key={d} value={d} className="bg-white">
-          {d}
-        </option>
-      ))}
-
-    {/* 3. ACTION ITEM */}
-    <option value="ADD_NEW_CUSTOM" className="font-bold text-blue-600 bg-blue-50">
-      + Add New Item
-    </option>
-  </select>
+    onChange={(val) => handleEquipmentChange(index, 'material_desc', val)}
+    onAddNew={() => {
+      setActiveRowForNewMaterial(index);
+      setEditingMaterialValue(null); // Not editing, just adding
+      setNewMaterialInput("");
+      setShowAddMaterialModal(true);
+    }}
+    onEditCustom={(val) => {
+      setActiveRowForNewMaterial(index);
+      setEditingMaterialValue(val); // Capture the name we want to replace
+      setNewMaterialInput(val);     // Pre-fill the input
+      setShowAddMaterialModal(true);
+    }}
+  />
 </td>
 
                         <td className="p-2">
@@ -1918,18 +2106,34 @@ const renderDownloadModal = () => {
                            </div>
                         </td>
 
-                        <td className="sticky right-0 z-10 p-2 text-center bg-white group-hover:bg-slate-50">
-                           <div className="flex justify-center gap-2">
-                             <button type="button" onClick={() => viewEquipmentDetails(index)} className="text-blue-600 hover:bg-blue-100 p-1 rounded pointer-events-auto"><Eye size={16}/></button>
-                             
-                             {/* UPDATED: Only show Trash icon if not edit/locked, and now opens Modal */}
-                             {!isEditMode && !isLocked && (
-                                <button type="button" onClick={() => setRowToDelete(index)} className="text-red-600 hover:bg-red-100 p-1 rounded">
-                                    <Trash2 size={16}/>
-                                </button>
-                             )}
-                           </div>
-                        </td>
+                    {/* Find this section in your code and replace it with this */}
+<td className="sticky right-0 z-10 p-2 text-center bg-white group-hover:bg-slate-50 border-l">
+  <div className="flex justify-center gap-2">
+    {/* View Icon remains */}
+    <button 
+      type="button" 
+      onClick={() => viewEquipmentDetails(index)} 
+      className="text-blue-600 hover:bg-blue-100 p-1 rounded transition-colors"
+      title="View Details"
+    >
+      <Eye size={18}/>
+    </button>
+    
+    {/* The Pencil button block that was here has been removed */}
+    
+    {/* Trash Icon remains */}
+    {!isEditMode && !isLocked && (
+      <button 
+        type="button" 
+        onClick={() => setRowToDelete(index)} 
+        className="text-red-600 hover:bg-red-100 p-1 rounded transition-colors"
+        title="Delete Row"
+      >
+        <Trash2 size={18}/>
+      </button>
+    )}
+  </div>
+</td>
                       </tr>
                     </React.Fragment>
                   )})}

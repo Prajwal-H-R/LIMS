@@ -82,6 +82,7 @@ export const generateStandardInwardPDF = (formData: any, equipmentList: any[]) =
       y += 6;
     };
     printRow("SRF Number:", formData.srf_no);
+    printRow("Received Date:", formData.received_date);
     printRow("Inward Date:", formData.material_inward_date);
     printRow("DC Number:", formData.customer_dc_no);
     printRow("DC Date:", formData.customer_dc_date);

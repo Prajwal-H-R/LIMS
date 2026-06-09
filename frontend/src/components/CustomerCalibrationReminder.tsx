@@ -153,7 +153,7 @@ export const CustomerCalibrationReminderWidget: React.FC = () => {
       const res = await api.get<CalibrationReminderResponse>(
         `/calibration-reminders/customer/${customerId}`,
         {
-          params: { days_ahead: 7 },
+          params: { days_ahead: 45 },
         }
       );
 
@@ -199,7 +199,7 @@ export const CustomerCalibrationReminderWidget: React.FC = () => {
 
   const totalDue = data?.total_due_count ?? 0;
   const customerGroup = data?.groups?.[0];
-  const windowDays = data?.window_days ?? 7;
+  const windowDays = data?.window_days ?? 45;
 
   const filteredCertificates = useMemo(() => {
     const certs = customerGroup?.certificates ?? [];

@@ -62,10 +62,13 @@ def build_reminder_subject(certificate_id: int, certificate_no: str, due_date: s
 
 
 def build_plain_text_body(customer_name: str, due_rows: List[Dict], days_ahead: int) -> str:
+    # Logic to change wording based on window
+    title_text = f"due for calibration in the next {days_ahead} days" if days_ahead <= 7 else f"due for calibration within the next 45 days (Advance Notice)"
+    
     lines = [
         f"Hello {customer_name or 'Customer'},",
         "",
-        f"The following certificate(s) are due for calibration in the next {days_ahead} day(s):",
+        f"The following certificate(s) are {title_text}:",
         "",
     ]
 

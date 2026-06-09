@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Wrench, FileText, Award, ClipboardList, AlertTriangle,
   ArrowRight, Mail, Download, Briefcase, XCircle,
-  Loader2, FileUp
+  Loader2, FileUp, PackageSearch
 } from "lucide-react";
 import { api, ENDPOINTS } from "../api/config";
 import { DelayedEmailManager } from "./DelayedEmailManager";
@@ -58,7 +58,7 @@ const DashboardSkeleton: React.FC = () => (
     <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
       <div className="h-8 w-48 bg-slate-200 rounded mb-6 border-b pb-3" />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {[1, 2, 3, 4, 5, 6, 7].map((item) => (
+        {[1, 2, 3, 4, 5].map((item) => (
           <div
             key={item}
             className="p-6 rounded-2xl border border-gray-100 bg-white flex items-center"
@@ -102,7 +102,7 @@ const ActionButton: React.FC<{
       >
         {icon}
         {badge != null && badge > 0 && (
-          <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center font-bold border-2 border-white">
+          <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center font-bold border-2 border-white animate-pulse">
             {badge > 99 ? "99+" : badge}
           </span>
         )}
@@ -126,26 +126,13 @@ const ActionButton: React.FC<{
 const EngineerDashboard: React.FC = () => {
   const navigate = useNavigate();
 
-  const [pendingEmailCount, setPendingEmailCount] =
-    useState(0);
-  const [
-    failedNotificationCount,
-    setFailedNotificationCount,
-  ] = useState(0);
-  const [showDelayedEmails, setShowDelayedEmails] =
-    useState(false);
-  const [
-    showFailedNotifications,
-    setShowFailedNotifications,
-  ] = useState(false);
-  const [availableDrafts, setAvailableDrafts] = useState<
-    AvailableDraft[]
-  >([]);
-  const [reviewedFirCount, setReviewedFirCount] =
-    useState(0);
-  const [expiredStandards, setExpiredStandards] = useState<
-    string[]
-  >([]);
+  const [pendingEmailCount, setPendingEmailCount] = useState(0);
+  const [failedNotificationCount, setFailedNotificationCount] = useState(0);
+  const [showDelayedEmails, setShowDelayedEmails] = useState(false);
+  const [showFailedNotifications, setShowFailedNotifications] = useState(false);
+  const [availableDrafts, setAvailableDrafts] = useState<AvailableDraft[]>([]);
+  const [reviewedFirCount, setReviewedFirCount] = useState(0);
+  const [expiredStandards, setExpiredStandards] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchDashboardData = useCallback(
@@ -153,9 +140,7 @@ const EngineerDashboard: React.FC = () => {
       if (isInitialLoad) setIsLoading(true);
       try {
         const timestamp = new Date().getTime();
-        const todayStr = new Date()
-          .toISOString()
-          .split("T")[0];
+        const todayStr = new Date().toISOString().split("T")[0];
 
         const [
           pendingEmailsRes,
@@ -164,70 +149,24 @@ const EngineerDashboard: React.FC = () => {
           reviewedFirsRes,
           expiryRes,
         ] = await Promise.allSettled([
-          api.get<DelayedTask[]>(
-            `${ENDPOINTS.STAFF.INWARDS}/delayed-emails/pending?_t=${timestamp}`
-          ),
-          api.get<FailedNotificationsResponse>(
-            `${ENDPOINTS.STAFF.INWARDS}/notifications/failed?_t=${timestamp}`
-          ),
-          api.get<AvailableDraft[]>(
-            `${ENDPOINTS.STAFF.INWARDS}/drafts?_t=${timestamp}`
-          ),
-          api.get<ReviewedFir[]>(
-            `${ENDPOINTS.STAFF.INWARDS}/reviewed-firs?_t=${timestamp}`
-          ),
-          api.post<ExpiryCheckResponse>(
-            "/calibration/check-expiry",
-            { reference_date: todayStr }
-          ),
+          api.get<DelayedTask[]>(`${ENDPOINTS.STAFF.INWARDS}/delayed-emails/pending?_t=${timestamp}`),
+          api.get<FailedNotificationsResponse>(`${ENDPOINTS.STAFF.INWARDS}/notifications/failed?_t=${timestamp}`),
+          api.get<AvailableDraft[]>(`${ENDPOINTS.STAFF.INWARDS}/drafts?_t=${timestamp}`),
+          api.get<ReviewedFir[]>(`${ENDPOINTS.STAFF.INWARDS}/reviewed-firs?_t=${timestamp}`),
+          api.post<ExpiryCheckResponse>("/calibration/check-expiry", { reference_date: todayStr }),
         ]);
 
-        if (pendingEmailsRes.status === "fulfilled")
-          setPendingEmailCount(
-            pendingEmailsRes.value.data.length
-          );
-        if (failedNotifsRes.status === "fulfilled")
-          setFailedNotificationCount(
-            failedNotifsRes.value.data.failed_notifications
-              .length
-          );
-        if (draftsRes.status === "fulfilled")
-          setAvailableDrafts(
-            draftsRes.value.data || []
-          );
-        if (reviewedFirsRes.status === "fulfilled")
-          setReviewedFirCount(
-            reviewedFirsRes.value.data.length
-          );
+        if (pendingEmailsRes.status === "fulfilled") setPendingEmailCount(pendingEmailsRes.value.data.length);
+        if (failedNotifsRes.status === "fulfilled") setFailedNotificationCount(failedNotifsRes.value.data.failed_notifications.length);
+        if (draftsRes.status === "fulfilled") setAvailableDrafts(draftsRes.value.data || []);
+        if (reviewedFirsRes.status === "fulfilled") setReviewedFirCount(reviewedFirsRes.value.data.length);
 
-        if (
-          expiryRes.status === "fulfilled" &&
-          expiryRes.value.data
-        ) {
-          if (
-            "affected_tables" in expiryRes.value.data &&
-            Array.isArray(
-              expiryRes.value.data.affected_tables
-            )
-          ) {
-            setExpiredStandards(
-              expiryRes.value.data.affected_tables
-            );
-          } else if (
-            Array.isArray(expiryRes.value.data)
-          ) {
-            setExpiredStandards(
-              expiryRes.value.data as unknown as string[]
-            );
-          } else {
-            setExpiredStandards([]);
-          }
+        if (expiryRes.status === "fulfilled" && expiryRes.value.data) {
+          const data = expiryRes.value.data;
+          setExpiredStandards(Array.isArray(data.affected_tables) ? data.affected_tables : (Array.isArray(data) ? data : []));
         }
       } catch (error) {
-        console.error(
-          "Error fetching dashboard data:",
-          error
-        );
+        console.error("Error fetching dashboard data:", error);
       } finally {
         if (isInitialLoad) {
           setTimeout(() => setIsLoading(false), 300);
@@ -241,101 +180,53 @@ const EngineerDashboard: React.FC = () => {
     fetchDashboardData(true);
     const onFocus = () => fetchDashboardData(false);
     window.addEventListener("focus", onFocus);
-    return () =>
-      window.removeEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [fetchDashboardData]);
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    const hasActiveTasks =
-      pendingEmailCount > 0 || failedNotificationCount > 0;
-    if (hasActiveTasks) {
-      interval = setInterval(
-        () => fetchDashboardData(false),
-        5000
-      );
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [
-    pendingEmailCount,
-    failedNotificationCount,
-    fetchDashboardData,
-  ]);
 
   const quickActions = [
     {
-      label: "Create Inward",
-      description:
-        "Process incoming equipment and SRF items",
-      icon: <ClipboardList className="h-8 w-8" />,
-      route: "create-inward",
-      colorClasses:
-        "bg-gradient-to-r from-blue-500 to-indigo-600",
-      badge: availableDrafts.length,
-    },
-    {
-      label: "View & Update Inward",
-      description:
-        "Manage existing inward entries and SRFs",
-      icon: <Wrench className="h-8 w-8" />,
-      route: "view-inward",
-      colorClasses:
-        "bg-gradient-to-r from-cyan-500 to-blue-600",
-      badge: reviewedFirCount,
-    },
-    {
-      label: "Export Inward",
-      description:
-        "Filter and export updated inward records",
-      icon: <Download className="h-8 w-8" />,
-      route: "export-inward",
-      colorClasses:
-        "bg-gradient-to-r from-indigo-500 to-purple-600",
+      label: "Inward Management",
+      description: "Manage equipment entry, updates, and reporting from one place",
+      icon: <PackageSearch className="h-8 w-8" />,
+      route: "inward-management",
+      colorClasses: "bg-gradient-to-r from-blue-600 to-indigo-700",
+      // Combine badges for drafts and reviewed FIRs
+      badge: (availableDrafts.length || 0) + (reviewedFirCount || 0),
     },
     {
       label: "SRF Management",
-      description:
-        "View and manage Service Request Forms",
+      description: "View and manage Service Request Forms",
       icon: <FileText className="h-8 w-8" />,
       route: "srfs",
-      colorClasses:
-        "bg-gradient-to-r from-green-500 to-emerald-600",
+      colorClasses: "bg-gradient-to-r from-green-500 to-emerald-600",
     },
     {
       label: "Jobs Management",
-      description:
-        "Manage calibration jobs and job status",
+      description: "Manage calibration jobs and job status",
       icon: <Briefcase className="h-8 w-8" />,
       route: "jobs",
-      colorClasses:
-        "bg-gradient-to-r from-teal-500 to-cyan-600",
+      colorClasses: "bg-gradient-to-r from-teal-500 to-cyan-600",
     },
     {
       label: "Manual Calibration",
-      description:
-        "View and manage Service Request Forms",
+      description: "Process manual equipment calibration entries",
       icon: <FileUp className="h-8 w-8" />,
       route: "manual-calibration",
-      colorClasses:
-        "bg-gradient-to-r from-slate-500 to-slate-700",
+      colorClasses: "bg-gradient-to-r from-slate-500 to-slate-700",
     },
     {
       label: "View Deviations",
-      description: "Access deviation reports",
+      description: "Access and manage deviation reports",
       icon: <AlertTriangle className="h-8 w-8" />,
       route: "deviations",
-      colorClasses:
-        "bg-gradient-to-r from-orange-500 to-red-500",
+      colorClasses: "bg-gradient-to-r from-orange-500 to-red-500",
     },
     {
       label: "Certificates",
-      description: "Generate and manage certificates",
+      description: "Generate and manage equipment certificates",
       icon: <Award className="h-8 w-8" />,
       route: "certificates",
-      colorClasses:
-        "bg-gradient-to-r from-purple-500 to-indigo-600",
+      colorClasses: "bg-gradient-to-r from-purple-500 to-indigo-600",
     },
   ];
 
@@ -356,8 +247,7 @@ const EngineerDashboard: React.FC = () => {
               Engineer Portal
             </h1>
             <p className="mt-1 text-base text-gray-600">
-              Manage calibration jobs, certificates, and
-              equipment intake
+              Manage calibration jobs, certificates, and equipment intake
             </p>
           </div>
         </div>
@@ -365,7 +255,7 @@ const EngineerDashboard: React.FC = () => {
 
       {/* Expired Standards Warning */}
       {expiredStandards.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6 shadow-lg animate-fade-in relative overflow-hidden">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6 shadow-lg relative overflow-hidden">
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <AlertTriangle className="w-32 h-32 text-red-600" />
           </div>
@@ -374,26 +264,14 @@ const EngineerDashboard: React.FC = () => {
               <AlertTriangle className="h-6 w-6 text-red-600" />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-red-900 mb-2">
-                Attention: Master Standards Expired
-              </h3>
+              <h3 className="text-lg font-bold text-red-900 mb-2">Attention: Master Standards Expired</h3>
               <p className="text-red-800 text-sm mb-3 font-medium">
-                The following master standards have
-                expired. Please be aware that creating new
-                jobs may be restricted in the Jobs module
-                until these are updated by an
-                administrator.
+                The following master standards have expired. Creating new jobs may be restricted.
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 {expiredStandards.map((table, idx) => (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-white border border-red-200 text-red-700 shadow-sm"
-                  >
-                    <XCircle
-                      size={12}
-                      className="mr-1.5"
-                    />
+                  <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-white border border-red-200 text-red-700 shadow-sm">
+                    <XCircle size={12} className="mr-1.5" />
                     {formatTableName(table)}
                   </span>
                 ))}
@@ -403,60 +281,38 @@ const EngineerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Pending Emails Banner */}
-      {pendingEmailCount > 0 && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 mb-6 shadow-lg animate-fade-in">
-          <div className="flex items-start gap-4">
-            <Mail className="h-6 w-6 text-orange-600 mt-1 flex-shrink-0" />
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-orange-900 mb-2">
-                Scheduled Email Reminders (
-                {pendingEmailCount})
-              </h3>
-              <p className="text-orange-800 text-sm mb-3">
-                You have {pendingEmailCount} email(s)
-                scheduled. Manage or send them
-                immediately.
-              </p>
-              <button
-                onClick={() =>
-                  setShowDelayedEmails(true)
-                }
-                className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 transition-colors text-sm"
-              >
-                Manage Scheduled Emails
-              </button>
+      {/* Notifications Banners (Delayed Emails & Failed Notifs) */}
+      <div className="space-y-4 mb-6">
+        {pendingEmailCount > 0 && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 shadow-md flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Mail className="h-6 w-6 text-orange-600" />
+              <div>
+                <p className="font-semibold text-orange-900">Scheduled Emails: {pendingEmailCount}</p>
+                <p className="text-sm text-orange-800">You have emails waiting to be sent.</p>
+              </div>
             </div>
+            <button onClick={() => setShowDelayedEmails(true)} className="bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 text-sm transition-colors">
+              Manage
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Failed Notifications Banner */}
-      {failedNotificationCount > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6 shadow-lg animate-fade-in">
-          <div className="flex items-start gap-4">
-            <AlertTriangle className="h-6 w-6 text-red-600 mt-1 flex-shrink-0" />
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-red-900 mb-2">
-                Failed Email Notifications (
-                {failedNotificationCount})
-              </h3>
-              <p className="text-red-800 text-sm mb-3">
-                Some email notifications failed to send.
-                Please review and retry them.
-              </p>
-              <button
-                onClick={() =>
-                  setShowFailedNotifications(true)
-                }
-                className="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors text-sm"
-              >
-                Review Failed Emails
-              </button>
+        {failedNotificationCount > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6 shadow-md flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-900">Failed Notifications: {failedNotificationCount}</p>
+                <p className="text-sm text-red-800">Review failed email notifications.</p>
+              </div>
             </div>
+            <button onClick={() => setShowFailedNotifications(true)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-700 text-sm transition-colors">
+              Review
+            </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Quick Actions Grid */}
       <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
@@ -476,20 +332,10 @@ const EngineerDashboard: React.FC = () => {
 
       {/* Modals */}
       {showDelayedEmails && (
-        <DelayedEmailManager
-          onClose={() => {
-            setShowDelayedEmails(false);
-            fetchDashboardData(true);
-          }}
-        />
+        <DelayedEmailManager onClose={() => { setShowDelayedEmails(false); fetchDashboardData(true); }} />
       )}
       {showFailedNotifications && (
-        <FailedNotificationsManager
-          onClose={() => {
-            setShowFailedNotifications(false);
-            fetchDashboardData(true);
-          }}
-        />
+        <FailedNotificationsManager onClose={() => { setShowFailedNotifications(false); fetchDashboardData(true); }} />
       )}
     </div>
   );
