@@ -17,7 +17,7 @@ from backend.models.htw.htw_pressure_gauge_resolution import HTWPressureGaugeRes
 from backend.services.htw import htw_repeatability_services as repeat_services
 from backend.services.htw.htw_const_coverage_factor_service import get_active_coverage_factor_k
 from backend.models.external_upload import ExternalUpload
-
+from backend.models.lab_scope import LabScope
 # Set up logger
 logger = logging.getLogger(__name__)
  
@@ -463,7 +463,7 @@ def build_template_data(
 def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = None) -> HTWCertificate:
     """
     Step 1–2: Generate certificate (DRAFT).
-    Creates htw_certificate with auto-filled data, status DRAFT.
+    Creates htw_certificate with auto-filled data and AUTO-GENERATED ULR.
     """
     job = db.query(HTWJob).options(
         joinedload(HTWJob.equipment_rel),
@@ -475,22 +475,50 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
  
     job_status = (job.job_status or "").strip()
     if not job_status_allows_certificate_generation(job_status):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Certificate can only be generated when the calibration job is complete "
-                "(Calibrated, Completed - OOT, or Completed). "
-                f"Current status: {job_status or 'Not set'}."
-            ),
-        )
+        raise HTTPException(status_code=400, detail=f"Job status {job_status} not allowed.")
  
     equipment = job.equipment_rel
     if not equipment:
         raise HTTPException(status_code=400, detail="Job has no equipment")
  
+    # ---------------------------------------------------------
+    # ULR GENERATION LOGIC (START)
+    # ---------------------------------------------------------
+    # 1. Get Prefix from active lab scope and trim hyphens
+    scope_rec = db.query(LabScope).filter(LabScope.is_active == True).first()
+    if not scope_rec or not scope_rec.lab_unique_number:
+        raise HTTPException(status_code=400, detail="No active Lab Accreditation Number found in Lab Scope settings.")
+    
+    prefix = scope_rec.lab_unique_number.replace("-", "").strip().upper()
+    year_code = str(date.today().year)[-2:]
+    loc_code = "0"
+    scope_flag = "F"
+
+    # 2. Find the highest existing ULR for this year to increment
+    # We use with_for_update() to lock these rows during the transaction 
+    # so another system can't grab the same "highest" number.
+    search_pattern = f"{prefix}{year_code}{loc_code}%"
+    last_cert_with_ulr = db.query(HTWCertificate).filter(
+        HTWCertificate.ulr_no.like(search_pattern)
+    ).order_by(HTWCertificate.ulr_no.desc()).with_for_update().first()
+
+    next_serial = 1
+    if last_cert_with_ulr and last_cert_with_ulr.ulr_no:
+        try:
+            # Extract serial from CC4466240 [00000001] F 
+            # (chars index 9 to 17)
+            last_serial_val = int(last_cert_with_ulr.ulr_no[9:17])
+            next_serial = last_serial_val + 1
+        except (ValueError, IndexError):
+            next_serial = 1
+
+    generated_ulr = f"{prefix}{year_code}{loc_code}{next_serial:08d}{scope_flag}"
+    # ---------------------------------------------------------
+    # ULR GENERATION LOGIC (END)
+    # ---------------------------------------------------------
+
     existing = db.query(HTWCertificate).filter(HTWCertificate.job_id == job_id).first()
  
-    # Pre-compute ISO 6789 conformity values to persist into `htw_certificate`.
     budgets = db.query(HTWUncertaintyBudget).filter(HTWUncertaintyBudget.job_id == job_id).order_by(HTWUncertaintyBudget.step_percent).all()
     mapped_uncertainty_rows = _map_uncertainty_budget(budgets)
     permissible_arr = [row.get("permissible_deviation_iso_6789") for row in mapped_uncertainty_rows]
@@ -498,12 +526,15 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
  
     if existing:
         if existing.status == "DRAFT":
-            # If old rows exist before this feature, backfill the persisted values.
+            # If draft exists but somehow has no ULR, assign it now
+            if not existing.ulr_no:
+                existing.ulr_no = generated_ulr
+            
             if getattr(existing, "permissible_deviation_iso_6789", None) is None or getattr(existing, "iso_6789_results", None) is None:
                 existing.permissible_deviation_iso_6789 = permissible_arr
                 existing.iso_6789_results = results_arr
-                db.commit()
-                db.refresh(existing)
+            db.commit()
+            db.refresh(existing)
             return existing
         raise HTTPException(status_code=400, detail=f"Certificate already exists with status {existing.status}")
  
@@ -517,8 +548,8 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
         inward_eqp_id=job.inward_eqp_id,
         certificate_no=cert_no,
         date_of_calibration=cal_date,
-        ulr_no=None,
-        field_of_parameter=None,
+        ulr_no=generated_ulr, # Assigned automatically here
+        field_of_parameter="Torque", # Set default parameter
         recommended_cal_due_date=default_due,
         item_status="Satisfactory",
         authorised_signatory=None,
@@ -531,7 +562,6 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
     db.commit()
     db.refresh(cert)
     return cert
- 
  
 def update_certificate(db: Session, certificate_id: int, payload: Dict[str, Any]) -> HTWCertificate:
     """

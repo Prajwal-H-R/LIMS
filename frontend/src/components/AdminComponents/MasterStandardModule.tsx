@@ -695,7 +695,7 @@ function MasterStandardList({ onBack, onAddNew, onEdit, onExportNavigate }: Mast
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Accuracy of Master</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Accuracy of Master (in %)</label>
                   <p className="text-sm text-gray-900">{viewingStandard.accuracy_of_master || 'N/A'}</p>
                 </div>
                 <div>
@@ -987,7 +987,7 @@ className={`bg-white border ${
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Accuracy of Master <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Accuracy of Master  (in %)<span className="text-red-500">*</span></label>
               <input
                 required
                 aria-required

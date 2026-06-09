@@ -547,67 +547,77 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
     fetchJobsForGenerate();
   };
 
-  const handleGenerateAndOpenFlow = async (jobId: number) => {
-    setGeneratingJobId(jobId);
-    try {
-      await api.post(ENDPOINTS.CERTIFICATES.GENERATE(jobId));
-      const updatedGroups = await fetchSrfGroups();
+const handleGenerateAndOpenFlow = async (jobId: number) => {
+  setGeneratingJobId(jobId);
+  try {
+    // 1. Trigger generation (Backend now assigns ULR automatically)
+    await api.post(ENDPOINTS.CERTIFICATES.GENERATE(jobId));
+    
+    // 2. Refresh the list to get the new record with its ULR
+    const updatedGroups = await fetchSrfGroups();
 
-      let newCert: Certificate | null = null;
-      let targetGroup: SrfGroup | null = null;
+    // 3. Find the newly created certificate
+    let newCert: Certificate | null = null;
+    let targetGroup: SrfGroup | null = null;
 
-      for (const group of updatedGroups) {
-        if (!group.equipments) continue;
-        const foundEq = group.equipments.find(e => Number(e.job_id) === Number(jobId));
-        if (foundEq && foundEq.certificate) {
-          newCert = foundEq.certificate;
-          targetGroup = group;
-          break;
-        }
+    for (const group of updatedGroups) {
+      const foundEq = group.equipments.find(e => Number(e.job_id) === Number(jobId));
+      if (foundEq && foundEq.certificate) {
+        newCert = foundEq.certificate;
+        targetGroup = group;
+        break;
       }
-
-      setShowGenerateModal(false);
-
-      if (newCert) {
-        setSelectedCertificate(newCert);
-        setShowPreviewModal(true);
-
-        setPreviewLoading(true);
-        try {
-          const res = await api.get(ENDPOINTS.CERTIFICATES.PREVIEW(newCert.certificate_id));
-          setPreviewData(res.data);
-        } catch (err) {
-          console.error("Preview load error", err);
-        } finally {
-          setPreviewLoading(false);
-        }
-
-        if (targetGroup) {
-          setSearchParams({ srfId: targetGroup.inward_id.toString(), tab: "draft" });
-        }
-      } else {
-        toast.success("Draft generated. Check Drafts tab.");
-      }
-
-    } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed to generate certificate.");
-    } finally {
-      setGeneratingJobId(null);
     }
-  };
 
-  const handleOpenEdit = (cert: Certificate) => {
-    setSelectedCertificate(cert);
-    setEditForm({
-      ulr_no: cert.ulr_no || "",
-      field_of_parameter: cert.field_of_parameter || "Torque",
-      recommended_cal_due_date: cert.recommended_cal_due_date
-        ? cert.recommended_cal_due_date.slice(0, 10)
-        : "",
-      item_status: cert.item_status || "Satisfactory",
-    });
-    setShowEditModal(true);
-  };
+    setShowGenerateModal(false);
+
+    if (newCert) {
+      // 4. Open the edit flow immediately
+      handleOpenEdit(newCert); 
+      
+      if (targetGroup) {
+        setSearchParams({ srfId: targetGroup.inward_id.toString(), tab: "draft" });
+      }
+    } else {
+      toast.success("Draft generated with ULR. Check Drafts tab.");
+    }
+  } catch (err: any) {
+    toast.error(err.response?.data?.detail || "Failed to generate.");
+  } finally {
+    setGeneratingJobId(null);
+  }
+};
+
+const [isFetchingUlr, setIsFetchingUlr] = useState(false);
+
+const handleOpenEdit = async (cert: Certificate) => {
+  setSelectedCertificate(cert);
+  
+  // Since backend generates it during 'POST /generate', 
+  // cert.ulr_no will already contain the sequential number.
+  let currentUlr = cert.ulr_no || "";
+
+  // SAFETY FALLBACK: If for some reason it's missing (e.g. legacy data), fetch it.
+  if (!currentUlr) {
+    setIsFetchingUlr(true);
+    try {
+      const res = await api.get<{ next_ulr: string }>("/certificates/next-ulr");
+      currentUlr = res.data.next_ulr;
+    } catch (err) {
+      console.error("Safety ULR fetch failed");
+    } finally {
+      setIsFetchingUlr(false);
+    }
+  }
+
+  setEditForm({
+    ulr_no: currentUlr,
+    field_of_parameter: cert.field_of_parameter || "Torque",
+    recommended_cal_due_date: cert.recommended_cal_due_date ? cert.recommended_cal_due_date.slice(0, 10) : "",
+    item_status: cert.item_status || "Satisfactory",
+  });
+  setShowEditModal(true);
+};
 
   const handleProceedToEditFromPreview = () => {
     setShowPreviewModal(false);
@@ -620,6 +630,11 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
 
   const handleSaveEdit = async () => {
     if (!selectedCertificate) return;
+  const ulrCheck = validateULR(editForm.ulr_no);
+  if (!ulrCheck.isValid) {
+    toast.error(ulrCheck.message);
+    return;
+  }
     setIsSubmitting(true);
     try {
       const payload: Record<string, any> = {};
@@ -660,10 +675,28 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
     } finally { setIsSubmitting(false); }
   };
 
-  const handleSubmitForApproval = async (cert: Certificate) => {
-    if (!editForm.ulr_no || !editForm.field_of_parameter || !editForm.recommended_cal_due_date) {
-      alert("Please fill all mandatory fields."); return;
-    }
+const fetchNextAvailableUlr = useCallback(async () => {
+  try {
+    // This matches the @router.get("/next-ulr") in the lab-scope router
+    const res = await api.get<{ next_ulr: string }>("/certificates/next-ulr"); 
+    return res.data.next_ulr;
+  } catch (err) {
+    console.error("Failed to fetch next ULR", err);
+    return "";
+  }
+}, []);
+  const handleSubmitForApproval = async (cert: Certificate) =>{
+  // --- ADD THIS CHECK HERE ---
+  const ulrCheck = validateULR(editForm.ulr_no);
+  if (!ulrCheck.isValid) {
+    toast.error(ulrCheck.message);
+    return;
+  }
+  // ---------------------------
+
+  if (!editForm.ulr_no || !editForm.field_of_parameter || !editForm.recommended_cal_due_date) {
+    alert("Please fill all mandatory fields."); return;
+  }
     if (!confirm("Submit for admin approval? This locks editing.")) return;
 
     setIsSubmitting(true);
@@ -795,6 +828,64 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
       .filter((id): id is number => id != null);
   }, [srfGroups, activeSrfId, activeTab]);
 
+
+  // Inside CertificatesPage component...
+
+const [labConfig, setLabConfig] = useState<{ lab_unique_number: string } | null>(null);
+
+// 1. Fetch Lab Configuration (Accreditation Number)
+const fetchLabConfig = useCallback(async () => {
+  try {
+    // Adjust this endpoint based on your actual backend API for lab settings
+    const res = await api.get("/lab-scope/config/"); 
+    setLabConfig(res.data);
+  } catch (err) {
+    console.error("Failed to fetch lab configuration", err);
+  }
+}, []);
+
+useEffect(() => {
+  fetchLabConfig();
+}, [fetchLabConfig]);
+const sanitizedLabPrefix = useMemo(() => {
+  if (!labConfig?.lab_unique_number) return "";
+  return labConfig.lab_unique_number.replace(/-/g, "").trim().toUpperCase();
+}, [labConfig]);
+// 2. ULR Validation Function (NABL Guidelines)
+const validateULR = (ulr: string): { isValid: boolean; message: string } => {
+  if (!ulr) return { isValid: false, message: "ULR is required." };
+  
+  // Regex Breakdown:
+  // ^[A-Z]{2}\d{4} : 6 chars Accreditation (e.g. CC4466)
+  // \d{2}          : 2 chars Year (e.g. 24)
+  // \d{1}          : 1 char Location (e.g. 0)
+  // \d{8}          : 8 chars Running Serial
+  // [F|P]$         : 1 char Scope (F=Full, P=Partial)
+  const ulrRegex = /^[A-Z]{2}\d{4}\d{2}\d{1}\d{8}[F|P]$/;
+  
+  if (ulr.length !== 18) {
+    return { isValid: false, message: "ULR must be exactly 18 characters." };
+  }
+  if (!ulrRegex.test(ulr)) {
+    return { isValid: false, message: "Invalid ULR format (NABL standard)." };
+  }
+  return { isValid: true, message: "" };
+};
+
+// 3. Helper to Auto-Generate (Template)
+const handleAutoGenerateULR = () => {
+  const prefix = labConfig?.lab_unique_number || "CC0000"; // Fallback if not loaded
+  const year = new Date().getFullYear().toString().slice(-2);
+  const location = "0";
+  const scope = "F";
+  
+  // Note: For a real production app, the serial number should come from the backend 
+  // to prevent duplicates. Here we provide a template for the user.
+  const placeholderSerial = "00000001"; 
+  
+  const generated = `${prefix}${year}${location}${placeholderSerial}${scope}`;
+  setEditForm(prev => ({ ...prev, ulr_no: generated }));
+};
   // --- Filtering ---
 
 
@@ -1205,9 +1296,43 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
                     )}
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">ULR No *</label>
-                      <input type="text" value={editForm.ulr_no} onChange={(e) => setEditForm((f) => ({ ...f, ulr_no: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Enter ULR No" />
-                    </div>
+  <label className="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+    <span>ULR No *</span>
+    {isFetchingUlr && <span className="text-[10px] text-indigo-600 animate-pulse font-bold">ASSIGNING...</span>}
+  </label>
+  <div className="relative">
+    <input 
+      type="text" 
+      value={editForm.ulr_no} 
+      disabled={isFetchingUlr}
+      // Force sanitize on type (strip hyphens)
+      onChange={(e) => setEditForm((f) => ({ ...f, ulr_no: e.target.value.replace(/-/g, "").toUpperCase().trim() }))} 
+      className={`w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-2 outline-none transition-all ${
+        isFetchingUlr ? "bg-gray-50 text-gray-400" : ""
+      } ${
+        editForm.ulr_no && !validateULR(editForm.ulr_no).isValid 
+          ? "border-red-500 focus:ring-red-200" 
+          : "border-gray-300 focus:ring-indigo-500"
+      }`} 
+      placeholder="Fetching next available ULR..." 
+      maxLength={18}
+    />
+    {editForm.ulr_no && validateULR(editForm.ulr_no).isValid && (
+      <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-emerald-500" />
+    )}
+  </div>
+  
+  {editForm.ulr_no && !validateULR(editForm.ulr_no).isValid && (
+    <p className="mt-1 text-[11px] text-red-600 flex items-center gap-1 font-medium">
+       <AlertCircle className="h-3 w-3" /> {validateULR(editForm.ulr_no).message}
+    </p>
+  )}
+  
+  {/* Helper text showing the clean prefix being used */}
+  <p className="mt-1 text-[9px] text-gray-400 uppercase tracking-widest">
+    Format: [Prefix:{sanitizedLabPrefix}] [Year] [Loc] [Serial] [Scope]
+  </p>
+</div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Field of Parameter *</label>
                       <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Torque" />
