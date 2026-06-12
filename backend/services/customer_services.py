@@ -1444,6 +1444,7 @@ class CustomerPortalService:
             select(
                 Customer.customer_id,
                 Customer.customer_details,
+                Customer.location_name,
                 Customer.contact_person,
                 Customer.phone,
                 Customer.email,
@@ -1457,6 +1458,7 @@ class CustomerPortalService:
             {
                 "customer_id":      c.customer_id,
                 "customer_details": c.customer_details,
+                "location_name": c.location_name,
                 "contact_person":   c.contact_person,
                 "phone":            c.phone,
                 "email":            c.email,

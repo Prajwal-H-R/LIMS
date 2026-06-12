@@ -82,6 +82,7 @@ def user_orm_to_response(user: User) -> UserResponse:
         r.phone = user.customer.phone
         r.ship_to_address = user.customer.ship_to_address
         r.bill_to_address = user.customer.bill_to_address
+        r.location_name = getattr(user.customer, "location_name", None)
     return r
 
 
@@ -243,7 +244,7 @@ def admin_update_user_by_id(
     role_lower = (user.role or "").lower()
     if role_lower == "customer" and user.customer_id and user.customer:
         cust: Customer = user.customer
-        for key in ("contact_person", "phone"):
+        for key in ("contact_person", "phone","location_name"):
             if key not in data:
                 continue
             raw = data[key]

@@ -24,6 +24,7 @@ class InvitationService:
         background_tasks: BackgroundTasks,
         invited_name: Optional[str] = None,
         company_name: Optional[str] = None,
+        location_name: Optional[str] = None, # Added parameter
         # --- UPDATED: Accept specific addresses instead of generic company_address ---
         ship_to_address: Optional[str] = None,
         bill_to_address: Optional[str] = None,
@@ -35,6 +36,7 @@ class InvitationService:
         Creates a new user invitation with a secure temporary password.
         Also creates the user record immediately so login works.
         Handles branching logic for staff/engineer/admin vs. customer roles.
+        Supports multiple locations for the same company name.
         """
 
         # 1️⃣ Check if user already exists
@@ -68,76 +70,43 @@ class InvitationService:
 
         # 3️⃣ Handle customer creation/linking for CUSTOMER role
         if normalized_role == UserRole.CUSTOMER.value:
-            if customer_id:
-                # Link to existing customer
-                customer = self.db.query(Customer).filter(Customer.customer_id == customer_id).first()
-                if not customer:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Customer with ID {customer_id} not found."
-                    )
-                if not invited_name:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invited name is required when linking to an existing customer."
-                    )
-                user_full_name = invited_name
-            else:
-                # If customer_id is not provided, check required fields
-                # --- UPDATED: Check ship_to_address instead of company_address ---
-                if not company_name or not ship_to_address or not phone_number or not invited_name:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Company name, shipping address, contact person, and phone number are required for new customer invitations."
-                    )
+            if not customer_id:
+                if not company_name or not ship_to_address or not invited_name:
+                    raise HTTPException(status_code=400, detail="Missing required fields")
 
-                # Construct the full customer details string for searching/display
-                input_company_details_str = f"{company_name}" 
-                # You can append city if needed: f"{company_name}, {ship_to_address}"
+                # --- CORRECTED SEARCH LOGIC ---
+                # Search database 'customer_details' using input 'company_name'
+                query = self.db.query(Customer).filter(
+                    func.lower(Customer.customer_details) == company_name.strip().lower()
+                )
                 
-                normalized_input_company_details = input_company_details_str.strip().lower()
+                # Check for specific location
+                if location_name:
+                    query = query.filter(func.lower(Customer.location_name) == location_name.strip().lower())
+                else:
+                    query = query.filter(Customer.location_name.is_(None))
 
-                # Search for an existing customer
-                existing_customer = self.db.query(Customer).filter(
-                    func.lower(func.trim(Customer.customer_details)) == normalized_input_company_details
-                ).first()
+                existing_customer = query.first()
 
                 if existing_customer:
-                    customer = existing_customer
-                    customer_id = customer.customer_id
-                    user_full_name = invited_name
+                    customer_id = existing_customer.customer_id
                 else:
-                    # Check email uniqueness
-                    existing_customer_by_email = self.db.query(Customer).filter(Customer.email == email).first()
-                    if existing_customer_by_email:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="A customer with this email already exists."
-                        )
-
-                    # --- UPDATED: Create new customer with specific addresses ---
+                    # Create NEW branch/location for this company
                     customer = Customer(
-                        customer_details=input_company_details_str,
+                        customer_details=company_name.strip(), # Save as company name
+                        location_name=location_name.strip() if location_name else None,
                         contact_person=invited_name,
                         phone=phone_number,
                         email=email,
                         ship_to_address=ship_to_address,
-                        bill_to_address=bill_to_address if bill_to_address else ship_to_address,
-                        created_at=datetime.utcnow(),
+                        bill_to_address=bill_to_address or ship_to_address,
                         is_active=True
                     )
                     self.db.add(customer)
                     self.db.flush()
                     customer_id = customer.customer_id
-                    user_full_name = invited_name
-        else:
-            # For staff/engineer/admin
-            if not invited_name:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invited name is required for staff, engineer, and admin roles."
-                )
-            customer_id = None
+            
+            # Link found/created ID
             user_full_name = invited_name
 
         # 4️⃣ Generate secure password and invitation token

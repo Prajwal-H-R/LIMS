@@ -89,7 +89,6 @@ class CustomerSchema(BaseModel):
 
 
 class CustomerDropdownResponse(BaseModel):
-    """Schema for customer data to be used in dropdowns."""
     customer_id: int
     customer_details: str
     contact_person: Optional[str] = None
@@ -97,6 +96,10 @@ class CustomerDropdownResponse(BaseModel):
     email: Optional[str] = None
     ship_to_address: Optional[str] = None
     bill_to_address: Optional[str] = None
+    
+    # --- ADD THIS LINE ---
+    location_name: Optional[str] = None 
+    # ---------------------
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -23,7 +23,7 @@ const Footer: React.FC = () => {
               className="bg-blue-600 p-2 rounded-full hover:opacity-80"
             >
               <img
-                src="https://cdn-icons-png.flaticon.com/512/174/174857.png"
+                src="https://img.icons8.com/?size=100&id=13930&format=png&color=000000"
                 alt="LinkedIn"
                 className="h-5 w-5"
               />
@@ -35,7 +35,7 @@ const Footer: React.FC = () => {
               className="bg-green-500 p-2 rounded-full hover:opacity-80"
             >
               <img
-                src="https://cdn-icons-png.flaticon.com/512/733/733585.png"
+                src="https://img.icons8.com/?size=100&id=16713&format=png&color=000000"
                 alt="WhatsApp"
                 className="h-5 w-5"
               />
@@ -77,8 +77,25 @@ const Footer: React.FC = () => {
 
       </div>
 
-      <div className="border-t border-gray-700 mt-10 pt-4 text-center text-sm text-gray-400">
-        © {new Date().getFullYear()} Nextage Engineering. All Rights Reserved.
+            {/* Bottom Section with Highlighted Background */}
+      <div className="bg-[#2D1B69] mt-10 border-t border-gray-800">
+        <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row justify-between items-center text-sm text-gray-400">
+           <p className="mt-2 md:mt-0">
+            Powered by{" "}
+            <a
+              href="https://aimlsn.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400 hover:text-white transition-colors font-semibold"
+            >
+              AIMLSolutionsNow
+            </a>
+          </p>
+          <p>© {new Date().getFullYear()} Nextage Engineering. All Rights Reserved.</p>
+          
+         
+
+        </div>
       </div>
     </footer>
   );

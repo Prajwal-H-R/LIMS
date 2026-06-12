@@ -71,6 +71,7 @@ class AdminUserUpdateRequest(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
     full_name: Optional[str] = None
+    location_name: Optional[str] = None
     customer_details: Optional[str] = None
     contact_person: Optional[str] = None
     phone: Optional[str] = None
@@ -86,7 +87,8 @@ class BatchCustomerUserStatusRequest(BaseModel):
 class InvitationRequest(BaseModel):
     email: EmailStr
     role: str
-    invited_name: Optional[str] = None  # Optional for customer role
+    invited_name: Optional[str] = None
+    location_name: Optional[str] = None # Optional for customer role
     company_name: Optional[str] = None
     company_address: Optional[str] = None
     phone_number: Optional[str] = None
@@ -112,6 +114,7 @@ class UserResponse(BaseModel):
     phone: Optional[str] = None
     ship_to_address: Optional[str] = None
     bill_to_address: Optional[str] = None
+    location_name: Optional[str] = None
     
     is_active: bool
     created_at: datetime
