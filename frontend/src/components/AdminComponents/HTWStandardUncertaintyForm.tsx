@@ -396,9 +396,13 @@ function HTWStandardUncertaintyList({ onBack, onAddNew, onEdit, refreshTrigger }
                         <div className="flex justify-between w-32"><span className="text-gray-500">App:</span> <span className="font-mono">{item.applied_torque}</span></div>
                         <div className="flex justify-between w-32"><span className="text-gray-500">Ind:</span> <span className="font-mono">{item.indicated_torque}</span></div>
                       </td>
-                      <td className={`px-6 py-4 font-mono font-medium ${item.error_value < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {item.error_value}
-                      </td>
+<td className={`px-6 py-4 font-mono font-medium ${
+  Number(item.error_value) < 0 ? 'text-red-600' : 'text-green-600'
+}`}>
+  {Number(item.error_value) === 0
+    ? '0'
+    : Number(item.error_value).toFixed(8)}
+</td>
                       <td className="px-6 py-4 font-bold text-gray-700">{item.uncertainty_percent}%</td>
                       <td className="px-6 py-4">
                         <button

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom"; 
 import { api } from "../api/config";
 import {
   ArrowLeft,
@@ -1331,6 +1332,8 @@ const DeviationModal: React.FC<{
   equipment: BasicEquipment;
   onSuccess: () => void;
 }> = ({ isOpen, isEditMode, onClose, equipment, onSuccess }) => {
+  const [mounted, setMounted] = useState(false); // <-- Add mounted state for SSR safety
+
   const [deviationId, setDeviationId] = useState<number | null>(null);
   const [deviationType, setDeviationType] = useState<"OOT" | "NC">("OOT");
   const [toolStatus, setToolStatus] = useState("");
@@ -1348,6 +1351,11 @@ const DeviationModal: React.FC<{
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // <-- Ensure component is mounted to the client before rendering portal
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1391,7 +1399,6 @@ const DeviationModal: React.FC<{
     const nextVal = !hideCustomerVisibility;
     setHideCustomerVisibility(nextVal);
 
-    // Dynamic patch only for OOT (the button is already hidden for NC)
     if (deviationId && deviationType === "OOT") {
       setIsUpdatingVisibility(true);
       try {
@@ -1452,7 +1459,6 @@ const DeviationModal: React.FC<{
       customer_decision: customerDecision,
     };
 
-    // ONLY send visibility status for OOT cases
     if (deviationType === "OOT") {
       payload.hide_customer_visibility = hideCustomerVisibility;
     }
@@ -1491,10 +1497,13 @@ const DeviationModal: React.FC<{
       ? url
       : `${api.defaults.baseURL?.split("/api")[0]}${url}`;
 
-  if (!isOpen) return null;
+  // <-- Wait for component to be mounted on client and check if open
+  if (!isOpen || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
+  // <-- Extract JSX into a variable
+  const modalContent = (
+    // Changed z-[100] to z-[9999] to ensure it stays over extreme sticky headers
+    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b bg-white">
           <div className="flex items-center gap-3">
@@ -1717,24 +1726,15 @@ const DeviationModal: React.FC<{
                           {a.file_name}
                         </span>
                         <div className="flex gap-1">
+                          {/* Replaced undefined handleView/handleDownload with actual actions or console.logs */}
                           <button
-                            onClick={() =>
-                              handleView(
-                                getFileFullUrl(a.file_url),
-                                a.file_name
-                              )
-                            }
+                            onClick={() => window.open(getFileFullUrl(a.file_url), '_blank')}
                             className="p-2 text-blue-600"
                           >
                             <Eye size={16} />
                           </button>
                           <button
-                            onClick={() =>
-                              handleDownload(
-                                getFileFullUrl(a.file_url),
-                                a.file_name
-                              )
-                            }
+                            onClick={() => window.open(getFileFullUrl(a.file_url), '_blank')}
                             className="p-2 text-green-600"
                           >
                             <Download size={16} />
@@ -1818,6 +1818,9 @@ const DeviationModal: React.FC<{
       </div>
     </div>
   );
+
+  // <-- Inject component directly into document.body
+  return createPortal(modalContent, document.body);
 };
 
 // ─────────────────────────────────────────────

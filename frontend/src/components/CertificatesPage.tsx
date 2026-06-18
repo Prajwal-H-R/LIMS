@@ -837,7 +837,7 @@ const [labConfig, setLabConfig] = useState<{ lab_unique_number: string } | null>
 const fetchLabConfig = useCallback(async () => {
   try {
     // Adjust this endpoint based on your actual backend API for lab settings
-    const res = await api.get("/lab-scope/config/"); 
+    const res = await api.get("/lab-scope/active"); 
     setLabConfig(res.data);
   } catch (err) {
     console.error("Failed to fetch lab configuration", err);
@@ -873,19 +873,6 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
 };
 
 // 3. Helper to Auto-Generate (Template)
-const handleAutoGenerateULR = () => {
-  const prefix = labConfig?.lab_unique_number || "CC0000"; // Fallback if not loaded
-  const year = new Date().getFullYear().toString().slice(-2);
-  const location = "0";
-  const scope = "F";
-  
-  // Note: For a real production app, the serial number should come from the backend 
-  // to prevent duplicates. Here we provide a template for the user.
-  const placeholderSerial = "00000001"; 
-  
-  const generated = `${prefix}${year}${location}${placeholderSerial}${scope}`;
-  setEditForm(prev => ({ ...prev, ulr_no: generated }));
-};
   // --- Filtering ---
 
 
@@ -1329,9 +1316,7 @@ const handleAutoGenerateULR = () => {
   )}
   
   {/* Helper text showing the clean prefix being used */}
-  <p className="mt-1 text-[9px] text-gray-400 uppercase tracking-widest">
-    Format: [Prefix:{sanitizedLabPrefix}] [Year] [Loc] [Serial] [Scope]
-  </p>
+
 </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Field of Parameter *</label>

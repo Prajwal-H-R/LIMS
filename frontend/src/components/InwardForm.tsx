@@ -282,118 +282,176 @@ const TruncatedTooltip = ({ text }: { text: string; type: 'input' | 'display' })
   );
 };
 
-const MaterialSearchSelect = ({ 
-  value, options, configuredTypes, onChange, onAddNew, onEditCustom, disabled 
-}: { 
-  value: string; options: string[]; configuredTypes: string[]; 
-  onChange: (val: string) => void; onAddNew: () => void; 
-  onEditCustom: (val: string) => void; disabled?: boolean;
+const MaterialSearchSelect = ({
+  value,
+  options,
+  configuredTypes,
+  onChange,
+  onAddNew,
+  onEditCustom,
+  disabled,
+}: {
+  value: string;
+  options: string[];
+  configuredTypes: string[];
+  onChange: (val: string) => void;
+  onAddNew: () => void;
+  onEditCustom: (val: string) => void;
+  disabled?: boolean;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+ 
   const containerRef = useRef<HTMLDivElement>(null);
-
+  const menuRef = useRef<HTMLDivElement>(null);
+ 
   const updatePosition = () => {
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setCoords({ top: rect.bottom, left: rect.left, width: rect.width });
-    }
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    setCoords({ top: rect.bottom, left: rect.left, width: rect.width });
   };
-
+ 
   useEffect(() => {
-    if (isOpen) {
-      updatePosition();
-      window.addEventListener('scroll', updatePosition, true);
-    }
-    return () => window.removeEventListener('scroll', updatePosition, true);
-  }, [isOpen]);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setIsOpen(false);
+    if (!isOpen) return;
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+ 
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
     };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+  }, [isOpen]);
+ 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const clickedInsideTrigger = containerRef.current?.contains(target);
+      const clickedInsideMenu = menuRef.current?.contains(target);
+ 
+      if (!clickedInsideTrigger && !clickedInsideMenu) {
+        setIsOpen(false);
+      }
+    };
+ 
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  const filteredOptions = options.filter(opt => 
+ 
+  const filteredOptions: string[] = options.filter((opt) =>
     opt.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
+ 
   const isCurrentValueConfigured = configuredTypes.includes(value);
-
+ 
   return (
-    <div className="relative w-full" ref={containerRef}>
-      <div 
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+<div className="relative w-full" ref={containerRef}>
+<div
+        onClick={() => !disabled && setIsOpen((prev) => !prev)}
         className={`w-full px-4 py-2.5 text-sm font-semibold border rounded-lg transition-all flex justify-between items-center cursor-pointer ${
-          disabled ? 'bg-gray-100 cursor-not-allowed' : 
-          isCurrentValueConfigured 
-            ? 'bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-100' 
-            : 'bg-white border-gray-300 text-gray-900'
+          disabled
+            ? "bg-gray-100 cursor-not-allowed"
+            : isCurrentValueConfigured
+            ? "bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-100"
+            : "bg-white border-gray-300 text-gray-900"
         }`}
-      >
-        <span className="truncate">
+>
+<span className="truncate">
           {value || "Select Equipment..."} {isCurrentValueConfigured && "★"}
-        </span>
-        <ChevronDown size={16} className={isCurrentValueConfigured ? 'text-amber-600' : 'text-gray-400'} />
-      </div>
-
-      {isOpen && createPortal(
-        <div 
-          style={{ position: 'fixed', top: coords.top + 4, left: coords.left, width: coords.width, zIndex: 99999 }}
-          className="bg-white border border-gray-300 rounded-lg shadow-2xl overflow-hidden flex flex-col"
-        >
-          <div className="p-2 border-b bg-gray-50 flex items-center gap-2">
-            <Search size={14} className="text-gray-400 ml-1" />
-            <input
-              autoFocus
-              className="w-full px-2 py-1 text-sm outline-none bg-transparent"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-
-          <div className="max-h-64 overflow-y-auto">
-            {filteredOptions.filter(m => configuredTypes.includes(m)).sort().map(opt => (
+</span>
+<ChevronDown
+          size={16}
+          className={isCurrentValueConfigured ? "text-amber-600" : "text-gray-400"}
+        />
+</div>
+ 
+      {isOpen &&
+        createPortal(
+<div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              top: coords.top + 4,
+              left: coords.left,
+              width: coords.width,
+              zIndex: 99999,
+            }}
+            className="bg-white border border-gray-300 rounded-lg shadow-2xl overflow-hidden flex flex-col"
+>
+<div className="p-2 border-b bg-gray-50 flex items-center gap-2">
+<Search size={14} className="text-gray-400 ml-1" />
+<input
+                autoFocus
+                className="w-full px-2 py-1 text-sm outline-none bg-transparent"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+</div>
+ 
+            <div className="max-h-64 overflow-y-auto">
+              {filteredOptions
+                .filter((m: string) => configuredTypes.includes(m))
+                .sort()
+                .map((opt: string) => (
+<div
+                    key={opt}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      onChange(opt);
+                      setIsOpen(false);
+                    }}
+                    className="px-4 py-2.5 text-sm font-bold bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer flex justify-between items-center border-b border-amber-100"
+>
+                    {opt} <Star size={14} className="fill-amber-500 text-amber-500" />
+</div>
+                ))}
+ 
+              {filteredOptions
+                .filter((m: string) => !configuredTypes.includes(m))
+                .sort()
+                .map((opt: string) => (
+<div
+                    key={opt}
+                    className="group px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b border-gray-50 last:border-0"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      onChange(opt);
+                      setIsOpen(false);
+                    }}
+>
+<span className="truncate flex-1">{opt}</span>
+<button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onEditCustom(opt);
+                        setIsOpen(false);
+                      }}
+                      className="p-1 hover:bg-amber-200 rounded text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity"
+>
+<Pencil size={14} />
+</button>
+</div>
+                ))}
+ 
               <div
-                key={opt}
-                onClick={() => { onChange(opt); setIsOpen(false); }}
-                className="px-4 py-2.5 text-sm font-bold bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer flex justify-between items-center border-b border-amber-100"
-              >
-                {opt} <Star size={14} className="fill-amber-500 text-amber-500" />
-              </div>
-            ))}
-
-            {filteredOptions.filter(m => !configuredTypes.includes(m)).sort().map(opt => (
-              <div
-                key={opt}
-                className="group px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b border-gray-50 last:border-0"
-                onClick={() => { onChange(opt); setIsOpen(false); }}
-              >
-                <span className="truncate flex-1">{opt}</span>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); onEditCustom(opt); setIsOpen(false); }}
-                  className="p-1 hover:bg-amber-200 rounded text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Pencil size={14} />
-                </button>
-              </div>
-            ))}
-
-            <div
-              onClick={() => { onAddNew(); setIsOpen(false); }}
-              className="px-4 py-2.5 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 flex items-center gap-2 border-t"
-            >
-              <Plus size={14} /> Add New Item
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onAddNew();
+                  setIsOpen(false);
+                }}
+                className="px-4 py-2.5 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 flex items-center gap-2 border-t cursor-pointer"
+>
+<Plus size={14} /> Add New Item
+</div>
+</div>
+</div>,
+          document.body
+        )}
+</div>
   );
 };
 
@@ -1358,7 +1416,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
            <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
               <table className="w-full text-sm border-collapse min-w-[2500px]">
                 <thead className="bg-slate-100">
-                    <tr><th className="sticky left-0 z-20 p-3 text-center text-xs font-semibold uppercase bg-slate-100 border-b">#</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[160px]">NEPL ID</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[280px]">Material Description *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Make *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Model *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Range</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Serial No</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[100px]">Qty *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Calibration *</th>{isAnyOutsourced && (<><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Supplier</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">In DC</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Out DC</th></>)}<th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Accessories</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Visual</th>{showEngineerRemarksColumn && (<th className="p-3 text-left text-xs font-semibold uppercase border-b w-[200px]">Eng. Remarks</th>)}{showCustomerRemarksColumn && (<th className="p-3 text-left text-xs font-semibold uppercase border-b w-[200px]">Customer Feedback</th>)}<th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[250px]">Photos</th><th className="sticky right-0 z-20 p-3 text-center text-xs font-semibold uppercase bg-slate-100 border-b">Actions</th></tr>
+                    <tr><th className="sticky left-0 z-20 p-3 text-center text-xs font-semibold uppercase bg-slate-100 border-b">#</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[160px]">NEPL ID</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[280px]">Material Description *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Make *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Model *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Range</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Serial No</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[100px]">Qty *</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Calibration *</th>{isAnyOutsourced && (<><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Supplier</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">In DC</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Out DC</th></>)}<th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[200px]">Accessories</th><th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[150px]">Visual Inspection notes</th>{showEngineerRemarksColumn && (<th className="p-3 text-left text-xs font-semibold uppercase border-b w-[200px]">Eng. Remarks</th>)}{showCustomerRemarksColumn && (<th className="p-3 text-left text-xs font-semibold uppercase border-b w-[200px]">Customer Feedback</th>)}<th className="p-3 text-left text-xs font-semibold uppercase border-b min-w-[250px]">Photos</th><th className="sticky right-0 z-20 p-3 text-center text-xs font-semibold uppercase bg-slate-100 border-b">Actions</th></tr>
                 </thead>
                 <tbody>
                   {equipmentList.map((equipment, index) => {
@@ -1369,8 +1427,65 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                         <td className="sticky left-0 z-10 p-3 text-center font-semibold bg-white group-hover:bg-slate-50">{index + 1}</td>
                         <td className="p-2"><input type="text" value={`${formData.srf_no}-${index + 1}`} disabled className="w-full bg-slate-100 font-medium px-2 py-1.5 border rounded-md" /></td>
                         <td className="p-2"><MaterialSearchSelect value={equipment.material_desc} options={materialOptions} configuredTypes={configuredTypes} disabled={isLocked} onChange={(val) => handleEquipmentChange(index, 'material_desc', val)} onAddNew={() => { setActiveRowForNewMaterial(index); setEditingMaterialValue(null); setNewMaterialInput(""); setShowAddMaterialModal(true); }} onEditCustom={(val) => { setActiveRowForNewMaterial(index); setEditingMaterialValue(val); setNewMaterialInput(val); setShowAddMaterialModal(true); }} /></td>
-                        <td className="p-2">{isHydraulic ? (<select value={equipment.make} onChange={e => handleEquipmentChange(index, 'make', e.target.value)} required className="w-full px-2 py-1.5 border rounded-md bg-white" disabled={isLocked}><option value="">Select Make</option>{makeOptions.map(m => (<option key={m} value={m}>{m}</option>))}</select>) : (<input type="text" value={equipment.make} onChange={e => handleEquipmentChange(index, 'make', e.target.value)} required placeholder="Enter Make" className="w-full px-2 py-1.5 border rounded-md bg-white" disabled={isLocked} />)}</td>
-                        <td className="p-2">{isHydraulic ? (<select value={equipment.model} onChange={e => handleEquipmentChange(index, 'model', e.target.value)} required disabled={!equipment.make || isLocked} className="w-full px-2 py-1.5 border rounded-md bg-white"><option value="">Select Model</option>{equipment.make && modelCache[equipment.make]?.map(m => (<option key={m} value={m}>{m}</option>))}</select>) : (<input type="text" value={equipment.model} onChange={e => handleEquipmentChange(index, 'model', e.target.value)} required placeholder="Enter Model" className="w-full px-2 py-1.5 border rounded-md bg-white" disabled={isLocked} />)}</td>
+<td className="p-2">
+                          {isHydraulic ? (
+                            <select 
+                              value={equipment.make} 
+                              onChange={e => handleEquipmentChange(index, 'make', e.target.value)} 
+                              required 
+                              // Disabled until a material description is selected
+                              disabled={!equipment.material_desc || isLocked}
+                              className="w-full px-2 py-1.5 border rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            >
+                              <option value="">{equipment.material_desc ? 'Select Make' : 'Select Material First'}</option>
+                              {makeOptions.map(make => (
+                                <option key={make} value={make}>{make}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input 
+                              type="text"
+                              value={equipment.make}
+                              onChange={e => handleEquipmentChange(index, 'make', e.target.value)}
+                              required
+                              placeholder={equipment.material_desc ? "Enter Make" : "Select Material First"}
+                              // Also locks standard input if no material is selected
+                              disabled={!equipment.material_desc || isLocked}
+                              className="w-full px-2 py-1.5 border rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            />
+                          )}
+                        </td>
+
+                        {/* MODEL COLUMN */}
+                        <td className="p-2">
+                          {isHydraulic ? (
+                            <select 
+                              value={equipment.model} 
+                              onChange={e => handleEquipmentChange(index, 'model', e.target.value)} 
+                              required 
+                              // Disabled until Make is selected
+                              disabled={!equipment.make || isLocked}
+                              className="w-full px-2 py-1.5 border rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            >
+                              <option value="">{equipment.make ? 'Select Model' : 'Select Make First'}</option>
+                              {equipment.make && modelCache[equipment.make]?.map(model => (
+                                <option key={model} value={model}>{model}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input 
+                              type="text"
+                              value={equipment.model}
+                              onChange={e => handleEquipmentChange(index, 'model', e.target.value)}
+                              required
+                              // Show appropriate placeholder
+                              placeholder={equipment.material_desc ? "Enter Model" : "Select Material First"}
+                              // Lock this standard input if no material is selected
+                              disabled={!equipment.material_desc || isLocked}
+                              className="w-full px-2 py-1.5 border rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            />
+                          )}
+                        </td>                        
                         <td className="p-2"><input value={equipment.range} readOnly={isHydraulic} onChange={e => !isHydraulic && handleEquipmentChange(index, 'range', e.target.value)} className={`w-full px-2 py-1.5 border rounded-md ${isHydraulic ? 'bg-gray-50' : ''}`} placeholder={isHydraulic ? 'Auto-filled' : 'Enter Range'} disabled={isLocked} /></td>
                         <td className="p-2"><input value={equipment.serial_no} onChange={e=>handleEquipmentChange(index,'serial_no',e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked} /></td>
                         <td className="p-2"><input type="number" value={equipment.qty} min={1} onChange={e=>handleEquipmentChange(index,'qty',e.target.value)} required className="w-full px-2 py-1.5 border rounded-md text-center" disabled={isLocked} /></td>

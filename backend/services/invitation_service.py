@@ -22,6 +22,7 @@ class InvitationService:
         role: str,
         created_by: int,
         background_tasks: BackgroundTasks,
+        user_full_name: Optional[str] = None,
         invited_name: Optional[str] = None,
         company_name: Optional[str] = None,
         location_name: Optional[str] = None, # Added parameter
