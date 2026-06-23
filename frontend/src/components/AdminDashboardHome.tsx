@@ -1,4 +1,4 @@
-// frontend/src/components/AdminComponents/AdminDashboardHome.tsx
+// frontend/src/components/AdminDashboardHome.tsx
 
 import React from 'react';
 import {
@@ -146,21 +146,31 @@ export interface User {
   username?: string;
 }
 
+export interface UserStats {
+  total_users: number;
+  active_users: number;
+  inactive_users: number;
+  admin_users: number;
+}
+
 export interface AdminDashboardHomeProps {
   users: User[];
+  userStats?: UserStats | null; // NEW: Receives stats from the fast query
   expiredTables: string[];
   onNavigate: (section: string) => void;
 }
 
 export const AdminDashboardHome: React.FC<AdminDashboardHomeProps> = ({
   users,
+  userStats,
   onNavigate,
   expiredTables,
 }) => {
-  const totalUsers    = users.length;
-  const activeUsers   = users.filter((u) => u.is_active).length;
-  const inactiveUsers = totalUsers - activeUsers;
-  const adminCount    = users.filter((u) => u.role === 'admin').length;
+  // Use userStats from the backend if available, otherwise fallback to array counts
+  const totalUsers    = userStats?.total_users ?? users.length;
+  const activeUsers   = userStats?.active_users ?? users.filter((u) => u.is_active).length;
+  const inactiveUsers = userStats?.inactive_users ?? (totalUsers - activeUsers);
+  const adminCount    = userStats?.admin_users ?? users.filter((u) => u.role === 'admin').length;
 
   return (
     <div className="space-y-8 animate-fadeIn">

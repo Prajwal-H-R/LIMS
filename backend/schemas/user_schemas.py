@@ -20,6 +20,13 @@ class User(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class UserStatsResponse(BaseModel):
+    total_users: int
+    active_users: int
+    inactive_users: int
+    admin_users: int
+    engineer_users: int  # <-- ADD THIS
+    customer_users: int
 # ====================================================================
 # REQUEST SCHEMAS
 # ====================================================================
@@ -128,4 +135,8 @@ class CurrentUserResponse(UserResponse):
     pass
 
 class UserListResponse(BaseModel):
+    users: List[UserResponse]
+
+class UserListPaginatedResponse(BaseModel):
+    total_count: int
     users: List[UserResponse]

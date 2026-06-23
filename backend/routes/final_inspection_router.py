@@ -1,8 +1,9 @@
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any,Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from backend.db import get_db
 from backend.auth import get_current_user, check_staff_role
@@ -11,7 +12,8 @@ from backend.schemas.final_inspection import (
     FinalInspectionCreate, 
     FinalInspectionUpdate, 
     FinalInspectionResponse,
-    FinalInspectionDecisionRequest
+    FinalInspectionDecisionRequest,
+    FinalInspectionPage
 )
 from backend.services.final_inspection_service import FinalInspectionService
 
@@ -29,7 +31,7 @@ router = APIRouter(
 )
 
 # Configuration for links (e.g., http://localhost:5173)
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 # --- CRUD ENDPOINTS ---
 
@@ -37,9 +39,55 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 def create_inspection(payload: FinalInspectionCreate, db: Session = Depends(get_db)):
     return FinalInspectionService.create(db, payload)
 
-@router.get("/", response_model=List[FinalInspectionResponse])
-def read_inspections(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return FinalInspectionService.get_multi(db, skip=skip, limit=limit)
+@router.get("/", response_model=Dict[str, Any])
+def read_inspections(search: Optional[str] = None, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Optimized high-speed paginated endpoint.
+    Queries ALL Inwards (so no pending SRFs are filtered out) and joins 
+    FinalInspection so the frontend can see everything and process new reports.
+    """
+    if limit > 1000: limit = 1000
+    
+    # 1. Base query for fast counting
+    count_query = db.query(Inward.inward_id)
+    if search:
+        search_term = f"%{search}%"
+        count_query = count_query.filter(
+            (Inward.srf_no.ilike(search_term)) |
+            (Inward.customer_details.ilike(search_term))
+        )
+    total_count = count_query.with_entities(func.count(Inward.inward_id)).scalar() or 0
+    
+    # 2. Main query Outer Joining FinalInspection to maintain ALL records
+    items_query = db.query(Inward, FinalInspection).outerjoin(
+        FinalInspection, Inward.inward_id == FinalInspection.inward_id
+    )
+    
+    if search:
+        items_query = items_query.filter(
+            (Inward.srf_no.ilike(search_term)) |
+            (Inward.customer_details.ilike(search_term))
+        )
+        
+    items = items_query.order_by(Inward.inward_id.desc()).offset(skip).limit(limit).all()
+    
+    # 3. High-speed dictionary comprehension serialization
+    result = []
+    for inward, inspection in items:
+        result.append({
+            "inward_id": inward.inward_id,
+            "srf_no": inward.srf_no,
+            "customer_details": getattr(inward, 'customer_details', 'N/A'),
+            "customer_name": getattr(inward, 'customer_name', 'N/A'),
+            "created_at": inward.created_at.isoformat() if getattr(inward, 'created_at', None) else None,
+            "inspection_status": inspection.status if inspection else "PENDING",
+            "report_sent": inspection.report_sent if inspection else False
+        })
+    
+    return {
+        "total_count": total_count,
+        "items": result
+    }
 
 @router.get("/{inspection_id}", response_model=FinalInspectionResponse)
 def read_inspection(inspection_id: int, db: Session = Depends(get_db)):
@@ -96,7 +144,6 @@ def get_final_inspection_details(
     upload_map = {u.inward_eqp_id: u for u in uploads}
 
     # 2. Map existing remarks if record was previously saved
-    # This prevents typed remarks from being lost when the status updates
     existing_remarks_map = {}
     if saved_inspection is not None and saved_inspection.equipments:
         for old_eq in saved_inspection.equipments:
@@ -110,10 +157,8 @@ def get_final_inspection_details(
         is_system_driven = eq.material_description in system_driven_types
         
         if is_system_driven:
-            # INTERNAL: Show the exact status from htw_job table
             raw_status = job_map.get(eq.inward_eqp_id, "PENDING")
         else:
-            # EXTERNAL: Determine if completed based on certificate file presence
             upload_record = upload_map.get(eq.inward_eqp_id)
             has_cert = False
             if upload_record is not None:
@@ -135,12 +180,11 @@ def get_final_inspection_details(
             "accessories_included": str(eq.accessories_included or ""),
             "engineer_remarks": str(eq.engineer_remarks or ""),
             "customer_remarks": str(eq.customer_remarks or ""),
-            "job_status": raw_status, # Exact DB status for internal, calculated for external
+            "job_status": raw_status, 
             "flow_type": "INTERNAL" if is_system_driven else "EXTERNAL",
             "final_remarks": existing_remarks_map.get(eq.inward_eqp_id, "")
         })
 
-    # Prepare standard response metadata
     cust_email = ""
     if inward.customer is not None:
         if getattr(inward.customer, 'email', None):
@@ -159,16 +203,14 @@ def get_final_inspection_details(
         "is_previously_saved": saved_inspection is not None
     }
 
-    # If record exists in FinalInspection table, merge metadata
     if saved_inspection is not None:
         response_data.update({
             "id": saved_inspection.id,
             "sent_emails": saved_inspection.sent_emails,
             "report_sent": saved_inspection.report_sent,
             "status": saved_inspection.status,
-            # Fallback to saved emails if the customer profile email is missing
-            "customer_decision": saved_inspection.customer_decision,  # ADDED
-            "customer_remarks": saved_inspection.customer_remarks,    # ADDED
+            "customer_decision": saved_inspection.customer_decision,  
+            "customer_remarks": saved_inspection.customer_remarks,    
             "updated_at": saved_inspection.updated_at,
             "customer_email": cust_email or str(saved_inspection.customer_email or "")
         })
@@ -203,7 +245,6 @@ async def send_final_report(
 
         inspection.customer_decision = None
         inspection.customer_remarks = None
-        # Solves Pylance AttributeAccessIssue: Forced string conversion ensures type safety
         inspection.srf_no = str(payload.get("srf_no") or "")
         inspection.customer_name = str(payload.get("customer_name") or "")
         inspection.customer_dc_no = str(payload.get("customer_dc_no") or "")
@@ -228,15 +269,11 @@ async def send_final_report(
         db.commit()
         db.refresh(inspection)
 
-        # Generate direct links for the email template
-        # React Route: /customer/final-report/:inwardId
         direct_link = f"{FRONTEND_URL}/customer/final-report/{inward_id}"
         login_link = f"{FRONTEND_URL}/login"
 
         if recipient_list:
             for email in recipient_list:
-                # portal_link parameter is renamed to direct_link and login_link 
-                # to match updated core/email.py and template requirements
                 await send_final_inspection_report_email(
                     background_tasks=background_tasks,
                     recipient_email=email,
@@ -258,40 +295,54 @@ async def send_final_report(
 
 # --- CUSTOMER PORTAL ENDPOINTS ---
 
-@router.get("/customer/dashboard-reports")
+@router.get("/customer/dashboard-reports", response_model=Dict[str, Any])
 def get_customer_dashboard_reports(
+    skip: int = 0, limit: int = 100,
     db: Session = Depends(get_db), 
     current_user: UserResponse = Depends(get_current_user)
 ):
     if current_user.customer_id is None:
         raise HTTPException(status_code=403, detail="Access denied. Customers only.")
+    if limit > 1000: limit = 1000
 
-    firs = db.query(Inward).filter(
+    # 1. High Speed Pagination for FIRs
+    firs_query = db.query(Inward).filter(
         Inward.customer_id == current_user.customer_id,
-        Inward.status == "PENDING_CUSTOMER_REMARKS" 
-    ).all()
+        Inward.status == "PENDING_CUSTOMER_REMARKS"
+    )
+    fir_count = firs_query.count()
+    firs = firs_query.order_by(Inward.inward_id.desc()).offset(skip).limit(limit).all()
 
-    finals = db.query(FinalInspection).filter(
+    # 2. High Speed Pagination for Finals
+    finals_query = db.query(FinalInspection).filter(
         FinalInspection.customer_id == current_user.customer_id
-    ).all()
+    )
+    finals_count = finals_query.count()
+    finals = finals_query.order_by(FinalInspection.id.desc()).offset(skip).limit(limit).all()
 
     return {
-        "firs": [
-            {
-                "inward_id": f.inward_id,
-                "srf_no": f.srf_no,
-                "material_inward_date": f.created_at,
-                "status": f.status
-            } for f in firs
-        ],
-        "finals": [
-            {
-                "inward_id": res.inward_id,
-                "srf_no": res.srf_no,
-                "report_sent_at": res.report_sent_at,
-                "status": res.status
-            } for res in finals
-        ]
+        "firs": {
+            "total_count": fir_count,
+            "items": [
+                {
+                    "inward_id": f.inward_id,
+                    "srf_no": f.srf_no,
+                    "material_inward_date": f.created_at,
+                    "status": f.status
+                } for f in firs
+            ]
+        },
+        "finals": {
+            "total_count": finals_count,
+            "items": [
+                {
+                    "inward_id": res.inward_id,
+                    "srf_no": res.srf_no,
+                    "report_sent_at": res.report_sent_at,
+                    "status": res.status
+                } for res in finals
+            ]
+        }
     }
 
 @router.get("/inward/{inward_id}/customer-view", response_model=FinalInspectionResponse)
@@ -305,7 +356,6 @@ def get_final_inspection_customer_view(
     if inspection is None:
         raise HTTPException(status_code=404, detail="Inspection not found")
     
-    # Security check: Ensure customer only views their own data
     if current_user.role.lower() == "customer" and inspection.customer_id != current_user.customer_id:
         raise HTTPException(status_code=403, detail="Access denied to this report")
 
@@ -318,19 +368,14 @@ def submit_customer_decision(
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """
-    Endpoint for customers to Approve or Reject the final inspection.
-    """
     inspection = db.query(FinalInspection).filter(FinalInspection.inward_id == inward_id).first()
     
     if inspection is None:
         raise HTTPException(status_code=404, detail="Inspection report not found")
     
-    # Security check: Ensure customer only updates their own data
     if current_user.role.lower() == "customer" and inspection.customer_id != current_user.customer_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Update using the service logic
     updated_inspection = FinalInspectionService.update_decision(
         db=db, 
         db_obj=inspection, 

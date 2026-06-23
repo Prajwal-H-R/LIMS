@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Iterable
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from fastapi import HTTPException, status
 import logging
 
@@ -313,21 +313,43 @@ class CustomerPortalService:
     #  LISTING METHODS                                                   #
     # ---------------------------------------------------------------- #
 
-    def get_firs_for_customer_list(self, customer_id: int) -> List[Inward]:
-        stmt = (
-            select(Inward)
-            .where(and_(
-                Inward.customer_id == customer_id,
-                or_(
-                    Inward.status == InwardStatus.CREATED,
-                    Inward.status == InwardStatus.REVIEWED,
-                    Inward.status == InwardStatus.UPDATED,
-                ),
-            ))
-            .order_by(Inward.material_inward_date.desc())
-        )
-        return self.db.scalars(stmt).all()
+    def get_firs_for_customer_list_paginated(self, customer_id: int, page: int, size: int) -> Dict[str, Any]:
+        offset = (page - 1) * size
 
+        # Base filtering statement
+        base_stmt = select(Inward).where(and_(
+            Inward.customer_id == customer_id,
+            or_(
+                Inward.status == InwardStatus.CREATED,
+                Inward.status == InwardStatus.REVIEWED,
+                Inward.status == InwardStatus.UPDATED,
+            ),
+        ))
+
+        # A. Extremely fast count of total matching records
+        count_stmt = select(func.count()).select_from(base_stmt.subquery())
+        total_items = self.db.execute(count_stmt).scalar() or 0
+
+        # B. Fetch only the current page WITH EAGER LOADING (Fixes N+1 issue)
+        data_stmt = (
+            base_stmt
+            .options(selectinload(Inward.equipments))  # Stops the DB from looping over equipment!
+            .order_by(Inward.material_inward_date.desc())
+            .offset(offset)
+            .limit(size)
+        )
+        
+        inwards = self.db.scalars(data_stmt).all()
+
+        return {
+            "total": total_items,
+            "page": page,
+            "size": size,
+            "items": inwards
+        }
+
+
+    # 2. Update get_srfs_for_customer to fix the N+1 problem you saw in the logs
     def get_srfs_for_customer(self, customer_id: int) -> Dict[str, List[Srf]]:
         inward_ids = self.db.scalars(
             select(Inward.inward_id).where(Inward.customer_id == customer_id)
@@ -336,16 +358,23 @@ class CustomerPortalService:
         if not inward_ids:
             return {"pending": [], "approved": [], "rejected": []}
 
+        # UPDATE THIS SECTION: Chain the selectinloads to catch the nested data!
         all_srfs = self.db.scalars(
             select(Srf)
             .where(Srf.inward_id.in_(inward_ids))
-            .options(selectinload(Srf.inward))
+            .options(
+                # Load SRF Equipments
+                selectinload(Srf.equipments),
+                
+                # Load Inward, AND deeply load the Inward's equipments in the same trip
+                selectinload(Srf.inward).selectinload(Inward.equipments)
+            )
             .order_by(Srf.created_at.desc())
         ).all()
 
         categorised: Dict[str, list] = {
             "pending": [], "approved": [], "rejected": []
-        }
+        }            # ... (keep the rest of your categorization loop exactly the same)
         for srf in all_srfs:
             s = srf.status.lower()
             if s == SrfStatus.APPROVED:

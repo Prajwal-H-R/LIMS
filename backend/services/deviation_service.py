@@ -6,9 +6,11 @@ from pathlib import Path
 import uuid
 from typing import Dict, List, Optional
 import fastapi.encoders
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, cast, String, select, union_all, literal, case
+from fastapi import HTTPException
+import traceback
 from sqlalchemy.orm import Session, joinedload
-
+from backend import models
 from backend.models.deviation import Deviation
 from backend.models.deviation_attachments import DeviationAttachment
 from backend.models.external_deviation import ExternalDeviation, ExternalDeviationAttachment
@@ -141,7 +143,23 @@ def sync_job_status_from_deviation(db: Session, d: Deviation, terminate: bool = 
             logging.info(f"Setting Job {job.job_id} status to {job.job_status}")
 def _sync_legacy_deviation_statuses(db: Session) -> None:
     """Synchronizes status, calibration status, and populates missing report dates."""
-    rows = db.query(Deviation).all()
+    
+    # ⚡ LIGHTNING FAST FIX: Only fetch rows that actually have missing data!
+    # This prevents the Full Table Scan of downloading thousands of perfectly fine records.
+    rows = db.query(Deviation).filter(
+        or_(
+            Deviation.status == None,
+            Deviation.status == "",
+            Deviation.report == None,
+            Deviation.calibration_status == None,
+            Deviation.calibration_status == ""
+        )
+    ).all()
+    
+    # If no rows need fixing, exit instantly!
+    if not rows:
+        return
+
     changed_total = False
     for d in rows:
         row_changed = False
@@ -633,3 +651,116 @@ def update_deviation_visibility(db: Session, deviation_id: int, hide: bool) -> O
     # Refresh to return the full updated object
     return get_deviation_detail_for_staff(db, deviation_id)
 # REPORT COLUMN FILLING NULL STORE THE CREATED AT DATE ONLY TO THE REPORT COLUMN TO IDETIFY THE DEVIATION REPORT DATE
+
+def list_all_deviations_paginated(db, skip: int, limit: int, search: str, deviation_type: str):
+    try:
+        # --- SUBQUERY 1: STANDARD DEVIATIONS (INTERNAL) ---
+        # NEW RULE: If calibration_status is 'not calibrated', group under NC. Otherwise, OOT.
+        internal_dev_type = case(
+            (models.Deviation.calibration_status.ilike('%not calibrated%'), 'NC'),
+            else_='OOT'
+        )
+
+        stmt1 = select(
+            (models.Deviation.id).label("deviation_id"),
+            models.Deviation.inward_eqp_id,
+            internal_dev_type.label("deviation_type"), # Dynamic based on Calibration Status
+            models.Deviation.report.label("report_date"),
+            models.Deviation.hide_customer_visibility,
+            models.Deviation.status.label("status"),
+            models.InwardEquipment.nepl_id,
+            models.Inward.srf_no,
+            models.Customer.customer_details.label("customer_name"),
+            models.Inward.customer_dc_no.label("customer_dc_no")
+        ).select_from(models.Deviation).join(
+            models.InwardEquipment, models.Deviation.inward_eqp_id == models.InwardEquipment.inward_eqp_id
+        ).join(
+            models.Inward, models.InwardEquipment.inward_id == models.Inward.inward_id
+        ).join(
+            models.Customer, models.Inward.customer_id == models.Customer.customer_id
+        )
+
+        # --- SUBQUERY 2: EXTERNAL DEVIATIONS ---
+        # Rule: Use the explicitly stored deviation_type ('NC' or 'OOT')
+        ext_status = case(
+            (models.ExternalDeviation.customer_decision.is_not(None), "CLOSED"),
+            else_="OPEN"
+        )
+
+        stmt2 = select(
+            (0 - models.ExternalDeviation.id).label("deviation_id"), # Negative ID for React router
+            models.ExternalDeviation.inward_eqp_id,
+            models.ExternalDeviation.deviation_type.label("deviation_type"),
+            models.ExternalDeviation.report.label("report_date"),
+            models.ExternalDeviation.hide_customer_visibility,
+            ext_status.label("status"),
+            models.InwardEquipment.nepl_id,
+            models.Inward.srf_no,
+            models.Customer.customer_details.label("customer_name"),
+            models.Inward.customer_dc_no.label("customer_dc_no")
+        ).select_from(models.ExternalDeviation).join(
+            models.InwardEquipment, models.ExternalDeviation.inward_eqp_id == models.InwardEquipment.inward_eqp_id
+        ).join(
+            models.Inward, models.InwardEquipment.inward_id == models.Inward.inward_id
+        ).join(
+            models.Customer, models.Inward.customer_id == models.Customer.customer_id
+        )
+
+        # --- COMBINE THEM ---
+        base_query = union_all(stmt1, stmt2).alias("base_query")
+
+        # --- WRAP WITH WINDOW COUNT (SUPERFAST PAGINATION) ---
+        final_stmt = select(
+            base_query,
+            func.count().over().label("total_window_count")
+        )
+
+        # --- FILTER BY TAB ---
+        if deviation_type:
+            if deviation_type == "MANUAL":
+                # Frontend sends "MANUAL" for the NC tab
+                final_stmt = final_stmt.where(base_query.c.deviation_type.in_(["MANUAL", "NC"]))
+            else:
+                final_stmt = final_stmt.where(base_query.c.deviation_type == deviation_type)
+
+        # --- FILTER BY SEARCH ---
+        if search:
+            search_term = f"%{search}%"
+            final_stmt = final_stmt.where(
+                or_(
+                    base_query.c.nepl_id.ilike(search_term),
+                    cast(base_query.c.srf_no, String).ilike(search_term),
+                    base_query.c.customer_name.ilike(search_term),
+                    base_query.c.customer_dc_no.ilike(search_term)
+                )
+            )
+
+        # --- PAGINATION & EXECUTE ---
+        final_stmt = final_stmt.order_by(base_query.c.deviation_id.desc()).offset(skip).limit(limit)
+        
+        results = db.execute(final_stmt).mappings().all()
+        total_records = results[0]["total_window_count"] if results else 0
+
+        # --- FORMAT OUTPUT ---
+        items = []
+        for row in results:
+            items.append({
+                "deviation_id": row["deviation_id"],
+                "inward_eqp_id": row["inward_eqp_id"],
+                "nepl_id": row["nepl_id"] or "",
+                "srf_no": str(row["srf_no"]) if row["srf_no"] else "",
+                "customer_name": row["customer_name"] or "",
+                "deviation_type": row["deviation_type"] or "",
+                "report_date": str(row["report_date"]) if row["report_date"] else None,
+                "hide_customer_visibility": bool(row["hide_customer_visibility"]),
+                "status": str(row["status"])
+            })
+
+        return {
+            "total": total_records,
+            "items": items
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database Crash: {str(e)}")

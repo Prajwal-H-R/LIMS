@@ -1,13 +1,13 @@
 // frontend/src/components/AdminComponents/AdminUserManagement.tsx
 
-import React, { useState, useEffect, FormEvent, useMemo, useRef } from 'react';
+import React, { useState, useEffect, FormEvent, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Shield, Power, PowerOff, UserPlus, Users, Info, Loader2,
   Settings, ChevronLeft, AlertCircle, X, Search,
   Filter, Briefcase, Wrench, Building2, Grid, AlignJustify,
   Lock, CheckCircle2, XCircle, ChevronDown, UserCog,
-  Pencil, Thermometer, ArrowRight, AlertTriangle, MapPin, Plus
+  Pencil, Thermometer, ArrowRight, AlertTriangle, MapPin, Plus, ChevronRight
 } from 'lucide-react';
 import { api, ENDPOINTS } from '../../api/config';
 import { UserRole } from '../../types';
@@ -149,7 +149,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
 };
 
 // ====================================================================
-// COMPANY ENTRY MODAL (Handles Company + Location)
+// COMPANY ENTRY MODAL
 // ====================================================================
 
 interface CompanyEntryModalProps {
@@ -184,7 +184,6 @@ const CompanyEntryModal: React.FC<CompanyEntryModalProps> = ({
     }
   };
 
-  // Teleport to document.body to escape layout z-index issues
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100 border border-gray-200">
@@ -307,7 +306,6 @@ export const EditUserModal: React.FC<{
     }
   };
 
-  // Teleport to document.body to escape layout z-index issues
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -584,7 +582,7 @@ export const UserTableRow: React.FC<{
 // ====================================================================
 
 export const UserManagementSystem: React.FC<{
-  users: User[];
+  users: User[]; // Initial page 1 load from parent
   updatingUserId: number | null;
   onToggleStatus: (userId: number, currentStatus: boolean) => void;
   onRefreshData: () => void;
@@ -592,43 +590,143 @@ export const UserManagementSystem: React.FC<{
   const [activeFilter,    setActiveFilter]    = useState<UserFilterTab>('all');
   const [groupByCompany,  setGroupByCompany]  = useState(false);
   const [searchTerm,      setSearchTerm]      = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [updatingCompany, setUpdatingCompany] = useState<string | null>(null);
   const [editingUser,     setEditingUser]     = useState<User | null>(null);
 
-  useEffect(() => { setSearchTerm(''); }, [activeFilter]);
+  // Pagination states
+  const PAGE_SIZE = 100;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [localUsers, setLocalUsers] = useState<User[]>(users);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  
+  // Loading states
+  const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [showLoaderOverlay, setShowLoaderOverlay] = useState(false);
+
+  // 1. Smooth Loading Effect (Delay the overlay so it doesn't flash on fast loads)
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isLoadingPage) {
+      timer = setTimeout(() => setShowLoaderOverlay(true), 200); // 200ms delay before showing spinner
+    } else {
+      setShowLoaderOverlay(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isLoadingPage]);
+
+  // 2. Fetch Global Dashboard Stats (For accurate counts)
+  const [globalStats, setGlobalStats] = useState({ total: 0, admin: 0, engineer: 0, customer: 0 });
+  useEffect(() => {
+    api.get('/users/stats').then(res => {
+      setGlobalStats({
+        total: res.data.total_users || 0,
+        admin: res.data.admin_users || 0,
+        engineer: res.data.engineer_users || 0, // Gets EXACT count from backend
+        customer: res.data.customer_users || 0, // Gets EXACT count from backend
+      });
+      if (totalCount === 0) setTotalCount(res.data.total_users || 0);
+    }).catch(() => {});
+  }, []);
+
+  // 3. Debounce Search Term (Prevents API spam)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (debouncedSearch !== searchTerm) {
+        setDebouncedSearch(searchTerm);
+        setCurrentPage(1); // Reset page on new search
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm, debouncedSearch]);
+
+  // 4. Initial Sync (Only pull parent's data if we are at the default view)
+  useEffect(() => {
+    if (currentPage === 1 && debouncedSearch === '' && activeFilter === 'all') {
+      setLocalUsers(users);
+    }
+  }, [users, currentPage, debouncedSearch, activeFilter]);
+
+  // 5. Central Data Fetcher
+  const fetchPageData = useCallback(async (page: number, searchStr: string, roleStr: string) => {
+    setIsLoadingPage(true);
+    try {
+      const skip = (page - 1) * PAGE_SIZE;
+      const params = new URLSearchParams({ 
+        skip: skip.toString(), 
+        limit: PAGE_SIZE.toString() 
+      });
+      if (searchStr) params.append('search', searchStr);
+      if (roleStr && roleStr !== 'all') params.append('role', roleStr);
+
+      const res = await api.get(`/users?${params.toString()}`);
+      setLocalUsers(res.data.users);
+      if (res.data.total_count !== undefined) {
+        setTotalCount(res.data.total_count);
+      }
+    } catch (error) {
+      console.error('Failed to load global data', error);
+    } finally {
+      setIsLoadingPage(false);
+    }
+  }, [PAGE_SIZE]);
+
+  // 6. Trigger Fetch ONLY when Pagination, Search, or Filters change
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      // Skip fetch on first load because the parent passed the data already
+      if (currentPage === 1 && debouncedSearch === '' && activeFilter === 'all') return;
+    }
+
+    // Skip fetch if we returned to the default state (Effect #4 handles syncing `users` back)
+    if (currentPage === 1 && debouncedSearch === '' && activeFilter === 'all') return;
+
+    fetchPageData(currentPage, debouncedSearch, activeFilter);
+  }, [currentPage, debouncedSearch, activeFilter, fetchPageData]);
+
+  // --- Actions ---
+
+  const handleFilterChange = (role: UserFilterTab) => {
+    setActiveFilter(role);
+    setCurrentPage(1);
+  };
+
+  const handleToggleStatusLocal = (userId: number, currentStatus: boolean) => {
+    onToggleStatus(userId, currentStatus); // Database update via parent
+    setLocalUsers(prev => prev.map(u => u.user_id === userId ? { ...u, is_active: !currentStatus } : u));
+  };
+
+  const handleEditSaved = () => {
+    onRefreshData(); 
+    // Only re-fetch if we are in a custom view. Otherwise let parent's users prop update us.
+    if (!(currentPage === 1 && debouncedSearch === '' && activeFilter === 'all')) {
+      fetchPageData(currentPage, debouncedSearch, activeFilter);
+    }
+  };
 
   const handleBatchUpdate = async (companyName: string, newStatus: boolean) => {
     setUpdatingCompany(companyName);
     try {
       await api.post('/users/batch-status-by-customer', {
-        customer_details: companyName, // Map to backward compatible field or updated endpoint requirement
+        customer_details: companyName,
         is_active: newStatus,
       });
       onRefreshData();
+      if (!(currentPage === 1 && debouncedSearch === '' && activeFilter === 'all')) {
+        fetchPageData(currentPage, debouncedSearch, activeFilter);
+      }
     } catch (error) {
-      console.error('Batch update failed', error);
       alert('Failed to update company users.');
     } finally {
       setUpdatingCompany(null);
     }
   };
 
-  const filteredUsers = users.filter((user) => {
-    if (activeFilter !== 'all' && user.role !== activeFilter) return false;
-    if (searchTerm.trim()) {
-      const t = searchTerm.toLowerCase();
-      return (
-        (user.full_name || user.username).toLowerCase().includes(t) ||
-        user.email.toLowerCase().includes(t) ||
-        (user.company_name || user.customer_details || '').toLowerCase().includes(t)
-      );
-    }
-    return true;
-  });
-
   const groupedCustomers =
     activeFilter === 'customer' && groupByCompany
-      ? filteredUsers.reduce((groups, user) => {
+      ? localUsers.reduce((groups, user) => {
           const company = user.company_name || user.customer_details || 'Unassigned / Independent';
           if (!groups[company]) groups[company] = [];
           groups[company].push(user);
@@ -636,13 +734,15 @@ export const UserManagementSystem: React.FC<{
         }, {} as Record<string, User[]>)
       : null;
 
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
   const TabButton = ({
     id, label, icon, count,
   }: {
-    id: UserFilterTab; label: string; icon: React.ReactNode; count: number;
+    id: UserFilterTab; label: string; icon: React.ReactNode; count: number | string;
   }) => (
     <button
-      onClick={() => setActiveFilter(id)}
+      onClick={() => handleFilterChange(id)}
       className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all duration-200 whitespace-nowrap
         ${activeFilter === id ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
     >
@@ -659,11 +759,11 @@ export const UserManagementSystem: React.FC<{
       <EditUserModal
         user={editingUser}
         onClose={() => setEditingUser(null)}
-        onSaved={onRefreshData}
+        onSaved={handleEditSaved}
       />
 
       {/* Header + Tabs */}
-      <div className="border-b border-gray-200 bg-white">
+      <div className="border-b border-gray-200 bg-white z-10 relative">
         <div className="p-6 pb-4">
           <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
             <Users size={24} className="text-blue-600" />
@@ -674,15 +774,16 @@ export const UserManagementSystem: React.FC<{
           </p>
         </div>
         <div className="flex overflow-x-auto scrollbar-hide px-2">
-          <TabButton id="all" label="All Users" icon={<Users size={16} />} count={users.length} />
-          <TabButton id="admin" label="Administrators" icon={<Shield size={16} />} count={users.filter((u) => u.role === 'admin').length} />
-          <TabButton id="engineer" label="Engineers" icon={<Wrench size={16} />} count={users.filter((u) => u.role === 'engineer').length} />
-          <TabButton id="customer" label="Customers" icon={<Briefcase size={16} />} count={users.filter((u) => u.role === 'customer').length} />
+          {/* Always display Global Stats unless performing a specific search */}
+          <TabButton id="all" label="All Users" icon={<Users size={16} />} count={debouncedSearch && activeFilter === 'all' ? totalCount : globalStats.total} />
+          <TabButton id="admin" label="Administrators" icon={<Shield size={16} />} count={debouncedSearch && activeFilter === 'admin' ? totalCount : globalStats.admin} />
+          <TabButton id="engineer" label="Engineers" icon={<Wrench size={16} />} count={debouncedSearch && activeFilter === 'engineer' ? totalCount : globalStats.engineer} />
+          <TabButton id="customer" label="Customers" icon={<Briefcase size={16} />} count={debouncedSearch && activeFilter === 'customer' ? totalCount : globalStats.customer} />
         </div>
       </div>
 
       {/* Toolbar */}
-      <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+      <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3 z-10 relative">
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative w-full sm:w-64">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -690,7 +791,7 @@ export const UserManagementSystem: React.FC<{
             </div>
             <input
               type="text"
-              placeholder="Search users..."
+              placeholder="Search User Profile or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 pr-4 py-2 w-full text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
@@ -722,90 +823,133 @@ export const UserManagementSystem: React.FC<{
         )}
       </div>
 
-      <div className="flex-1 overflow-auto bg-white min-h-[400px]">
-        {groupedCustomers ? (
-          <div className="p-6 space-y-6">
-            {Object.entries(groupedCustomers).map(([companyName, companyUsers], index) => {
-              const isCompanyInactive = !companyUsers.some((u) => u.is_active);
-              return (
-                <div key={index} className={`border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow ${isCompanyInactive ? 'border-gray-200 bg-gray-50' : 'border-blue-100 bg-white'}`}>
-                  <CompanyGroupHeader
-                    companyName={companyName}
-                    users={companyUsers}
-                    onBatchUpdate={handleBatchUpdate}
-                    isUpdating={updatingCompany === companyName}
-                  />
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-gray-50/50 text-gray-400 border-b border-gray-100 uppercase font-semibold text-[10px] tracking-wider">
-                        <tr>
-                          <th className="px-6 py-3">User Profile</th>
-                          <th className="px-6 py-3">Company / Location</th>
-                          <th className="px-6 py-3">Role</th>
-                          <th className="px-6 py-3">Status</th>
-                          <th className="px-6 py-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {companyUsers.map((u) => (
-                          <UserTableRow
-                            key={u.user_id}
-                            user={u}
-                            updatingUserId={updatingUserId}
-                            onToggleStatus={onToggleStatus}
-                            onEdit={(row) => setEditingUser(row)}
-                            isGroupInactive={isCompanyInactive && companyName !== 'Unassigned / Independent'}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })}
+      {/* ── Table Body with Absolute Loader Overlay ── */}
+      <div className="relative flex-1 min-h-[400px]">
+        {/* Overlay that sits ON TOP of the table to prevent unmounting lag */}
+        {showLoaderOverlay && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/50 backdrop-blur-[2px] transition-all duration-300">
+            <Loader2 className="w-10 h-10 animate-spin text-blue-600 shadow-sm rounded-full mb-3" />
+            <p className="text-sm font-bold text-blue-800 bg-white/90 px-4 py-1.5 rounded-full shadow-sm border border-blue-100">
+              Loading Users...
+            </p>
           </div>
-        ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 text-gray-500 uppercase font-semibold text-[10px] tracking-wider border-b">
-              <tr>
-                <th className="px-6 py-4">User Profile</th>
-                <th className="px-6 py-4">Company / Location</th>
-                <th className="px-6 py-4">Role</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredUsers.length > 0 ? (
-                filteredUsers.map((u) => (
-                  <UserTableRow
-                    key={u.user_id}
-                    user={u}
-                    updatingUserId={updatingUserId}
-                    onToggleStatus={onToggleStatus}
-                    onEdit={(row) => setEditingUser(row)}
-                  />
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
-                    <div className="flex flex-col items-center justify-center">
-                      <Filter size={24} className="text-gray-400 mb-2" />
-                      <p className="font-medium">No users found</p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
         )}
+
+        <div className="absolute inset-0 overflow-auto bg-white">
+          {groupedCustomers ? (
+            <div className="p-6 space-y-6">
+              {Object.entries(groupedCustomers).map(([companyName, companyUsers], index) => {
+                const isCompanyInactive = !companyUsers.some((u) => u.is_active);
+                return (
+                  <div key={index} className={`border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow ${isCompanyInactive ? 'border-gray-200 bg-gray-50' : 'border-blue-100 bg-white'}`}>
+                    <CompanyGroupHeader
+                      companyName={companyName}
+                      users={companyUsers}
+                      onBatchUpdate={handleBatchUpdate}
+                      isUpdating={updatingCompany === companyName}
+                    />
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50/50 text-gray-400 border-b border-gray-100 uppercase font-semibold text-[10px] tracking-wider">
+                          <tr>
+                            <th className="px-6 py-3">User Profile</th>
+                            <th className="px-6 py-3">Company / Location</th>
+                            <th className="px-6 py-3">Role</th>
+                            <th className="px-6 py-3">Status</th>
+                            <th className="px-6 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {companyUsers.map((u) => (
+                            <UserTableRow
+                              key={u.user_id}
+                              user={u}
+                              updatingUserId={updatingUserId}
+                              onToggleStatus={handleToggleStatusLocal}
+                              onEdit={(row) => setEditingUser(row)}
+                              isGroupInactive={isCompanyInactive && companyName !== 'Unassigned / Independent'}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <table className="w-full text-sm text-left">
+              <thead className="bg-gray-50 text-gray-500 uppercase font-semibold text-[10px] tracking-wider border-b">
+                <tr>
+                  <th className="px-6 py-4">User Profile</th>
+                  <th className="px-6 py-4">Company / Location</th>
+                  <th className="px-6 py-4">Role</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {localUsers.length > 0 ? (
+                  localUsers.map((u) => (
+                    <UserTableRow
+                      key={u.user_id}
+                      user={u}
+                      updatingUserId={updatingUserId}
+                      onToggleStatus={handleToggleStatusLocal}
+                      onEdit={(row) => setEditingUser(row)}
+                    />
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                      <div className="flex flex-col items-center justify-center">
+                        <Filter size={24} className="text-gray-400 mb-2" />
+                        <p className="font-medium">No users found matching "{searchTerm}"</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
+
+      {/* ── Pagination Footer ── */}
+      {totalCount > PAGE_SIZE && (
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between z-10 relative">
+          <span className="text-sm text-gray-600 font-medium">
+            Showing <span className="font-bold">{((currentPage - 1) * PAGE_SIZE) + 1}</span> to{' '}
+            <span className="font-bold">{Math.min(currentPage * PAGE_SIZE, totalCount)}</span> of{' '}
+            <span className="font-bold">{totalCount}</span> users
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1 || isLoadingPage}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft size={16} /> Prev
+            </button>
+            <span className="text-sm font-medium text-gray-600 px-3 py-1 bg-white border border-gray-200 rounded-lg shadow-sm">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages || isLoadingPage}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Next <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 // ====================================================================
-// INVITE USERS SECTION (Dual Searchable Dropdowns + Sync Address)
+// INVITE USERS SECTION (UNCHANGED)
 // ====================================================================
 
 export const InviteUsersSection: React.FC<{

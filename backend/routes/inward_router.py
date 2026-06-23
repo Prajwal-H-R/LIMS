@@ -1,3 +1,5 @@
+# backend/routes/inward_router.py
+
 import json
 from datetime import date, datetime
 from typing import Dict, List, Optional
@@ -8,12 +10,13 @@ from fastapi import (
     Body, Form, UploadFile, BackgroundTasks
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, func, or_ # <-- Added for queries
 
 # Local imports
 from backend.db import get_db
 # ------------------------------------------------------------------
-# ✅ IMPORT Inward (Removed InwardEquipment as it is no longer used here)
+# ✅ IMPORT Inward
 from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 # ✅ IMPORT HTWJob
@@ -41,7 +44,9 @@ from backend.schemas.inward_schemas import (
     FailedNotificationsResponse,
     BatchExportRequest,
     CustomerRemarkRequest,
-    InwardStatusUpdate
+    InwardStatusUpdate,
+    InwardListPaginatedResponse,
+    ExportablePaginatedResponse # <-- NEW Schema imported
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -241,30 +246,131 @@ async def update_direct_status(inward_id: int, status_update: InwardStatusUpdate
     updated_inward = await inward_service.update_inward_status(inward_id, status_update.status)
     return {"message": "Status updated successfully", "status": updated_inward.status}
 
-# --- GENERAL LISTING ENDPOINTS ---
+# --- GENERAL LISTING ENDPOINTS (PAGINATED NOW) ---
 
-@router.get("", response_model=List[InwardResponse], include_in_schema=True)
+@router.get("", response_model=InwardListPaginatedResponse, include_in_schema=True)
 async def get_all_inward_records(
+    skip: int = 0,
+    limit: int = 1000,
+    search: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    status: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    return await InwardService(db).get_all_inwards(start_date=start_date, end_date=end_date)
+    if limit > 1000:
+        limit = 1000
+
+    conditions = []
+    
+    if start_date:
+        conditions.append(Inward.material_inward_date >= start_date)
+    if end_date:
+        conditions.append(Inward.material_inward_date <= end_date)
+
+    if status and status.lower() != 'all':
+        conditions.append(Inward.status.ilike(f"%{status}%"))
+        
+    if search:
+        search_term = f"%{search}%"
+        conditions.append(
+            or_(
+                Inward.srf_no.ilike(search_term),
+                Inward.customer_details.ilike(search_term),
+                Inward.customer_dc_no.ilike(search_term)
+            )
+        )
+
+    # 1. Total Count (Fast)
+    count_stmt = select(func.count(Inward.inward_id))
+    if conditions:
+        count_stmt = count_stmt.where(*conditions)
+    total_count = db.scalar(count_stmt) or 0
+
+    # 2. Paginated Chunk
+    stmt = select(Inward).options(
+        selectinload(Inward.customer),
+        selectinload(Inward.equipments)
+    )
+    if conditions:
+        stmt = stmt.where(*conditions)
+        
+    stmt = stmt.order_by(Inward.inward_id.desc()).offset(skip).limit(limit)
+    inwards = db.scalars(stmt).all()
+    
+    return {
+        "total_count": total_count,
+        "inwards": inwards
+    }
+
 
 @router.get("/reviewed-firs", response_model=List[ReviewedFirResponse])
 async def get_reviewed_firs(db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     inward_service = InwardService(db)
     return await inward_service.get_reviewed_inwards_filtered()
 
-@router.get("/exportable-list", response_model=List[UpdatedInwardSummary])
+@router.get("/exportable-list", response_model=ExportablePaginatedResponse)
 async def list_exportable_inwards(
+    skip: int = 0,
+    limit: int = 1000,
+    search: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(check_staff_role)
 ):
-    inward_service = InwardService(db)
-    return await inward_service.get_inwards_for_export(start_date=start_date, end_date=end_date)
+    # Cap limit to prevent massive payload overloads
+    if limit > 1000:
+        limit = 1000
+
+    conditions = []
+    
+    # 1. Date Filters
+    if start_date:
+        conditions.append(Inward.material_inward_date >= start_date)
+    if end_date:
+        conditions.append(Inward.material_inward_date <= end_date)
+
+    # 2. Search Filters
+    if search:
+        search_term = f"%{search}%"
+        conditions.append(
+            or_(
+                Inward.srf_no.ilike(search_term),
+                Inward.customer_details.ilike(search_term),
+                Inward.customer_dc_no.ilike(search_term)
+            )
+        )
+
+    # Note: If your old `get_inwards_for_export` strictly filtered by a certain status
+    # (like ONLY allowing "reviewed" or "completed" records to be exported), 
+    # you can uncomment and adjust this line below:
+    # conditions.append(Inward.status.ilike("%reviewed%"))
+
+    # 3. Total Count (Fast Query)
+    count_stmt = select(func.count(Inward.inward_id))
+    if conditions:
+        count_stmt = count_stmt.where(*conditions)
+    total_count = db.scalar(count_stmt) or 0
+
+    # 4. Paginated Chunk (Fast Query)
+    # Using selectinload for equipments so Pydantic can calculate `equipment_count` instantly
+    stmt = select(Inward).options(
+        selectinload(Inward.customer),
+        selectinload(Inward.equipments)
+    )
+    
+    if conditions:
+        stmt = stmt.where(*conditions)
+        
+    stmt = stmt.order_by(Inward.inward_id.desc()).offset(skip).limit(limit)
+    inwards = db.scalars(stmt).all()
+    
+    # Return structured paginated payload
+    return {
+        "total_count": total_count,
+        "inwards": inwards
+    }
 
 @router.get("/updated", response_model=List[UpdatedInwardSummary])
 async def list_updated_inwards(

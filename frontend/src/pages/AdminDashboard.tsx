@@ -14,7 +14,6 @@ import { CertificateApprovalModule } from '../components/AdminComponents/Certifi
 import { LabScopeModule }          from '../components/AdminComponents/LabScopeModule';
 import { HTWEnvironmentManager }   from '../components/AdminComponents/HTWEnvironmentManager';
 
-
 import {
   AdminNotificationsPanel,
   extractCompanyFromNotification,
@@ -51,7 +50,18 @@ const PROFILE_UPDATE_LAST_READ_KEY    = 'admin_profile_update_last_read_id';
 // RESPONSE TYPES
 // ====================================================================
 
-interface UsersResponse            { users: User[]; }
+export interface UserStats {
+  total_users: number;
+  active_users: number;
+  inactive_users: number;
+  admin_users: number;
+}
+
+// Updated to match the new paginated backend response
+interface UsersResponse { 
+  total_count: number;
+  users: User[]; 
+}
 interface AdminNotificationsResponse { notifications: AdminNotificationItem[]; }
 interface ExpiryCheckResponse      { message: string; affected_tables: string[]; }
 
@@ -375,6 +385,8 @@ const AdminDashboard: React.FC = () => {
 
   // ── Core state ────────────────────────────────────────────────────
   const [users,          setUsers]          = useState<User[]>([]);
+  const [userStats,      setUserStats]      = useState<UserStats | null>(null); // NEW: Track Dashboard Stats separately
+  const [totalUserCount, setTotalUserCount] = useState<number>(0);
   const [customers,      setCustomers]      = useState<Customer[]>([]);
   const [loading,        setLoading]        = useState(true);
   const [error,          setError]          = useState('');
@@ -429,17 +441,22 @@ const AdminDashboard: React.FC = () => {
     }
   }, []);
 
-  // ── Core data fetch ───────────────────────────────────────────────
+  // ── Core data fetch (MODIFIED) ────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [usersRes, customersRes] = await Promise.all([
-        api.get<UsersResponse>(ENDPOINTS.USERS.ALL_USERS),
+      const [usersRes, customersRes, statsRes] = await Promise.all([
+        api.get<UsersResponse>(`${ENDPOINTS.USERS.ALL_USERS}?skip=0&limit=1000`), // Fetch first 1000
         api.get<Customer[]>(ENDPOINTS.PORTAL.CUSTOMERS_DROPDOWN),
+        api.get<UserStats>('/users/stats') // NEW: Fetch ultra-fast dashboard stats
       ]);
-      setUsers(usersRes.data.users);
+      
+      // Update states with new backend schemas
+      setUsers(usersRes.data.users || []); 
+      setTotalUserCount(usersRes.data.total_count || 0);
       setCustomers(customersRes.data);
+      setUserStats(statsRes.data);
     } catch (e: unknown) {
       console.error('Error fetching admin data:', e);
       if (e && typeof e === 'object' && 'isAxiosError' in e) {
@@ -643,7 +660,8 @@ const latestPopupCompany =
                   <AdminSkeleton type="dashboard" />
                 ) : (
                   <AdminDashboardHome
-                    users={users}
+                    users={users} // Still passing this for backward compatibility if needed
+                    userStats={userStats} // NEW: Passing the exact numbers to the dashboard cards
                     onNavigate={handleNavigate}
                     expiredTables={expiredTables}
                   />
@@ -718,7 +736,7 @@ const latestPopupCompany =
                         </div>
                       )}
                       <UserManagementSystem
-                        users={users}
+                        users={users} // The initial 1000 users. We will implement pagination in this file next.
                         updatingUserId={updatingUserId}
                         onToggleStatus={handleToggleStatus}
                         onRefreshData={fetchData}

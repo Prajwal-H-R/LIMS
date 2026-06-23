@@ -25,7 +25,7 @@ import {
   QrCode,
   ClipboardCheck
 } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { api, ENDPOINTS } from "../api/config";
 import { CustomerCertificatePrintView } from "./CustomerCertificatePrintView";
 import QRCode from "qrcode";
@@ -84,6 +84,8 @@ interface GenericInward {
   customer_details?: string;
   customer_name?: string; 
   created_at?: string;
+  inspection_status?: string;
+  report_sent?: boolean;
 }
 
 interface HtwJob {
@@ -95,17 +97,20 @@ interface HtwJob {
   job_status?: string;
 }
 
-/** Align with backend `job_status_allows_certificate_generation`: finished cal jobs including OOT. */
 function jobStatusAllowsCertificateGeneration(jobStatus: string | null | undefined): boolean {
   const v = (jobStatus || "").trim().toLowerCase();
   return v === "calibrated" || v === "completed - oot" || v === "completed";
 }
 
-// --- Constants ---
+function isHydraulicTorqueWrench(desc?: string | null): boolean {
+  if (!desc) return false;
+  const lower = desc.toLowerCase();
+  return lower.includes("hydraulic") || lower.includes("torque") || lower.includes("htw");
+}
 
+// --- Constants ---
 const STATUS_KEYS = ["DRAFT", "CREATED", "REWORK", "APPROVED", "ISSUED"] as const;
 type StatusKey = (typeof STATUS_KEYS)[number];
-
 type CertTabKey = "pending_gen" | "draft" | "rework" | "approval" | "approved" | "issued" | "generate_qr";
 
 const STATUS_LABELS: Record<StatusKey, string> = {
@@ -125,16 +130,7 @@ const TAB_BADGE_CLASSES: Record<string, string> = {
   NO_CERT: "bg-gray-100 text-gray-700 border-gray-200"
 };
 
-const STATUS_ICONS: Record<StatusKey, React.ReactNode> = {
-  DRAFT: <FileText className="h-4 w-4" />,
-  CREATED: <Clock className="h-4 w-4" />,
-  REWORK: <RotateCcw className="h-4 w-4" />,
-  APPROVED: <CheckCircle2 className="h-4 w-4" />,
-  ISSUED: <Award className="h-4 w-4" />,
-};
-
 // --- Skeletons ---
-
 const CertificateListSkeleton = () => (
   <div className="space-y-4">
     {[1, 2, 3, 4, 5].map((i) => (
@@ -166,7 +162,6 @@ const DetailSkeleton: React.FC = () => (
   </div>
 );
 
-// --- Helper: Modal Portal ---
 const ModalPortal = ({ children }: { children: React.ReactNode }) => {
   return createPortal(children, document.body);
 };
@@ -174,6 +169,7 @@ const ModalPortal = ({ children }: { children: React.ReactNode }) => {
 // --- Main Component ---
 export const CertificatesPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Navigation / View State
@@ -181,30 +177,27 @@ export const CertificatesPage: React.FC = () => {
   const activeTab = (searchParams.get("tab") as CertTabKey) || "pending_gen";
   const [listMode, setListMode] = useState<"certificates" | "inspection">("certificates");
 
-// Inside CertificatesPage component
-const [finalReportSrfId, setFinalReportSrfId] = useState<number | null>(null);
-const [finalReportData, setFinalReportData] = useState<any | null>(null);
-const [isReportLoading, setIsReportLoading] = useState(false);
-const [recipientEmail, setRecipientEmail] = useState("");
-const [isSendingReport, setIsSendingReport] = useState(false);
+  // --- Smooth Pagination & Search State ---
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1); 
+  const [limit, setLimit] = useState(100);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
 
-// Update viewMode logic
-const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "list");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFetchingData, setIsFetchingData] = useState(false);
+  const [showLoaderOverlay, setShowLoaderOverlay] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   // Data State
   const [srfGroups, setSrfGroups] = useState<SrfGroup[]>([]);
   const [allInwards, setAllInwards] = useState<GenericInward[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAllInwardsLoading, setIsAllInwardsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
 
   // Modals
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [selectedCertificate, setSelectedCertificate] = useState<Certificate | null>(null);
-
-  // Download Modal State
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloadCertData, setDownloadCertData] = useState<{ id: number, no: string } | null>(null);
   const [includeLetterhead, setIncludeLetterhead] = useState(true);
@@ -222,13 +215,12 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
   const [jobs, setJobs] = useState<HtwJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [generatingJobId, setGeneratingJobId] = useState<number | null>(null);
-  const [expandedGenerateSrfs, setExpandedGenerateSrfs] = useState<Set<string>>(new Set());
 
   // Preview state
   const [previewData, setPreviewData] = useState<any>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Multi PDF download (Approved / Issued tabs only)
+  // Multi PDF download & QR
   const [selectedForBulkDownload, setSelectedForBulkDownload] = useState<Set<number>>(new Set());
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [showBulkDownloadModal, setShowBulkDownloadModal] = useState(false);
@@ -236,90 +228,111 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
   const [qrGeneratingCertId, setQrGeneratingCertId] = useState<number | null>(null);
   const [bulkQrGenerating, setBulkQrGenerating] = useState(false);
   const [bulkQrPrinting, setBulkQrPrinting] = useState(false);
-  
-  // --- Data Logic ---
-  const fetchAllInwards = useCallback(async () => {
-    setIsAllInwardsLoading(true);
+
+  // 1. Debounce Search Term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (debouncedSearch !== searchTerm) {
+        setDebouncedSearch(searchTerm);
+        setCurrentPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm, debouncedSearch]);
+
+  // 2. Smooth Loading Overlay
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isFetchingData && !isLoading) {
+      timer = setTimeout(() => setShowLoaderOverlay(true), 200);
+    } else {
+      setShowLoaderOverlay(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isFetchingData, isLoading]);
+
+  // 3. SMART DATA FETCH FUNCTION
+  const fetchData = useCallback(async () => {
     try {
-      const res = await api.get<GenericInward[]>("/staff/inwards/");
-      setAllInwards(Array.isArray(res.data) ? res.data : []);
+      setIsFetchingData(true);
+      setError(null);
+      const skip = (currentPage - 1) * limit;
+      const params: any = { skip, limit };
+      if (debouncedSearch) params.search = debouncedSearch;
+
+      if (listMode === "inspection") {
+        // Correct Endpoint to view ALL reports un-filtered
+        const res = await api.get<any>("/final-inspections/", { params });
+        const data = res.data?.items ? res.data.items : (Array.isArray(res.data) ? res.data : []);
+        setAllInwards(data);
+        setServerTotalCount(res.data?.total_count || data.length);
+      } else {
+        const res = await api.get<any>(ENDPOINTS.CERTIFICATES.SRF_GROUPS, { params });
+        const rawData = res.data?.items ? res.data.items : (Array.isArray(res.data) ? res.data : []);
+        
+        // HTW filter applies ONLY to the certificates generation tab
+        const htwGroups = rawData.map((group: any) => ({
+          ...group,
+          equipments: (group.equipments || []).filter((eq: any) => isHydraulicTorqueWrench(eq.material_description))
+        })).filter((group: any) => group.equipments.length > 0);
+
+        setSrfGroups(htwGroups);
+        setServerTotalCount(res.data?.total_count || htwGroups.length);
+      }
     } catch (err: any) {
-      toast.error("Failed to load SRF database.");
+      console.error("Failed to fetch data:", err);
+      setError(err.response?.data?.detail || "Failed to load records.");
     } finally {
-      setIsAllInwardsLoading(false);
+      setIsFetchingData(false);
+      setIsLoading(false);
     }
-  }, []);
+  }, [currentPage, limit, debouncedSearch, listMode]);
 
   useEffect(() => {
-    if (listMode === "inspection") {
-      fetchAllInwards();
+    if (!activeSrfId) {
+      fetchData();
     }
-  }, [listMode, fetchAllInwards]);
+  }, [fetchData, activeSrfId]);
 
-  const filteredDisplayList = useMemo(() => {
-    const query = searchTerm.toLowerCase();
-    if (listMode === "inspection") {
-      return allInwards.filter(i => 
-        i.srf_no.toLowerCase().includes(query) || 
-        (i.customer_details && i.customer_details.toLowerCase().includes(query)) ||
-        (i.customer_name && i.customer_name.toLowerCase().includes(query))
-      );
-    }
-    return srfGroups.filter(g => 
-      g.srf_no.toLowerCase().includes(query) || 
-      (g.customer_details && g.customer_details.toLowerCase().includes(query))
-    );
-  }, [listMode, allInwards, srfGroups, searchTerm]);
-
-  // --- Scrollbar Management (FIXED) ---
   useEffect(() => {
-  const isAnyModalOpen =
-    showGenerateModal ||
-    showEditModal ||
-    showPreviewModal ||
-    showDownloadModal ||
-    showBulkDownloadModal;
-
-  if (isAnyModalOpen) {
-    const scrollbarWidth =
-      window.innerWidth - document.documentElement.clientWidth;
-
-    document.body.style.overflow = "hidden";
-
-    if (scrollbarWidth > 0) {
-      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    if (activeSrfId && !srfGroups.some(g => g.inward_id === activeSrfId)) {
+      api.get<any>(ENDPOINTS.CERTIFICATES.SRF_GROUPS, { params: { inward_id: activeSrfId } })
+         .then(res => {
+            const rawData = res.data?.items ? res.data.items : (Array.isArray(res.data) ? res.data : []);
+            const htwGroups = rawData.map((group: any) => ({
+                ...group,
+                equipments: (group.equipments || []).filter((eq: any) => isHydraulicTorqueWrench(eq.material_description))
+            }));
+            if (htwGroups.length > 0) {
+               setSrfGroups(prev => [...prev.filter(g => g.inward_id !== activeSrfId), htwGroups[0]]);
+            }
+         })
+         .finally(() => setIsLoading(false));
     }
-  } else {
-    document.body.style.overflow = "";
-    document.body.style.paddingRight = "";
-  }
+  }, [activeSrfId, srfGroups]);
 
-  return () => {
-    document.body.style.overflow = "";
-    document.body.style.paddingRight = "";
-  };
-}, [showGenerateModal, showEditModal, showPreviewModal, showDownloadModal, showBulkDownloadModal]);
-
-  // --- Helpers ---
+  useEffect(() => {
+    const isAnyModalOpen = showGenerateModal || showEditModal || showPreviewModal || showDownloadModal || showBulkDownloadModal;
+    if (isAnyModalOpen) {
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+      document.body.style.overflow = "hidden";
+      if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    } else {
+      document.body.style.overflow = "";
+      document.body.style.paddingRight = "";
+    }
+    return () => { document.body.style.overflow = ""; document.body.style.paddingRight = ""; };
+  }, [showGenerateModal, showEditModal, showPreviewModal, showDownloadModal, showBulkDownloadModal]);
 
   const closeAllModals = () => {
-    setShowGenerateModal(false);
-    setShowEditModal(false);
-    setShowPreviewModal(false);
-    setShowDownloadModal(false);
-    setShowBulkDownloadModal(false);
-    setSelectedCertificate(null);
-    setPreviewData(null);
-    setDownloadCertData(null);
+    setShowGenerateModal(false); setShowEditModal(false); setShowPreviewModal(false);
+    setShowDownloadModal(false); setShowBulkDownloadModal(false);
+    setSelectedCertificate(null); setPreviewData(null); setDownloadCertData(null);
   };
 
   const formatDate = (d?: string | null) => {
     if (!d) return "-";
-    return new Date(d).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
   };
 
   const getEquipmentCategory = (item: SrfGroupEquipment): CertTabKey => {
@@ -343,23 +356,16 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
 
   const getQrScanUrlForCertificate = (certificateId: number) => {
     const configuredPublicBase = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim();
-    const base = configuredPublicBase && configuredPublicBase.length > 0
-      ? configuredPublicBase.replace(/\/+$/, "")
-      : window.location.origin;
+    const base = configuredPublicBase && configuredPublicBase.length > 0 ? configuredPublicBase.replace(/\/+$/, "") : window.location.origin;
     return `${base}/certificate-qr/${certificateId}`;
   };
 
   const generateQrForCertificate = async (cert: Certificate) => {
     setQrGeneratingCertId(cert.certificate_id);
     try {
-      const qrImageBase64 = await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), {
-        width: 320,
-        margin: 1,
-      });
-      await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR(cert.certificate_id), {
-        qr_image_base64: qrImageBase64,
-      });
-      await fetchSrfGroups();
+      const qrImageBase64 = await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), { width: 320, margin: 1 });
+      await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR(cert.certificate_id), { qrImageBase64 });
+      if (activeSrfId) fetchData(); 
       toast.success(`QR generated for ${cert.certificate_no}`);
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to generate QR.");
@@ -369,9 +375,7 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
   };
 
   const printQrCards = (rows: Array<{ cert: Certificate; neplId?: string; description?: string }>) => {
-    const htmlRows = rows
-      .filter((r) => !!r.cert.qr_image_base64)
-      .map((r) => {
+    const htmlRows = rows.filter((r) => !!r.cert.qr_image_base64).map((r) => {
         const due = formatDate(r.cert.recommended_cal_due_date);
         const status = getCalibrationDueStatus(r.cert.recommended_cal_due_date);
         return `
@@ -386,51 +390,29 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
             </div>
           </div>
         `;
-      })
-      .join("");
+      }).join("");
 
-    if (!htmlRows) {
-      toast.error("No generated QR images available to print.");
-      return;
-    }
+    if (!htmlRows) { toast.error("No generated QR images available to print."); return; }
     const w = window.open("", "_blank", "width=1000,height=800");
-    if (!w) {
-      toast.error("Unable to open print window.");
-      return;
-    }
-    w.document.write(`
-      <html>
-        <head><title>QR Print</title></head>
-        <body style="font-family:Arial,sans-serif;padding:16px;">
-          ${htmlRows}
-          <script>window.onload = () => window.print();</script>
-        </body>
-      </html>
-    `);
+    if (!w) { toast.error("Unable to open print window."); return; }
+    w.document.write(`<html><head><title>QR Print</title></head><body style="font-family:Arial,sans-serif;padding:16px;">${htmlRows}<script>window.onload = () => window.print();</script></body></html>`);
     w.document.close();
   };
 
   const bulkGenerateQrForSrf = async (equipments: SrfGroupEquipment[]) => {
-    const qrEligibleCerts = equipments
-      .map((e) => e.certificate)
-      .filter((c): c is Certificate => !!c && (c.status === "APPROVED" || c.status === "ISSUED"));
-    if (qrEligibleCerts.length === 0) {
-      toast.error("No APPROVED/ISSUED certificates found in this SRF.");
-      return;
-    }
+    const qrEligibleCerts = equipments.map((e) => e.certificate).filter((c): c is Certificate => !!c && (c.status === "APPROVED" || c.status === "ISSUED"));
+    if (qrEligibleCerts.length === 0) { toast.error("No APPROVED/ISSUED certificates found in this SRF."); return; }
+    
     setBulkQrGenerating(true);
     try {
       const items = await Promise.all(
         qrEligibleCerts.map(async (cert) => ({
           certificate_id: cert.certificate_id,
-          qr_image_base64: await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), {
-            width: 320,
-            margin: 1,
-          }),
+          qr_image_base64: await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), { width: 320, margin: 1 }),
         }))
       );
       await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR_BULK, { items });
-      await fetchSrfGroups();
+      if(activeSrfId) fetchData(); 
       toast.success(`Generated QR for ${qrEligibleCerts.length} certificate(s).`);
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Bulk QR generation failed.");
@@ -442,22 +424,18 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
   const printQrForSrfLot = async (equipments: SrfGroupEquipment[]) => {
     setBulkQrPrinting(true);
     try {
-      const approvedRows = equipments
-        .filter((e) => e.certificate?.status === "APPROVED" || e.certificate?.status === "ISSUED")
+      const approvedRows = equipments.filter((e) => e.certificate?.status === "APPROVED" || e.certificate?.status === "ISSUED")
         .map((e) => ({ cert: e.certificate as Certificate, neplId: e.nepl_id, description: e.material_description }));
-      if (approvedRows.length === 0) {
-        toast.error("No APPROVED/ISSUED certificates found in this SRF.");
-        return;
-      }
+      if (approvedRows.length === 0) { toast.error("No APPROVED/ISSUED certificates found in this SRF."); return; }
+      
       const needsGenerate = approvedRows.some((r) => !r.cert.qr_image_base64);
-      if (needsGenerate) {
-        await bulkGenerateQrForSrf(equipments);
-      }
-      const latest = await fetchSrfGroups();
-      const group = latest.find((g) => g.inward_id === activeSrfId);
-      const latestRows = (group?.equipments || [])
-        .filter((e) => e.certificate?.status === "APPROVED" || e.certificate?.status === "ISSUED")
-        .map((e) => ({ cert: e.certificate as Certificate, neplId: e.nepl_id, description: e.material_description }));
+      if (needsGenerate) { await bulkGenerateQrForSrf(equipments); }
+      
+      const latestRes = await api.get<any>(ENDPOINTS.CERTIFICATES.SRF_GROUPS, { params: { inward_id: activeSrfId } });
+      const rawData = latestRes.data?.items ? latestRes.data.items : (Array.isArray(latestRes.data) ? latestRes.data : []);
+      const group = rawData[0];
+      const latestRows = (group?.equipments || []).filter((e: any) => e.certificate?.status === "APPROVED" || e.certificate?.status === "ISSUED")
+        .map((e: any) => ({ cert: e.certificate as Certificate, neplId: e.nepl_id, description: e.material_description }));
       printQrCards(latestRows);
     } finally {
       setBulkQrPrinting(false);
@@ -469,32 +447,6 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
     const status = (cert.status || "DRAFT").toUpperCase();
     return TAB_BADGE_CLASSES[status] || TAB_BADGE_CLASSES["DRAFT"];
   };
-
-  // --- Fetching ---
-
-  const fetchSrfGroups = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await api.get<SrfGroup[]>(ENDPOINTS.CERTIFICATES.SRF_GROUPS);
-      const data = Array.isArray(res.data) ? res.data : [];
-      setSrfGroups(data);
-      return data;
-    } catch (err: any) {
-      console.error("Failed to fetch SRF groups:", err);
-      setError(err.response?.data?.detail || "Failed to load certificate data.");
-      setSrfGroups([]);
-      return [];
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchSrfGroups();
-  }, [fetchSrfGroups]);
-
-  // --- Navigation Handlers ---
 
   const handleOpenSrf = (id: number) => {
     closeAllModals();
@@ -508,31 +460,18 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
 
   const handleTabChange = (tab: CertTabKey) => {
     setSelectedForBulkDownload(new Set());
-    if (activeSrfId) {
-      setSearchParams({ srfId: activeSrfId.toString(), tab: tab });
-    }
+    if (activeSrfId) setSearchParams({ srfId: activeSrfId.toString(), tab: tab });
   };
-
-  // --- Action Handlers ---
 
   const fetchJobsForGenerate = async () => {
     setJobsLoading(true);
     try {
-      const res = await api.get<HtwJob[]>("/htw-jobs/");
-      const jobList = Array.isArray(res.data) ? res.data : [];
-      const certJobIds = new Set(
-        srfGroups.flatMap((g) =>
-          g.equipments.filter((e) => e.certificate).map((e) => e.certificate!.job_id)
-        )
-      );
-      const available = jobList.filter(
-        (j) => !certJobIds.has(j.job_id) && jobStatusAllowsCertificateGeneration(j.job_status)
-      );
+      const res = await api.get<any>("/htw-jobs/", { params: { limit: 1000 } });
+      const jobList = res.data?.items ? res.data.items : (Array.isArray(res.data) ? res.data : []);
+      
+      const certJobIds = new Set(srfGroups.flatMap((g) => g.equipments.filter((e) => e.certificate).map((e) => e.certificate!.job_id)));
+      const available = jobList.filter((j: any) => !certJobIds.has(j.job_id) && jobStatusAllowsCertificateGeneration(j.job_status));
       setJobs(available);
-      if (available.length > 0) {
-        const firstSrf = available[0].srf_no || "Unknown SRF";
-        setExpandedGenerateSrfs(new Set([firstSrf]));
-      }
     } catch (err) {
       console.error("Failed to fetch jobs:", err);
       setJobs([]);
@@ -543,344 +482,220 @@ const viewMode = finalReportSrfId ? "final_report" : (activeSrfId ? "detail" : "
 
   const handleOpenGenerateModal = () => {
     setShowGenerateModal(true);
-    setExpandedGenerateSrfs(new Set());
     fetchJobsForGenerate();
   };
 
-const handleGenerateAndOpenFlow = async (jobId: number) => {
-  setGeneratingJobId(jobId);
-  try {
-    // 1. Trigger generation (Backend now assigns ULR automatically)
-    await api.post(ENDPOINTS.CERTIFICATES.GENERATE(jobId));
-    
-    // 2. Refresh the list to get the new record with its ULR
-    const updatedGroups = await fetchSrfGroups();
-
-    // 3. Find the newly created certificate
-    let newCert: Certificate | null = null;
-    let targetGroup: SrfGroup | null = null;
-
-    for (const group of updatedGroups) {
-      const foundEq = group.equipments.find(e => Number(e.job_id) === Number(jobId));
-      if (foundEq && foundEq.certificate) {
-        newCert = foundEq.certificate;
-        targetGroup = group;
-        break;
-      }
-    }
-
-    setShowGenerateModal(false);
-
-    if (newCert) {
-      // 4. Open the edit flow immediately
-      handleOpenEdit(newCert); 
-      
-      if (targetGroup) {
-        setSearchParams({ srfId: targetGroup.inward_id.toString(), tab: "draft" });
-      }
-    } else {
-      toast.success("Draft generated with ULR. Check Drafts tab.");
-    }
-  } catch (err: any) {
-    toast.error(err.response?.data?.detail || "Failed to generate.");
-  } finally {
-    setGeneratingJobId(null);
-  }
-};
-
-const [isFetchingUlr, setIsFetchingUlr] = useState(false);
-
-const handleOpenEdit = async (cert: Certificate) => {
-  setSelectedCertificate(cert);
-  
-  // Since backend generates it during 'POST /generate', 
-  // cert.ulr_no will already contain the sequential number.
-  let currentUlr = cert.ulr_no || "";
-
-  // SAFETY FALLBACK: If for some reason it's missing (e.g. legacy data), fetch it.
-  if (!currentUlr) {
-    setIsFetchingUlr(true);
+  const handleGenerateAndOpenFlow = async (jobId: number) => {
+    setGeneratingJobId(jobId);
     try {
-      const res = await api.get<{ next_ulr: string }>("/certificates/next-ulr");
-      currentUlr = res.data.next_ulr;
-    } catch (err) {
-      console.error("Safety ULR fetch failed");
-    } finally {
-      setIsFetchingUlr(false);
-    }
-  }
+      await api.post(ENDPOINTS.CERTIFICATES.GENERATE(jobId));
+      
+      const latestRes = await api.get<any>(ENDPOINTS.CERTIFICATES.SRF_GROUPS, { params: { limit: 1000 } });
+      const rawData = latestRes.data?.items ? latestRes.data.items : (Array.isArray(latestRes.data) ? latestRes.data : []);
+      
+      let newCert: Certificate | null = null;
+      let targetGroup: SrfGroup | null = null;
 
-  setEditForm({
-    ulr_no: currentUlr,
-    field_of_parameter: cert.field_of_parameter || "Torque",
-    recommended_cal_due_date: cert.recommended_cal_due_date ? cert.recommended_cal_due_date.slice(0, 10) : "",
-    item_status: cert.item_status || "Satisfactory",
-  });
-  setShowEditModal(true);
-};
+      for (const group of rawData) {
+        const foundEq = group.equipments.find((e:any) => Number(e.job_id) === Number(jobId));
+        if (foundEq && foundEq.certificate) {
+          newCert = foundEq.certificate; targetGroup = group; break;
+        }
+      }
+
+      setShowGenerateModal(false);
+      if (newCert) {
+        handleOpenEdit(newCert); 
+        if (targetGroup) setSearchParams({ srfId: targetGroup.inward_id.toString(), tab: "draft" });
+      } else {
+        toast.success("Draft generated with ULR. Check Drafts tab.");
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to generate.");
+    } finally {
+      setGeneratingJobId(null);
+    }
+  };
+
+  const [isFetchingUlr, setIsFetchingUlr] = useState(false);
+
+  const handleOpenEdit = async (cert: Certificate) => {
+    setSelectedCertificate(cert);
+    let currentUlr = cert.ulr_no || "";
+
+    if (!currentUlr) {
+      setIsFetchingUlr(true);
+      try {
+        const res = await api.get<{ next_ulr: string }>("/certificates/next-ulr");
+        currentUlr = res.data.next_ulr;
+      } catch (err) { } finally { setIsFetchingUlr(false); }
+    }
+
+    setEditForm({
+      ulr_no: currentUlr,
+      field_of_parameter: cert.field_of_parameter || "Torque",
+      recommended_cal_due_date: cert.recommended_cal_due_date ? cert.recommended_cal_due_date.slice(0, 10) : "",
+      item_status: cert.item_status || "Satisfactory",
+    });
+    setShowEditModal(true);
+  };
 
   const handleProceedToEditFromPreview = () => {
     setShowPreviewModal(false);
-    setTimeout(() => {
-      if (selectedCertificate) {
-        handleOpenEdit(selectedCertificate);
-      }
-    }, 50);
+    setTimeout(() => { if (selectedCertificate) handleOpenEdit(selectedCertificate); }, 50);
   };
 
   const handleSaveEdit = async () => {
     if (!selectedCertificate) return;
-  const ulrCheck = validateULR(editForm.ulr_no);
-  if (!ulrCheck.isValid) {
-    toast.error(ulrCheck.message);
-    return;
-  }
+    const ulrCheck = validateULR(editForm.ulr_no);
+    if (!ulrCheck.isValid) { toast.error(ulrCheck.message); return; }
+    
     setIsSubmitting(true);
     try {
       const payload: Record<string, any> = {};
       if (editForm.ulr_no) payload.ulr_no = editForm.ulr_no;
       if (editForm.field_of_parameter) payload.field_of_parameter = editForm.field_of_parameter;
-      if (editForm.recommended_cal_due_date)
-        payload.recommended_cal_due_date = editForm.recommended_cal_due_date;
+      if (editForm.recommended_cal_due_date) payload.recommended_cal_due_date = editForm.recommended_cal_due_date;
       if (editForm.item_status !== undefined) payload.item_status = editForm.item_status || "Satisfactory";
 
       await api.patch(ENDPOINTS.CERTIFICATES.UPDATE(selectedCertificate.certificate_id), payload);
 
-      setShowEditModal(false);
-      setSelectedCertificate(null);
-      await fetchSrfGroups();
-      toast.success("Certificate saved to Drafts");
-    } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed to update certificate.");
-    } finally {
-      setIsSubmitting(false);
-    }
+      setShowEditModal(false); setSelectedCertificate(null);
+      fetchData(); toast.success("Certificate saved to Drafts");
+    } catch (err: any) { alert(err.response?.data?.detail || "Failed to update certificate."); } finally { setIsSubmitting(false); }
   };
 
   const handleResubmitForApproval = async (cert: Certificate) => {
-    if (!editForm.ulr_no || !editForm.field_of_parameter || !editForm.recommended_cal_due_date) {
-      alert("Please fill all mandatory fields."); return;
-    }
+    if (!editForm.ulr_no || !editForm.field_of_parameter || !editForm.recommended_cal_due_date) { alert("Please fill all mandatory fields."); return; }
     if (!confirm("Resubmit for admin approval?")) return;
-
     setIsSubmitting(true);
     try {
       await api.patch(ENDPOINTS.CERTIFICATES.UPDATE(cert.certificate_id), { ...editForm });
       await api.post(ENDPOINTS.CERTIFICATES.RESUBMIT(cert.certificate_id));
-      setShowEditModal(false);
-      await fetchSrfGroups();
-      toast.success("Resubmitted for approval");
-    } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed");
-    } finally { setIsSubmitting(false); }
+      setShowEditModal(false); fetchData(); toast.success("Resubmitted for approval");
+    } catch (err: any) { alert(err.response?.data?.detail || "Failed"); } finally { setIsSubmitting(false); }
   };
 
-const fetchNextAvailableUlr = useCallback(async () => {
-  try {
-    // This matches the @router.get("/next-ulr") in the lab-scope router
-    const res = await api.get<{ next_ulr: string }>("/certificates/next-ulr"); 
-    return res.data.next_ulr;
-  } catch (err) {
-    console.error("Failed to fetch next ULR", err);
-    return "";
-  }
-}, []);
-  const handleSubmitForApproval = async (cert: Certificate) =>{
-  // --- ADD THIS CHECK HERE ---
-  const ulrCheck = validateULR(editForm.ulr_no);
-  if (!ulrCheck.isValid) {
-    toast.error(ulrCheck.message);
-    return;
-  }
-  // ---------------------------
-
-  if (!editForm.ulr_no || !editForm.field_of_parameter || !editForm.recommended_cal_due_date) {
-    alert("Please fill all mandatory fields."); return;
-  }
+  const handleSubmitForApproval = async (cert: Certificate) => {
+    const ulrCheck = validateULR(editForm.ulr_no);
+    if (!ulrCheck.isValid) { toast.error(ulrCheck.message); return; }
+    if (!editForm.ulr_no || !editForm.field_of_parameter || !editForm.recommended_cal_due_date) { alert("Please fill all mandatory fields."); return; }
     if (!confirm("Submit for admin approval? This locks editing.")) return;
 
     setIsSubmitting(true);
     try {
       await api.patch(ENDPOINTS.CERTIFICATES.UPDATE(cert.certificate_id), { ...editForm });
       await api.post(ENDPOINTS.CERTIFICATES.SUBMIT(cert.certificate_id));
-      setShowEditModal(false);
-      await fetchSrfGroups();
-      toast.success("Submitted for approval");
-    } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed");
-    } finally { setIsSubmitting(false); }
+      setShowEditModal(false); fetchData(); toast.success("Submitted for approval");
+    } catch (err: any) { alert(err.response?.data?.detail || "Failed"); } finally { setIsSubmitting(false); }
   };
 
-  // --- DOWNLOAD LOGIC ---
-
   const handleInitiateDownload = (cert: Certificate) => {
-    setDownloadCertData({ id: cert.certificate_id, no: cert.certificate_no });
-    setIncludeLetterhead(true); // Default to including header/footer
-    setShowDownloadModal(true);
+    setDownloadCertData({ id: cert.certificate_id, no: cert.certificate_no }); setIncludeLetterhead(true); setShowDownloadModal(true);
   };
 
   const handleConfirmDownload = async () => {
     if (!downloadCertData) return;
-
-    // Logic:
-    // Checkbox Checked (Include Letterhead) = true => noHeaderFooter = false
-    // Checkbox Unchecked (Clean) = false => noHeaderFooter = true
     const noHeaderFooter = !includeLetterhead;
-
     try {
       const url = `${ENDPOINTS.CERTIFICATES.DOWNLOAD_PDF(downloadCertData.id)}${noHeaderFooter ? "?no_header_footer=true" : ""}`;
       const res = await api.get(url, { responseType: "blob" });
       const blob = new Blob([res.data], { type: "application/pdf" });
       const contentDisp = res.headers?.["content-disposition"];
-      const filename =
-        contentDisp?.match(/filename="?([^";\n]+)"?/)?.[1]?.trim() ||
-        `certificate_${(downloadCertData.no || downloadCertData.id).toString().replace(/\//g, "-")}.pdf`;
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      link.click();
-      URL.revokeObjectURL(link.href);
-
-      setShowDownloadModal(false);
-      setDownloadCertData(null);
-    } catch (err: any) {
-      alert("Failed to download PDF.");
-    }
+      const filename = contentDisp?.match(/filename="?([^";\n]+)"?/)?.[1]?.trim() || `certificate_${(downloadCertData.no || downloadCertData.id).toString().replace(/\//g, "-")}.pdf`;
+      const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = filename; link.click(); URL.revokeObjectURL(link.href);
+      setShowDownloadModal(false); setDownloadCertData(null);
+    } catch (err: any) { alert("Failed to download PDF."); }
   };
 
   const handleOpenPreview = async (cert: Certificate) => {
-    setSelectedCertificate(cert);
-    setShowPreviewModal(true);
-    setPreviewLoading(true);
-    setPreviewData(null);
+    setSelectedCertificate(cert); setShowPreviewModal(true); setPreviewLoading(true); setPreviewData(null);
     try {
       const res = await api.get(ENDPOINTS.CERTIFICATES.PREVIEW(cert.certificate_id));
       setPreviewData(res.data);
-    } catch (err) {
-      console.error("Failed to load preview:", err);
-    } finally {
-      setPreviewLoading(false);
-    }
+    } catch (err) { } finally { setPreviewLoading(false); }
   };
 
-  // --- Bulk PDF download (Approved / Issued) ---
+  // Bulk PDF logic
   const isBulkDownloadTab = activeTab === "approved" || activeTab === "issued";
   const toggleBulkSelection = (certId: number) => {
-    setSelectedForBulkDownload((prev) => {
-      const next = new Set(prev);
-      if (next.has(certId)) next.delete(certId);
-      else next.add(certId);
-      return next;
-    });
+    setSelectedForBulkDownload((prev) => { const next = new Set(prev); if (next.has(certId)) next.delete(certId); else next.add(certId); return next; });
   };
+  const bulkCertIds = useMemo(() => {
+    if (!activeSrfId || (activeTab !== "approved" && activeTab !== "issued")) return [];
+    const group = srfGroups.find((g) => g.inward_id === activeSrfId);
+    if (!group) return [];
+    return group.equipments.filter((e) => getEquipmentCategory(e) === activeTab).map((e) => e.certificate?.certificate_id).filter((id): id is number => id != null);
+  }, [srfGroups, activeSrfId, activeTab]);
+
   const toggleBulkSelectAll = () => {
     if (bulkCertIds.length === 0) return;
     const allSelected = bulkCertIds.every((id) => selectedForBulkDownload.has(id));
-    if (allSelected) {
-      setSelectedForBulkDownload(new Set());
-    } else {
-      setSelectedForBulkDownload(new Set(bulkCertIds));
-    }
-  };
-  const handleBulkDownloadClick = () => {
-    if (selectedForBulkDownload.size === 0) {
-      toast.error("Select at least one certificate to download.");
-      return;
-    }
-    setBulkIncludeLetterhead(includeLetterhead);
-    setShowBulkDownloadModal(true);
+    if (allSelected) setSelectedForBulkDownload(new Set()); else setSelectedForBulkDownload(new Set(bulkCertIds));
   };
 
+  const handleBulkDownloadClick = () => {
+    if (selectedForBulkDownload.size === 0) { toast.error("Select at least one certificate to download."); return; }
+    setBulkIncludeLetterhead(includeLetterhead); setShowBulkDownloadModal(true);
+  };
 
   const handleConfirmBulkDownload = async () => {
     setBulkDownloading(true);
     try {
       const noHeaderFooter = !bulkIncludeLetterhead;
-      const res = await api.post(
-        ENDPOINTS.CERTIFICATES.DOWNLOAD_BULK_PDF,
-        { certificate_ids: Array.from(selectedForBulkDownload), no_header_footer: noHeaderFooter },
-        { responseType: "blob" }
-      );
+      const res = await api.post(ENDPOINTS.CERTIFICATES.DOWNLOAD_BULK_PDF, { certificate_ids: Array.from(selectedForBulkDownload), no_header_footer: noHeaderFooter }, { responseType: "blob" });
       const blob = new Blob([res.data], { type: "application/zip" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "certificates.zip";
-      link.click();
-      URL.revokeObjectURL(link.href);
-      setShowBulkDownloadModal(false);
-      toast.success(`Downloaded ${selectedForBulkDownload.size} certificate(s) as ZIP.`);
+      const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "certificates.zip"; link.click(); URL.revokeObjectURL(link.href);
+      setShowBulkDownloadModal(false); toast.success(`Downloaded ${selectedForBulkDownload.size} certificate(s) as ZIP.`);
     } catch (err: any) {
-      const msg = err.response?.data instanceof Blob ? "Bulk download failed." : err.response?.data?.detail || "Bulk download failed.";
-      toast.error(msg);
+      toast.error(err.response?.data instanceof Blob ? "Bulk download failed." : err.response?.data?.detail || "Bulk download failed.");
     } finally {
       setBulkDownloading(false);
     }
   };
 
-  // Certificate IDs for current tab (Approved/Issued) - used for "Select all" and bulk download
-  const bulkCertIds = useMemo(() => {
-    if (!activeSrfId || (activeTab !== "approved" && activeTab !== "issued")) return [];
-    const group = srfGroups.find((g) => g.inward_id === activeSrfId);
-    if (!group) return [];
-    return group.equipments
-      .filter((e) => getEquipmentCategory(e) === activeTab)
-      .map((e) => e.certificate?.certificate_id)
-      .filter((id): id is number => id != null);
-  }, [srfGroups, activeSrfId, activeTab]);
+  const validateULR = (ulr: string): { isValid: boolean; message: string } => {
+    if (!ulr) return { isValid: false, message: "ULR is required." };
+    const ulrRegex = /^[A-Z]{2}\d{4}\d{2}\d{1}\d{8}[F|P]$/;
+    if (ulr.length !== 18) return { isValid: false, message: "ULR must be exactly 18 characters." };
+    if (!ulrRegex.test(ulr)) return { isValid: false, message: "Invalid ULR format (NABL standard)." };
+    return { isValid: true, message: "" };
+  };
 
+  // --- Pagination Controls Component ---
+  const totalPages = Math.max(1, Math.ceil(serverTotalCount / limit));
+  const startRecord = serverTotalCount === 0 ? 0 : ((currentPage - 1) * limit) + 1;
+  const endRecord = Math.min(currentPage * limit, serverTotalCount);
 
-  // Inside CertificatesPage component...
-
-const [labConfig, setLabConfig] = useState<{ lab_unique_number: string } | null>(null);
-
-// 1. Fetch Lab Configuration (Accreditation Number)
-const fetchLabConfig = useCallback(async () => {
-  try {
-    // Adjust this endpoint based on your actual backend API for lab settings
-    const res = await api.get("/lab-scope/active"); 
-    setLabConfig(res.data);
-  } catch (err) {
-    console.error("Failed to fetch lab configuration", err);
-  }
-}, []);
-
-useEffect(() => {
-  fetchLabConfig();
-}, [fetchLabConfig]);
-const sanitizedLabPrefix = useMemo(() => {
-  if (!labConfig?.lab_unique_number) return "";
-  return labConfig.lab_unique_number.replace(/-/g, "").trim().toUpperCase();
-}, [labConfig]);
-// 2. ULR Validation Function (NABL Guidelines)
-const validateULR = (ulr: string): { isValid: boolean; message: string } => {
-  if (!ulr) return { isValid: false, message: "ULR is required." };
-  
-  // Regex Breakdown:
-  // ^[A-Z]{2}\d{4} : 6 chars Accreditation (e.g. CC4466)
-  // \d{2}          : 2 chars Year (e.g. 24)
-  // \d{1}          : 1 char Location (e.g. 0)
-  // \d{8}          : 8 chars Running Serial
-  // [F|P]$         : 1 char Scope (F=Full, P=Partial)
-  const ulrRegex = /^[A-Z]{2}\d{4}\d{2}\d{1}\d{8}[F|P]$/;
-  
-  if (ulr.length !== 18) {
-    return { isValid: false, message: "ULR must be exactly 18 characters." };
-  }
-  if (!ulrRegex.test(ulr)) {
-    return { isValid: false, message: "Invalid ULR format (NABL standard)." };
-  }
-  return { isValid: true, message: "" };
-};
-
-// 3. Helper to Auto-Generate (Template)
-  // --- Filtering ---
-
+  const PaginationControls = () => (
+    <div className="flex justify-center w-full sm:w-auto">
+        <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm">
+          <button
+            disabled={currentPage === 1 || isFetchingData}
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft size={16} /> Prev
+          </button>
+          <div className="px-4 py-1.5 text-sm font-bold text-gray-700 min-w-[100px] text-center">
+            Page {currentPage} <span className="text-gray-400 font-medium">of {totalPages}</span>
+          </div>
+          <button
+            disabled={currentPage === totalPages || isFetchingData || serverTotalCount === 0}
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
+    </div>
+  );
 
   // ==========================================
   // VIEW MODE: DETAIL
   // ==========================================
 
-  if (viewMode === "detail" && activeSrfId) {
+  if (activeSrfId) {
     if (isLoading) return <DetailSkeleton />;
 
     const selectedGroup = srfGroups.find(g => g.inward_id === activeSrfId);
@@ -1169,6 +984,7 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
                                   )}
                                 </>
                               )}
+                              
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1192,24 +1008,16 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
             </div>
           </div>
 
-          {/* --- MODALS IN DETAIL VIEW --- */}
-
-          {/* Download Options Modal */}
+          {/* --- DETAIL MODALS --- */}
           {showDownloadModal && downloadCertData && (
             <ModalPortal>
               <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-200">
                 <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 zoom-in-95 animate-in">
                   <h3 className="text-lg font-bold text-gray-900 mb-4">Download Certificate</h3>
                   <p className="text-sm text-gray-500 mb-6">Choose how you want to export certificate <strong>{downloadCertData.no}</strong>.</p>
-
                   <label className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors mb-6">
                     <div className="relative flex items-center">
-                      <input
-                        type="checkbox"
-                        className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                        checked={includeLetterhead}
-                        onChange={(e) => setIncludeLetterhead(e.target.checked)}
-                      />
+                      <input type="checkbox" className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" checked={includeLetterhead} onChange={(e) => setIncludeLetterhead(e.target.checked)} />
                     </div>
                     <div className="flex-1">
                       <span className="font-medium text-gray-900 block">Include Letterhead</span>
@@ -1217,7 +1025,6 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
                     </div>
                     <Printer className="h-5 w-5 text-gray-400" />
                   </label>
-
                   <div className="flex gap-3">
                     <button onClick={() => setShowDownloadModal(false)} className="flex-1 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Cancel</button>
                     <button onClick={handleConfirmDownload} className="flex-1 py-2.5 text-white bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
@@ -1229,7 +1036,6 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
             </ModalPortal>
           )}
 
-          {/* Bulk Download (ZIP) Options Modal */}
           {showBulkDownloadModal && (
             <ModalPortal>
               <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-200">
@@ -1238,15 +1044,9 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
                   <p className="text-sm text-gray-500 mb-6">
                     Download <strong>{selectedForBulkDownload.size}</strong> certificate(s) as a ZIP file. Choose export option.
                   </p>
-
                   <label className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors mb-6">
                     <div className="relative flex items-center">
-                      <input
-                        type="checkbox"
-                        className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                        checked={bulkIncludeLetterhead}
-                        onChange={(e) => setBulkIncludeLetterhead(e.target.checked)}
-                      />
+                      <input type="checkbox" className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" checked={bulkIncludeLetterhead} onChange={(e) => setBulkIncludeLetterhead(e.target.checked)} />
                     </div>
                     <div className="flex-1">
                       <span className="font-medium text-gray-900 block">Include Letterhead</span>
@@ -1254,7 +1054,6 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
                     </div>
                     <Printer className="h-5 w-5 text-gray-400" />
                   </label>
-
                   <div className="flex gap-3">
                     <button onClick={() => setShowDownloadModal(false)} className="flex-1 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Cancel</button>
                     <button onClick={handleConfirmBulkDownload} disabled={bulkDownloading} className="flex-1 py-2.5 text-white bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
@@ -1266,7 +1065,6 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
             </ModalPortal>
           )}
 
-          {/* Edit Modal */}
           {showEditModal && selectedCertificate && (
             <ModalPortal>
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -1281,43 +1079,17 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
                         <strong>Admin Comment:</strong> {selectedCertificate.admin_rework_comment}
                       </div>
                     )}
-
                     <div>
-  <label className="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
-    <span>ULR No *</span>
-    {isFetchingUlr && <span className="text-[10px] text-indigo-600 animate-pulse font-bold">ASSIGNING...</span>}
-  </label>
-  <div className="relative">
-    <input 
-      type="text" 
-      value={editForm.ulr_no} 
-      disabled={isFetchingUlr}
-      // Force sanitize on type (strip hyphens)
-      onChange={(e) => setEditForm((f) => ({ ...f, ulr_no: e.target.value.replace(/-/g, "").toUpperCase().trim() }))} 
-      className={`w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-2 outline-none transition-all ${
-        isFetchingUlr ? "bg-gray-50 text-gray-400" : ""
-      } ${
-        editForm.ulr_no && !validateULR(editForm.ulr_no).isValid 
-          ? "border-red-500 focus:ring-red-200" 
-          : "border-gray-300 focus:ring-indigo-500"
-      }`} 
-      placeholder="Fetching next available ULR..." 
-      maxLength={18}
-    />
-    {editForm.ulr_no && validateULR(editForm.ulr_no).isValid && (
-      <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-emerald-500" />
-    )}
-  </div>
-  
-  {editForm.ulr_no && !validateULR(editForm.ulr_no).isValid && (
-    <p className="mt-1 text-[11px] text-red-600 flex items-center gap-1 font-medium">
-       <AlertCircle className="h-3 w-3" /> {validateULR(editForm.ulr_no).message}
-    </p>
-  )}
-  
-  {/* Helper text showing the clean prefix being used */}
-
-</div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+                        <span>ULR No *</span>
+                        {isFetchingUlr && <span className="text-[10px] text-indigo-600 animate-pulse font-bold">ASSIGNING...</span>}
+                      </label>
+                      <div className="relative">
+                        <input type="text" value={editForm.ulr_no} disabled={isFetchingUlr} onChange={(e) => setEditForm((f) => ({ ...f, ulr_no: e.target.value.replace(/-/g, "").toUpperCase().trim() }))} className={`w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-2 outline-none transition-all ${isFetchingUlr ? "bg-gray-50 text-gray-400" : ""} ${editForm.ulr_no && !validateULR(editForm.ulr_no).isValid ? "border-red-500 focus:ring-red-200" : "border-gray-300 focus:ring-indigo-500"}`} placeholder="Fetching next available ULR..." maxLength={18} />
+                        {editForm.ulr_no && validateULR(editForm.ulr_no).isValid && <CheckCircle2 className="absolute right-3 top-2.5 h-4 w-4 text-emerald-500" />}
+                      </div>
+                      {editForm.ulr_no && !validateULR(editForm.ulr_no).isValid && <p className="mt-1 text-[11px] text-red-600 flex items-center gap-1 font-medium"><AlertCircle className="h-3 w-3" /> {validateULR(editForm.ulr_no).message}</p>}
+                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Field of Parameter *</label>
                       <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Torque" />
@@ -1330,7 +1102,6 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Item Status</label>
                       <input type="text" value={editForm.item_status} onChange={(e) => setEditForm((f) => ({ ...f, item_status: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
                     </div>
-
                     <div className="flex gap-2 pt-4">
                       <button onClick={handleSaveEdit} disabled={isSubmitting} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex justify-center items-center">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Draft"}</button>
                       {(selectedCertificate.status === "DRAFT" || selectedCertificate.status === "REWORK") && (
@@ -1343,54 +1114,33 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
             </ModalPortal>
           )}
 
-          {/* Preview Modal */}
           {showPreviewModal && selectedCertificate && (
             <ModalPortal>
               <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/50 p-4 pt-8 overflow-y-auto">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[calc(100vh-4rem)] overflow-hidden flex flex-col flex-shrink-0 my-4">
                   <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50">
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setShowPreviewModal(false);
-                          setSelectedCertificate(null);
-                          setPreviewData(null);
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors font-medium"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                        Back
+                      <button onClick={() => { setShowPreviewModal(false); setSelectedCertificate(null); setPreviewData(null); }} className="inline-flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors font-medium">
+                        <ChevronLeft className="h-5 w-5" /> Back
                       </button>
                     </div>
                     <h3 className="text-lg font-bold text-gray-900">Certificate Preview</h3>
                     <div className="flex items-center gap-2">
                       {(selectedCertificate.status === "DRAFT" || selectedCertificate.status === "REWORK") && (
-                        <button
-                          onClick={handleProceedToEditFromPreview}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm"
-                        >
+                        <button onClick={handleProceedToEditFromPreview} className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm">
                           <Edit className="h-4 w-4" /> Continue to Edit
                         </button>
                       )}
-                      <button
-                        onClick={() => handleInitiateDownload(selectedCertificate)}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm"
-                      >
+                      <button onClick={() => handleInitiateDownload(selectedCertificate)} className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm">
                         <Download className="h-4 w-4" /> Download PDF
                       </button>
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto bg-slate-100 p-4 min-h-0">
                     {previewLoading ? (
-                      <div className="flex flex-col items-center justify-center py-24">
-                        <Loader2 className="h-12 w-12 animate-spin text-purple-600 mb-4" />
-                        <p className="text-gray-600">Loading certificate...</p>
-                      </div>
+                      <div className="flex flex-col items-center justify-center py-24"><Loader2 className="h-12 w-12 animate-spin text-purple-600 mb-4" /><p className="text-gray-600">Loading certificate...</p></div>
                     ) : previewData?.template_data ? (
-                      <CustomerCertificatePrintView
-                        data={previewData.template_data}
-                      // No onDownload prop here - removing the inner button
-                      />
+                      <CustomerCertificatePrintView data={previewData.template_data} />
                     ) : (
                       <div className="text-center py-24 text-gray-500">Failed to load preview.</div>
                     )}
@@ -1400,161 +1150,215 @@ const validateULR = (ulr: string): { isValid: boolean; message: string } => {
             </ModalPortal>
           )}
         </div>
-      </div>);
-  }
-return (
-  <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-    <div className="max-w-6xl mx-auto space-y-6">
-
-      {/* Header Card */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-            <Award className="h-8 w-8" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Certificates</h2>
-            <p className="text-gray-500 text-sm mt-1">
-              Generate and manage calibration certificates
-            </p>
-          </div>
-        </div>
-        <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm" >
-          <ChevronLeft size={16} /> <span>Back to Dashboard</span>
-        </button>
       </div>
+    );
+  }
 
-      {/* Main Content Card */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
-        {/* Toolbar */}
-       {/* Toolbar */}
-<div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
-  <div className="relative max-w-md w-full">
-    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-      <Search className="h-4 w-4 text-gray-400" />
-    </div>
-    <input 
-      type="text" 
-      placeholder={listMode === 'certificates' ? "Search Certificates..." : "Search SRFs for Inspection..."} 
-      value={searchTerm} 
-      onChange={(e) => setSearchTerm(e.target.value)} 
-      className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow bg-white" 
-    />
-  </div>
-  
-  <div className="flex items-center gap-2">
-    <button 
-      onClick={() => setListMode(listMode === 'certificates' ? 'inspection' : 'certificates')} 
-      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-sm transition-all border ${
-        listMode === 'inspection' 
-          ? "bg-emerald-600 text-white border-emerald-700" 
-          : "bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50"
-      }`}
-    >
-      <ClipboardCheck className="h-4 w-4" />
-      {listMode === 'inspection' ? "Show SRFs for Certificates" : "Final Inspection List"}
-    </button>
-    <button onClick={handleOpenGenerateModal} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 shadow-sm transition-colors" >
-      <Plus className="h-4 w-4" /> Generate Certificate
-    </button>
-  </div>
-</div>
+  // ==========================================
+  // VIEW MODE: LIST (Certificates or Final Inspection)
+  // ==========================================
 
-        {error && (
-          <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" /> {error}
-          </div>
-        )}
-
-        <div className="p-4 sm:p-6">
-          {(isLoading || isAllInwardsLoading) ? (
-            <CertificateListSkeleton />
-          ) : filteredDisplayList.length === 0 ? (
-            <div className="text-center py-16">
-              <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
-                <FileText className="h-8 w-8 text-gray-300" />
-              </div>
-              <h3 className="text-lg font-medium text-gray-900">No SRFs found</h3>
-              <p className="text-gray-500 mt-1 max-w-sm mx-auto">
-                {listMode === 'inspection' ? "No records in the database." : "Calibrate equipment first to see them appear here."}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-{filteredDisplayList.map((item: any) => {
-  const isInspection = listMode === 'inspection';
-  
-  // For certificate mode data structure
-  const total = item.equipments?.length || 0;
-  const issued = item.equipments?.filter((e: any) => e.certificate?.status === "ISSUED").length || 0;
-  
-  // Logic for what happens when the row is clicked
-  const handleRowClick = () => {
-    if (isInspection) {
-      navigate(`/engineer/final-inspection/${item.inward_id}`);
-    } else {
-      handleOpenSrf(item.inward_id);
-    }
-  };
+  const displayList = listMode === "inspection" ? allInwards : srfGroups;
 
   return (
-    <div
-      key={item.inward_id}
-      className={`flex items-center justify-between p-5 border rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer ${
-        isInspection 
-          ? "bg-emerald-50/20 border-emerald-100 hover:border-emerald-300" 
-          : "bg-gray-50 border-gray-200 hover:bg-indigo-50 hover:border-indigo-300"
-      }`}
-      onClick={handleRowClick}
-    >
-      <div className="flex items-start gap-4">
-        <div className="mt-1">
-          <div className={`p-2 rounded-full ${
-            isInspection ? "bg-emerald-100 text-emerald-600" : "bg-indigo-100 text-indigo-600"
-          }`}>
-            <Package className="h-5 w-5" />
-          </div>
-        </div>
-        <div>
-          <div className="flex items-center gap-3">
-            <p className="font-semibold text-lg text-gray-800">
-              SRF No: {item.srf_no}
-            </p>
-          </div>
-          <p className="text-sm text-gray-600 mt-1">
-            Customer: <span className="font-medium text-gray-900">{item.customer_details || item.customer_name || "N/A"}</span>
-            {!isInspection && ` • ${total} Equipments • ${issued} Issued`}
-          </p>
-        </div>
-      </div>
+    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto space-y-6">
 
-      <div className="flex items-center gap-3">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate(`/engineer/final-inspection/${item.inward_id}`);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition-all shadow-sm"
-        >
-          <ClipboardCheck className="h-4 w-4" />
-          Final Inspection
-        </button>
-        {!isInspection && (
-           <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
-        )}
-      </div>
-    </div>
-  );
-})}
+        {/* Header Card */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shadow-sm">
+              <Award className="h-8 w-8" />
             </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Certificates</h2>
+              <p className="text-gray-500 text-sm mt-1">
+                Generate and manage calibration certificates
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm" >
+            <ArrowLeft size={16} /> <span>Back to Dashboard</span>
+          </button>
+        </div>
+
+        {/* Main Content Card */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative z-0">
+          
+          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 z-10 relative">
+            <div className="relative max-w-md w-full">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-gray-400" />
+              </div>
+              <input 
+                type="text" 
+                placeholder={listMode === 'certificates' ? "Search Certificates..." : "Search SRFs for Inspection..."} 
+                value={searchTerm} 
+                onChange={(e) => setSearchTerm(e.target.value)} 
+                className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow bg-white outline-none" 
+              />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => { setListMode(listMode === 'certificates' ? 'inspection' : 'certificates'); setCurrentPage(1); }} 
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg shadow-sm transition-all border ${
+                  listMode === 'inspection' 
+                    ? "bg-emerald-600 text-white border-emerald-700" 
+                    : "bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                }`}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+                {listMode === 'inspection' ? "Show HTW Certificates" : "Final Inspection List"}
+              </button>
+              <button onClick={handleOpenGenerateModal} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 shadow-sm transition-colors" >
+                <Plus className="h-4 w-4" /> Generate Certificate
+              </button>
+            </div>
+          </div>
+
+          {/* TOP PAGINATION CONTROLS */}
+          <div className="px-6 py-4 border-b border-gray-100 flex flex-col md:flex-row items-center justify-between gap-4 bg-white z-10 relative">
+             <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                 <div className="flex items-center gap-2">
+                     <span className="text-xs text-gray-500 font-bold uppercase tracking-wider hidden sm:inline">Records:</span>
+                     <select 
+                          value={limit} 
+                          onChange={(e) => { setLimit(Number(e.target.value)); setCurrentPage(1); }}
+                          className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white cursor-pointer font-bold text-gray-700 shadow-sm outline-none"
+                      >
+                          <option value={10}>10</option>
+                          <option value={20}>20</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                     </select>
+                 </div>
+             </div>
+             <div className="hidden sm:block">
+               <PaginationControls />
+             </div>
+          </div>
+
+          {error && (
+            <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2 z-10 relative">
+              <AlertCircle className="h-4 w-4" /> {error}
+            </div>
+          )}
+
+          <div className="relative min-h-[400px] bg-white p-4 sm:p-6 flex-1">
+            {showLoaderOverlay && (
+               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/50 backdrop-blur-[2px] transition-all duration-300">
+                  <Loader2 className="w-10 h-10 animate-spin text-indigo-600 shadow-sm rounded-full mb-3" />
+                  <p className="text-sm font-bold text-indigo-800 bg-white/90 px-4 py-1.5 rounded-full shadow-sm border border-indigo-100">
+                    Loading Data...
+                  </p>
+               </div>
+            )}
+
+            {isLoading ? (
+              <CertificateListSkeleton />
+            ) : displayList.length === 0 && !isFetchingData ? (
+              <div className="text-center py-16">
+                <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
+                  <FileText className="h-8 w-8 text-gray-300" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900">No records found</h3>
+                <p className="text-gray-500 mt-1 max-w-sm mx-auto">
+                  {listMode === 'inspection' ? "No Inward records in the database." : "Calibrate HTW equipment first to see them appear here."}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {displayList.map((item: any) => {
+                  const isInspection = listMode === 'inspection';
+                  const total = item.equipments?.length || 0;
+                  const issued = item.equipments?.filter((e: any) => e.certificate?.status === "ISSUED").length || 0;
+                  
+                  const handleRowClick = () => {
+                    if (isInspection) navigate(`/engineer/final-inspection/${item.inward_id}`);
+                    else handleOpenSrf(item.inward_id);
+                  };
+
+                  return (
+                    <div
+                      key={item.inward_id}
+                      className={`flex items-center justify-between p-5 border rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer ${
+                        isInspection ? "bg-emerald-50/20 border-emerald-100 hover:border-emerald-300" : "bg-white border-gray-200 hover:bg-indigo-50 hover:border-indigo-300"
+                      }`}
+                      onClick={handleRowClick}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="mt-1">
+                          <div className={`p-2 rounded-full ${
+                            isInspection ? "bg-emerald-100 text-emerald-600" : "bg-indigo-100 text-indigo-600"
+                          }`}>
+                            <Package className="h-5 w-5" />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <p className={`font-semibold text-lg ${isInspection ? 'text-gray-900 group-hover:text-emerald-800' : 'text-gray-800 group-hover:text-indigo-700'} transition-colors`}>
+                              SRF No: {item.srf_no}
+                            </p>
+                          </div>
+                          <p className="text-sm text-gray-500 mt-1 font-medium flex items-center flex-wrap gap-y-2">
+                            <span className="text-gray-700">Customer: {item.customer_details || item.customer_name || "N/A"}</span>
+                            
+                            {/* NEW: Displays if Final Report is already sent for the un-filtered list */}
+                          
+
+                            {!isInspection && (
+                              <>
+                                <span className="mx-2 text-gray-300">|</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded-md text-[11px] font-bold tracking-wide border bg-gray-50 text-gray-600 border-gray-200">
+                                      {total} Equipments
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded-md text-[11px] font-bold tracking-wide border bg-green-50 text-green-600 border-green-200">
+                                      {issued} Issued
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigate(`/engineer/final-inspection/${item.inward_id}`); }}
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition-all shadow-sm"
+                        >
+                          <ClipboardCheck className="h-4 w-4" />
+                          Final Inspection
+                        </button>
+                        
+                        {!isInspection && (
+                           <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-indigo-600 transform group-hover:translate-x-1 transition-all flex-shrink-0 ml-2" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* BOTTOM PAGINATION CONTROLS */}
+          {serverTotalCount > 0 && (
+             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row items-center justify-between z-10 relative shrink-0 gap-4">
+                <span className="text-sm text-gray-600 font-medium">
+                  Showing <span className="font-bold">{startRecord}</span> to{' '}
+                  <span className="font-bold">{endRecord}</span> of{' '}
+                  <span className="font-bold">{serverTotalCount}</span> records
+                </span>
+                <PaginationControls />
+             </div>
           )}
         </div>
       </div>
-    </div>
 
       {/* --- MODALS IN LIST VIEW --- */}
-
-      {/* Generate Modal (Global) */}
       {showGenerateModal && (
         <ModalPortal>
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -1579,7 +1383,6 @@ return (
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {/* Simplified list for modal */}
                     {jobs.map(job => (
                       <div key={job.job_id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
                         <div>
@@ -1593,143 +1396,6 @@ return (
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </ModalPortal>
-      )}
-
-      {/* Download Modal (List View Context) */}
-      {showDownloadModal && downloadCertData && (
-        <ModalPortal>
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 zoom-in-95 animate-in">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Download Certificate</h3>
-              <p className="text-sm text-gray-500 mb-6">Choose how you want to export certificate <strong>{downloadCertData.no}</strong>.</p>
-
-              <label className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors mb-6">
-                <div className="relative flex items-center">
-                  <input
-                    type="checkbox"
-                    className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                    checked={includeLetterhead}
-                    onChange={(e) => setIncludeLetterhead(e.target.checked)}
-                  />
-                </div>
-                <div className="flex-1">
-                  <span className="font-medium text-gray-900 block">Include Letterhead</span>
-                  <span className="text-xs text-gray-500">Header logo and footer details</span>
-                </div>
-                <Printer className="h-5 w-5 text-gray-400" />
-              </label>
-
-              <div className="flex gap-3">
-                <button onClick={() => setShowDownloadModal(false)} className="flex-1 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Cancel</button>
-                <button onClick={handleConfirmDownload} className="flex-1 py-2.5 text-white bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
-                  <Download className="h-4 w-4" /> Download
-                </button>
-              </div>
-            </div>
-          </div>
-        </ModalPortal>
-      )}
-
-      {/* Edit Modal (List Context) */}
-      {showEditModal && selectedCertificate && (
-        <ModalPortal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full animate-in fade-in zoom-in-95 duration-200">
-              <div className="flex items-center justify-between p-6 border-b">
-                <h2 className="text-xl font-bold text-gray-900">Edit Certificate</h2>
-                <button onClick={() => setShowEditModal(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="h-5 w-5" /></button>
-              </div>
-              <div className="p-6 space-y-4">
-                {selectedCertificate.status === "REWORK" && selectedCertificate.admin_rework_comment && (
-                  <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
-                    <strong>Admin Comment:</strong> {selectedCertificate.admin_rework_comment}
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ULR No *</label>
-                  <input type="text" value={editForm.ulr_no} onChange={(e) => setEditForm((f) => ({ ...f, ulr_no: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Enter ULR No" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Field of Parameter *</label>
-                  <input type="text" value={editForm.field_of_parameter} onChange={(e) => setEditForm((f) => ({ ...f, field_of_parameter: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Torque" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Recommended Due Date *</label>
-                  <input type="date" value={editForm.recommended_cal_due_date} onChange={(e) => setEditForm((f) => ({ ...f, recommended_cal_due_date: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Item Status</label>
-                  <input type="text" value={editForm.item_status} onChange={(e) => setEditForm((f) => ({ ...f, item_status: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
-                </div>
-
-                <div className="flex gap-2 pt-4">
-                  <button onClick={handleSaveEdit} disabled={isSubmitting} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex justify-center items-center">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Draft"}</button>
-                  {(selectedCertificate.status === "DRAFT" || selectedCertificate.status === "REWORK") && (
-                    <button onClick={() => selectedCertificate.status === "REWORK" ? handleResubmitForApproval(selectedCertificate) : handleSubmitForApproval(selectedCertificate)} disabled={isSubmitting} className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex justify-center items-center"><Send className="h-4 w-4 mr-1" /> Submit</button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </ModalPortal>
-      )}
-
-      {/* Preview Modal (List Context) */}
-      {showPreviewModal && selectedCertificate && (
-        <ModalPortal>
-          <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/50 p-4 pt-8 overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[calc(100vh-4rem)] overflow-hidden flex flex-col flex-shrink-0 my-4">
-              <div className="flex-shrink-0 flex items-center justify-between p-4 border-b bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setShowPreviewModal(false);
-                      setSelectedCertificate(null);
-                      setPreviewData(null);
-                    }}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors font-medium"
-                  >
-                    <ChevronLeft className="h-5 w-5" />
-                    Back
-                  </button>
-                </div>
-                <h3 className="text-lg font-bold text-gray-900">Certificate Preview</h3>
-                <div className="flex items-center gap-2">
-                  {(selectedCertificate.status === "DRAFT" || selectedCertificate.status === "REWORK") && (
-                    <button
-                      onClick={handleProceedToEditFromPreview}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm"
-                    >
-                      <Edit className="h-4 w-4" /> Continue to Edit
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleInitiateDownload(selectedCertificate)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm"
-                  >
-                    <Download className="h-4 w-4" /> Download PDF
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto bg-slate-100 p-4 min-h-0">
-                {previewLoading ? (
-                  <div className="flex flex-col items-center justify-center py-24">
-                    <Loader2 className="h-12 w-12 animate-spin text-purple-600 mb-4" />
-                    <p className="text-gray-600">Loading certificate...</p>
-                  </div>
-                ) : previewData?.template_data ? (
-                  <CustomerCertificatePrintView
-                    data={previewData.template_data}
-                  // No onDownload here
-                  />
-                ) : (
-                  <div className="text-center py-24 text-gray-500">Failed to load preview.</div>
                 )}
               </div>
             </div>

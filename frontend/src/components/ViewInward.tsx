@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ENDPOINTS, BACKEND_ROOT_URL } from "../api/config";
 import { InwardDetail, ViewInwardEquipment } from "../types/inward";
@@ -68,6 +68,20 @@ export const ViewInward: React.FC = () => {
     navigate(`/engineer/edit-inward/${id}`);
   };
 
+  // ✅ NEW: Sort equipments by NEPL ID descending (Highest number first)
+  const sortedEquipments = useMemo(() => {
+    if (!inward?.equipments) return [];
+    return [...inward.equipments].sort((a, b) => {
+      // Assuming NEPL ID format is something like "SRF-123-1", "SRF-123-2"
+      // We extract the last number to sort mathematically
+      const aParts = a.nepl_id.split('-');
+      const bParts = b.nepl_id.split('-');
+      const numA = parseInt(aParts[aParts.length - 1]) || 0;
+      const numB = parseInt(bParts[bParts.length - 1]) || 0;
+      return numB - numA; // Descending order
+    });
+  }, [inward]);
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -129,7 +143,7 @@ export const ViewInward: React.FC = () => {
             </div>
           </div>
 
-          {/* --- Info Grid with Added Customer DC Section --- */}
+          {/* --- Info Grid --- */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 border-t pt-6">
             <div className="flex items-center gap-3">
               <Building className="h-8 w-8 text-gray-400" />
@@ -147,7 +161,6 @@ export const ViewInward: React.FC = () => {
               </div>
             </div>
 
-            {/* New DC Number Section */}
             <div className="flex items-center gap-3">
               <FileText className="h-8 w-8 text-gray-400" />
               <div>
@@ -192,9 +205,10 @@ export const ViewInward: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {inward.equipments.map((eq: ViewInwardEquipment) => (
+                {/* ✅ Mapped using the NEW sortedEquipments array */}
+                {sortedEquipments.map((eq: ViewInwardEquipment) => (
                   <tr key={eq.inward_eqp_id} className="hover:bg-gray-50">
-                    <td className="p-4 font-mono text-blue-600">{eq.nepl_id}</td>
+                    <td className="p-4 font-mono text-blue-600 font-bold">{eq.nepl_id}</td>
                     <td className="p-4 text-gray-800">{eq.material_description}</td>
                     <td className="p-4 text-gray-600">{eq.make} / {eq.model}</td>
                     <td className="p-4 text-gray-500">{eq.serial_no || 'N/A'}</td>
@@ -234,7 +248,7 @@ export const ViewInward: React.FC = () => {
       
       {showStickerSheet && (
         <StickerSheet 
-          equipmentList={inward.equipments} 
+          equipmentList={sortedEquipments} 
           inwardStatus={inward.status}
           onClose={() => setShowStickerSheet(false)} 
         />
@@ -272,3 +286,5 @@ export const ViewInward: React.FC = () => {
     </div>
   );
 };
+
+export default ViewInward;

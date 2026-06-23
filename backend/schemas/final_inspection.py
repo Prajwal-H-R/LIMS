@@ -50,3 +50,7 @@ class FinalReportSendRequest(BaseModel):
     customer_name: str
     srf_no: str
     # Add other fields if you want to update them during send
+
+class FinalInspectionPage(BaseModel):
+    total_count: int
+    items: List[FinalInspectionResponse]

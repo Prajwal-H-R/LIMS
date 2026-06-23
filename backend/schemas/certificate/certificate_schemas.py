@@ -115,3 +115,12 @@ class CertificateRenderData(BaseModel):
     field_of_parameter: Optional[str] = None
     authorised_signatory: Optional[str] = None
     template_data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PaginatedSrfGroupResponse(BaseModel):
+    total_count: int
+    items: List[dict]  # Replace dict with your SrfGroup schema
+
+class PaginatedCertificateResponse(BaseModel):
+    total_count: int
+    items: List[CertificateWithContext]

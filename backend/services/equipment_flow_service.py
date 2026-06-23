@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional, Tuple, Any
-from sqlalchemy import func, case
+from sqlalchemy import func, case, exists, and_, or_
 
 from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
@@ -187,31 +187,69 @@ def get_system_driven_job_details(db: Session, inward_id: int) -> Optional[Inwar
     return inward_record
 
 
-def get_manual_calibration_srf_groups(db: Session) -> List[ManualSrfGroup]:
-    system_driven_types_subquery = (
-        db.query(func.lower(func.trim(EquipmentFlowConfig.equipment_type)))
-        .filter(EquipmentFlowConfig.is_active == True)
-        .scalar_subquery()
+def get_manual_calibration_srf_groups(db: Session, skip: int, limit: int, search: str = "None"):
+    # 1. High-Performance Exists Subquery
+    is_system_driven = exists().where(
+        and_(
+            EquipmentFlowConfig.is_active == True,
+            func.lower(func.trim(EquipmentFlowConfig.equipment_type)) == func.lower(func.trim(InwardEquipment.material_description))
+        )
     )
-    results = (
+
+    # 2. Base Query
+    base_query = (
         db.query(
             Inward.srf_no,
             Inward.customer_details.label("customer_name"),
+            Inward.customer_dc_no.label("customer_dc_no"),
             Inward.material_inward_date.label("received_date"),
             func.count(InwardEquipment.inward_eqp_id).label("equipment_count")
         )
         .join(InwardEquipment, Inward.inward_id == InwardEquipment.inward_id)
-        .filter(
-            func.lower(func.trim(InwardEquipment.material_description)).notin_(
-                system_driven_types_subquery
+        .filter(~is_system_driven)
+        .group_by(Inward.inward_id)
+    )
+
+    # 3. Apply Search Filter (if provided from frontend)
+    if search:
+        search_term = f"%{search}%"
+        base_query = base_query.filter(
+            or_(
+                Inward.srf_no.ilike(search_term),
+                Inward.customer_details.ilike(search_term),
+                Inward.customer_dc_no.ilike(search_term)
             )
         )
-        .group_by(Inward.inward_id)
+
+    # 4. Get Total Count (For the UI: Page 1 of X)
+    # Using a subquery for counting grouped records is the most accurate method
+    subq = base_query.subquery()
+    total_count = db.query(func.count()).select_from(subq).scalar() or 0
+
+    # 5. Get Paginated Data (Only fetches 10, 50, or 100 rows!)
+    results = (
+        base_query
         .order_by(Inward.material_inward_date.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
-    return results
 
+    # 6. Format the response
+    groups = [
+        {
+            "srf_no": r.srf_no,
+            "customer_name": r.customer_name,
+            "received_date": r.received_date,
+            "equipment_count": r.equipment_count
+        }
+        for r in results
+    ]
+
+    return {
+        "total_count": total_count,
+        "groups": groups
+    }
 
 def get_manual_equipment_for_srf(db: Session, srf_no: str) -> List[ManualEquipmentDetail]:
     system_driven_types_subquery = (

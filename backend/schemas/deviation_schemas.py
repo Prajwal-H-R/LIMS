@@ -96,3 +96,19 @@ class DeviationDetailOut(BaseModel):
     oot_steps: List[OOTStepOut] = []
     attachments: List[DeviationAttachmentOut] = []
     hide_customer_visibility: Optional[bool] = False
+
+
+class PaginatedDeviationItemOut(BaseModel):
+    deviation_id: int
+    inward_eqp_id: int
+    nepl_id: str
+    srf_no: str
+    customer_name: str
+    deviation_type: str
+    report_date: Optional[str]
+    hide_customer_visibility: bool
+    status: str
+
+class PaginatedDeviationsResponse(BaseModel):
+    total: int
+    items: List[PaginatedDeviationItemOut]

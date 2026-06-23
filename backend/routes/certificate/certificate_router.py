@@ -24,6 +24,8 @@ from backend.schemas.certificate.certificate_schemas import (
     CertificateQrBulkGenerateRequest,
     CertificateQrGenerateResponse,
     QrScanCertificateView,
+    PaginatedSrfGroupResponse,
+    PaginatedCertificateResponse
 )
 from backend.services.certificate import certificate_service as cert_service
 from backend.services.certificate import certificate_pdf_service as pdf_service
@@ -283,54 +285,89 @@ def view_certificate_page_by_id_for_qr(
     return HTMLResponse(content=html)
 
 
-@router.get("/srf-groups")
+@router.get("/srf-groups", response_model=PaginatedSrfGroupResponse)
 def list_srf_groups_with_eligible_equipment(
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    inward_id: Optional[int] = None,
+    status: Optional[str] = Query(None),       # NEW: Filters by Tab
+    start_date: Optional[str] = Query(None),   # NEW: Date filter
+    end_date: Optional[str] = Query(None),     # NEW: Date filter
+    is_htw: Optional[bool] = Query(None), 
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(check_staff_role),
 ):
-    """
-    List SRFs with all equipments eligible for certificate (equipments with calibration jobs).
-    When an SRF is expanded, shows all such equipments - with Generate button if no cert, or cert UI if exists.
-    """
-    return cert_service.list_srf_groups_with_eligible_equipment(db)
+    if limit > 1000: limit = 1000
 
+    # Ensure your cert_service is updated to accept these parameters!
+    # Example Implementation for cert_service.list_srf_groups_with_eligible_equipment:
+    """
+    conditions = []
+    if inward_id:
+        conditions.append(Inward.inward_id == inward_id)
+    if search:
+        search_term = f"%{search}%"
+        conditions.append(or_(
+            Inward.srf_no.ilike(search_term),
+            Inward.customer_details.ilike(search_term)
+        ))
 
-@router.get("/", response_model=List[CertificateWithContext])
+    # Fast Count
+    count_stmt = select(func.count(Inward.inward_id)).where(*conditions)
+    total_count = db.scalar(count_stmt) or 0
+
+    # Paginated Fetch with Eager Loading
+    stmt = select(Inward).options(selectinload(Inward.equipments)).where(*conditions)
+    stmt = stmt.order_by(Inward.inward_id.desc()).offset(skip).limit(limit)
+    inwards = db.scalars(stmt).all()
+    """
+    
+    return cert_service.list_srf_groups_with_eligible_equipment(
+        db, 
+        skip=skip, 
+        limit=limit, 
+        search=search, 
+        inward_id=inward_id,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        is_htw=is_htw
+    )
+
+# --- 2. Optimized Certificates Endpoint ---
+@router.get("/", response_model=PaginatedCertificateResponse)
 def list_certificates(
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
     job_id: Optional[int] = Query(None),
     inward_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_current_user),
 ):
-    """
-    List certificates. 
-    - If Customer: Only see Issued + External certificates.
-    - If Staff/Engineer: See all certificates (including External).
-    - If Admin: See system certificates only (Hide External).
-    """
+    if limit > 1000: limit = 1000
+    
     customer_id = None
     exclude_external = False
-    
     user_role = current_user.role.lower()
 
-    # logic for Customer
     if user_role == "customer":
         customer_id = current_user.customer_id
         status = "ISSUED"
-        exclude_external = False # Customers SHOULD see manual uploads
-        
-    # logic for Admin (Requirement: hide in admin portal)
+        exclude_external = False 
     elif user_role == "admin":
-        exclude_external = True # Admin SHUOLD NOT see manual uploads
-        
-    # logic for Engineer/Staff
+        exclude_external = True 
     else:
-        exclude_external = False # Engineers SHOULD see manual uploads
+        exclude_external = False
 
-    # Call the service with the new flag
+    # Update your service to accept skip, limit, search and return a dict {total_count, items}
     return cert_service.list_certificates_with_external(
         db, 
+        skip=skip,
+        limit=limit,
+        search=search,
         customer_id=customer_id, 
         status=status,
         exclude_external=exclude_external

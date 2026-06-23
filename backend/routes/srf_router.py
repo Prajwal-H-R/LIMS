@@ -3,12 +3,20 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import literal, cast, String, Boolean, DateTime, union_all, select, func, or_, and_
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.sql.expression import exists
+from datetime import date, datetime
+
 from typing import List, Optional
  
 # Import schemas, models, and dependencies
-from ..schemas.srf_schemas import Srf, SrfCreate, SrfDetailUpdate, SrfSummary, InwardListSummary
+# Make sure SrfPaginatedResponse and SrfFullPaginatedResponse are added to your schemas!
+from ..schemas.srf_schemas import (
+    Srf, SrfCreate, SrfDetailUpdate, SrfSummary, InwardListSummary,
+    WorkItemResponse, WorkItemsPaginatedResponse
+)
 from .. import models
 from ..db import get_db
 from ..services.srf_services import SrfService
@@ -26,71 +34,226 @@ router = APIRouter(
 def get_srf_with_full_details(srf_id: int, db: Session) -> Optional[models.Srf]:
     """
     Centralized function to fetch an SRF with all its nested relationships
-    eagerly loaded for a complete response object.
+    eagerly loaded using selectinload for maximum speed (prevents Cartesian explosion).
     """
-    return db.query(models.Srf).options(
-        joinedload(models.Srf.inward).joinedload(models.Inward.customer),
-        joinedload(models.Srf.inward)
-        .joinedload(models.Inward.equipments)
-        .joinedload(models.InwardEquipment.srf_equipment)
-    ).filter(models.Srf.srf_id == srf_id).first()
+    stmt = select(models.Srf).options(
+        selectinload(models.Srf.inward).selectinload(models.Inward.customer),
+        selectinload(models.Srf.inward)
+        .selectinload(models.Inward.equipments)
+        .selectinload(models.InwardEquipment.srf_equipment)
+    ).filter(models.Srf.srf_id == srf_id)
+    
+    return db.scalars(stmt).first()
  
 # =====================================================================
-# GET: All SRFs (List View)
+# GET: All SRFs (List View - Admin/Staff)
 # =====================================================================
-@router.get("/", response_model=List[SrfSummary])
-def get_srfs(db: Session = Depends(get_db), inward_status: Optional[str] = Query(None)):
-    """
-    Retrieves a list of SRF summaries.
-    Updated to include inward details (Customer DC No).
-    """
-    try:
-        # 1. Query Database
-        query = (
-            db.query(models.Srf)
-            .join(models.Inward, models.Srf.inward_id == models.Inward.inward_id)
-            .options(joinedload(models.Srf.inward).joinedload(models.Inward.customer))
+# =====================================================================
+# GET: Work Item Counts for Tabs
+# =====================================================================
+@router.get("/work-items/counts")
+async def get_work_item_counts(
+    search: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Returns the total counts for all 4 tabs based on current filters."""
+    
+    # 1. Base Query for Pending Inwards (No SRF)
+    srf_exists_stmt = select(1).where(models.Srf.inward_id == models.Inward.inward_id)
+    inwards_stmt = select(func.count(models.Inward.inward_id)).select_from(models.Inward)
+    
+    # 2. Base Query for SRFs
+    srfs_stmt = select(models.Srf.status, func.count(models.Srf.srf_id)).select_from(models.Srf).join(
+        models.Inward, models.Srf.inward_id == models.Inward.inward_id
+    )
+
+    # Apply Search & Date Filters conditionally
+    if search or start_date or end_date:
+        inwards_stmt = inwards_stmt.outerjoin(models.Customer, models.Inward.customer_id == models.Customer.customer_id)
+        srfs_stmt = srfs_stmt.outerjoin(models.Customer, models.Inward.customer_id == models.Customer.customer_id)
+
+        if search:
+            search_filter_inward = or_(
+                func.concat('SRF No: ', cast(models.Inward.srf_no, String)).ilike(f"%{search}%"),
+                models.Customer.customer_details.ilike(f"%{search}%"),
+                models.Inward.customer_dc_no.ilike(f"%{search}%")
+            )
+            search_filter_srf = or_(
+                func.concat('SRF No: ', cast(models.Srf.srf_no, String)).ilike(f"%{search}%"),
+                models.Customer.customer_details.ilike(f"%{search}%"),
+                models.Inward.customer_dc_no.ilike(f"%{search}%")
+            )
+            inwards_stmt = inwards_stmt.where(search_filter_inward)
+            srfs_stmt = srfs_stmt.where(search_filter_srf)
+
+        if start_date:
+            inwards_stmt = inwards_stmt.where(models.Inward.material_inward_date >= start_date)
+            srfs_stmt = srfs_stmt.where(func.coalesce(models.Srf.created_at, func.now()) >= start_date)
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            inwards_stmt = inwards_stmt.where(models.Inward.material_inward_date <= end_datetime)
+            srfs_stmt = srfs_stmt.where(func.coalesce(models.Srf.created_at, func.now()) <= end_datetime)
+
+    # Apply specific status filters
+    inwards_pending_stmt = inwards_stmt.where(models.Inward.status == 'updated', ~exists(srf_exists_stmt))
+    srfs_grouped_stmt = srfs_stmt.group_by(models.Srf.status)
+
+    # Execute
+    pending_inwards_count = db.scalar(inwards_pending_stmt) or 0
+    srf_counts = db.execute(srfs_grouped_stmt).all()
+
+    # Map Results
+    counts = {
+        "pending_creation": pending_inwards_count,
+        "customer_review": 0,
+        "approved": 0,
+        "rejected": 0
+    }
+
+    for status, count in srf_counts:
+        if status == 'draft':
+            counts["pending_creation"] += count
+        elif status in ['inward_completed', 'generated']:
+            counts["customer_review"] += count
+        elif status == 'approved':
+            counts["approved"] += count
+        elif status == 'rejected':
+            counts["rejected"] += count
+
+    return counts
+
+@router.get("/work-items", response_model=WorkItemsPaginatedResponse)
+async def get_srf_work_items(
+    skip: int = 0,
+    limit: int = 50,
+    tab_status: str = Query("pending_creation"),
+    search: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db)
+):
+    if limit > 1000: limit = 1000
+
+    # -------------------------------------------------------------
+    # 1. BUILD BASE QUERIES 
+    # -------------------------------------------------------------
+    if tab_status == 'pending_creation':
+        
+        # UPGRADE 1: Use EXISTS instead of LEFT JOIN for anti-join
+        srf_exists_stmt = select(1).where(models.Srf.inward_id == models.Inward.inward_id)
+
+        inwards_stmt = select(
+            models.Inward.inward_id.label('id'),
+            literal("inward", type_=String).label('type'),
+            func.concat('SRF No: ', cast(models.Inward.srf_no, String)).label('displayNumber'),
+            models.Customer.customer_details.label('customer_name'),
+            models.Inward.customer_dc_no.label('customer_dc_no'),
+            # UPGRADE 2: Keep Native DateTime for B-Tree Indexing
+            cast(models.Inward.material_inward_date, DateTime).label('item_date'),
+            literal("pending_creation", type_=String).label('status'),
+            literal(False, type_=Boolean).label('isDraft')
+        ).select_from(models.Inward).outerjoin(
+            models.Customer, models.Inward.customer_id == models.Customer.customer_id
+        ).where(
+            models.Inward.status == 'updated',
+            ~exists(srf_exists_stmt) # <--- FAST ANTI-JOIN
         )
- 
-        if inward_status:
-            query = query.filter(models.Inward.status == inward_status)
- 
-        srfs_from_db = query.order_by(models.Srf.srf_id.desc()).all()
- 
-        # 2. Helper to format response
-        def create_summary(srf: models.Srf) -> SrfSummary:
-            summary = SrfSummary.model_validate(srf, from_attributes=True)
-           
-            # CRITICAL FIX: Manually attach the inward object as InwardListSummary
-            if srf.inward:
-                # Create InwardListSummary from the inward model
-                summary.inward = InwardListSummary(
-                    inward_id=srf.inward.inward_id,          # ✅ required
-                    status=srf.inward.status, 
-                    customer_dc_no=srf.inward.customer_dc_no
-                )
-               
-                # Handle SRF No conversion
-                if srf.inward.srf_no is not None:
-                    summary.srf_no = str(srf.inward.srf_no)
-               
-                # Attach Customer Name
-                if srf.inward.customer:
-                    summary.customer_name = srf.inward.customer.customer_details
-           
-            return summary
 
-        return [create_summary(srf) for srf in srfs_from_db]
+        drafts_stmt = select(
+            models.Srf.srf_id.label('id'),
+            literal("srf", type_=String).label('type'),
+            func.concat('SRF No: ', cast(models.Srf.srf_no, String)).label('displayNumber'),
+            models.Customer.customer_details.label('customer_name'),
+            models.Inward.customer_dc_no.label('customer_dc_no'),
+            cast(func.coalesce(models.Srf.created_at, func.now()), DateTime).label('item_date'),
+            literal("pending_creation", type_=String).label('status'),
+            literal(True, type_=Boolean).label('isDraft')
+        ).select_from(models.Srf).join(
+            models.Inward, models.Srf.inward_id == models.Inward.inward_id
+        ).outerjoin(
+            models.Customer, models.Inward.customer_id == models.Customer.customer_id
+        ).where(
+            models.Srf.status == 'draft',
+            models.Inward.status == 'srf_created'
+        )
 
-    except SQLAlchemyError as e:
-        print(f"Database error in get_srfs: {e}")
-        raise HTTPException(status_code=500, detail=f"Database query failed: {e}")
-    except Exception as e:
-        print(f"Unexpected error in get_srfs: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
- 
+        base_query = union_all(inwards_stmt, drafts_stmt).alias("base_query")
+
+    else:
+        # Standard query for other tabs
+        other_stmt = select(
+            models.Srf.srf_id.label('id'),
+            literal("srf", type_=String).label('type'),
+            func.concat('SRF No: ', cast(models.Srf.srf_no, String)).label('displayNumber'),
+            models.Customer.customer_details.label('customer_name'),
+            models.Inward.customer_dc_no.label('customer_dc_no'),
+            cast(func.coalesce(models.Srf.created_at, func.now()), DateTime).label('item_date'),
+            literal(tab_status, type_=String).label('status'),
+            literal(False, type_=Boolean).label('isDraft')
+        ).select_from(models.Srf).join(
+            models.Inward, models.Srf.inward_id == models.Inward.inward_id
+        ).outerjoin(
+            models.Customer, models.Inward.customer_id == models.Customer.customer_id
+        )
+
+        if tab_status == "customer_review":
+            other_stmt = other_stmt.where(models.Srf.status.in_(['inward_completed', 'generated']))
+        elif tab_status == "approved":
+            other_stmt = other_stmt.where(models.Srf.status == 'approved')
+        elif tab_status == "rejected":
+            other_stmt = other_stmt.where(models.Srf.status == 'rejected')
+
+        base_query = other_stmt.alias("base_query")
+
+    # -------------------------------------------------------------
+    # 2. APPLY FILTERS & UPGRADE 3: WINDOW FUNCTION COUNT
+    # -------------------------------------------------------------
+    # We select all columns from base_query PLUS the window count
+    final_stmt = select(
+        *base_query.c, 
+        func.count().over().label('total_window_count')
+    )
+
+    if search:
+        final_stmt = final_stmt.where(
+            or_(
+                base_query.c.displayNumber.ilike(f"%{search}%"),
+                base_query.c.customer_name.ilike(f"%{search}%"),
+                base_query.c.customer_dc_no.ilike(f"%{search}%")
+            )
+        )
+
+    # UPGRADE 2 (Continued): Native DateTime comparisons
+    if start_date:
+        final_stmt = final_stmt.where(base_query.c.item_date >= cast(start_date, DateTime))
+    if end_date:
+        # Add 23:59:59 to include the entire end date natively
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        final_stmt = final_stmt.where(base_query.c.item_date <= cast(end_datetime, DateTime))
+
+    # Apply Pagination & Execute Single Query
+    final_stmt = final_stmt.order_by(base_query.c.item_date.desc()).offset(skip).limit(limit)
+    items_raw = db.execute(final_stmt).mappings().all()
+
+    # Extract total from the first row (if rows exist)
+    total_records = items_raw[0]['total_window_count'] if items_raw else 0
+
+    return {
+        "total": total_records,
+        "items": [
+            {
+                "id": row["id"],
+                "type": row["type"],
+                "displayNumber": row["displayNumber"],
+                "customer_name": row["customer_name"],
+                "date": row["item_date"].isoformat() if row["item_date"] else "",
+                "status": row["status"],
+                "isDraft": row["isDraft"]
+            } for row in items_raw
+        ]
+    }
 
 # =====================================================================
 # GET: Single SRF (Detail View)
@@ -205,46 +368,90 @@ def delete_srf(srf_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to delete SRF: {e}")
  
 # =====================================================================
-# GET SRFs by Customer ID
+# GET: SRFs by Customer ID (List View with Full Data - Paginated)
 # =====================================================================
-@router.get("/customer/", response_model=List[Srf])
+@router.get("/customer/", response_model=WorkItemsPaginatedResponse)
 def get_srfs_for_current_customer(
+    skip: int = 0,
+    limit: int = 50, # Lowered default limit to match pagination standards
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_current_user)
 ):
+    """
+    Retrieves a highly optimized, paginated summary list of SRFs 
+    for the logged-in customer using Window Functions.
+    """
+    if limit > 1000:
+        limit = 1000
+
     try:
+        # 1. Validate Customer Access
         if current_user.customer_id is None:
             raise HTTPException(status_code=403, detail="User is not linked to a customer.")
-       
-        inwards = db.query(models.Inward).filter(models.Inward.customer_id == current_user.customer_id).all()
-        inward_ids = [inward.inward_id for inward in inwards]
-        
-        if not inward_ids:
-            return []
 
-        srfs = (
-            db.query(models.Srf)
-            .options(
-                joinedload(models.Srf.inward).joinedload(models.Inward.customer),
-                joinedload(models.Srf.inward)
-                .joinedload(models.Inward.equipments)
-                .joinedload(models.InwardEquipment.srf_equipment)
-            )
-            .filter(models.Srf.inward_id.in_(inward_ids))
-            .order_by(models.Srf.srf_id.desc())
-            .all()
+        # 2. Build the Optimized Base Query with Window Count
+        stmt = select(
+            models.Srf.srf_id.label('id'),
+            literal("srf", type_=String).label('type'),
+            func.concat('SRF No: ', cast(models.Inward.srf_no, String)).label('displayNumber'),
+            models.Customer.customer_details.label('customer_name'),
+            cast(func.coalesce(models.Srf.created_at, func.now()), DateTime).label('item_date'),
+            models.Srf.status.label('status'),
+            (models.Srf.status == 'draft').label('isDraft'),
+            # UPGRADE: Window function eliminates the need for a separate count() query
+            func.count().over().label('total_window_count')
+        ).select_from(models.Srf).join(
+            models.Inward, models.Srf.inward_id == models.Inward.inward_id
+        ).join(
+            models.Customer, models.Inward.customer_id == models.Customer.customer_id
+        ).where(
+            models.Inward.customer_id == current_user.customer_id
         )
-        return srfs
+
+        # 3. Apply Search (Native DB filtering)
+        if search:
+            search_term = f"%{search}%"
+            stmt = stmt.where(
+                or_(
+                    cast(models.Inward.srf_no, String).ilike(search_term),
+                    models.Inward.customer_dc_no.ilike(search_term)
+                )
+            )
+
+        # 4. Apply Pagination & Execute Single DB Trip
+        stmt = stmt.order_by(models.Srf.srf_id.desc()).offset(skip).limit(limit)
+        
+        # We use .mappings().all() to fetch rows as dictionaries
+        items_raw = db.execute(stmt).mappings().all()
+
+        # Extract total from the first row (if rows exist)
+        total_records = items_raw[0]['total_window_count'] if items_raw else 0
+
+        # 5. Map to the flat WorkItemsPaginatedResponse schema
+        return {
+            "total": total_records,
+            "items": [
+                {
+                    "id": row["id"],
+                    "type": row["type"],
+                    "displayNumber": row["displayNumber"],
+                    "customer_name": row["customer_name"],
+                    "date": row["item_date"].isoformat() if row["item_date"] else "",
+                    "status": row["status"],
+                    "isDraft": row["isDraft"]
+                } for row in items_raw
+            ]
+        }
    
     except SQLAlchemyError as e:
         print(f"Database error in get_srfs_for_current_customer: {e}")
         raise HTTPException(status_code=500, detail="A database error occurred.")
     except Exception as e:
-        print(f"An unexpected error occurred in get_srfs_for_current_customer: {e}")
+        print(f"An unexpected error occurred: {e}")
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
-
 # =====================================================================
-# Export Endpoints for SRF Management Sections
+# Export Endpoints for SRF Management Sections (No pagination needed)
 # =====================================================================
 
 @router.get("/export/pending")

@@ -20,7 +20,8 @@ from backend.schemas.customer_schemas import (
     InwardForCustomer,
     AccountActivationRequest,
     CustomerDropdownResponse,
-    TrackingResponse 
+    TrackingResponse,
+    PaginatedFIRResponse
 )
 from backend.schemas.srf_schemas import SrfApiResponse, SrfResponse
 from backend.schemas.certificate.certificate_schemas import CertificateResponse, CertificateRenderData, CustomerCertificateResponse
@@ -86,13 +87,19 @@ async def update_srf_status_by_customer(
 
 # --- FIR ENDPOINTS ---
 
-@router.get("/firs-for-review", response_model=List[InwardForCustomer])
+@router.get("/firs-for-review", response_model=PaginatedFIRResponse)
 async def get_firs_for_customer_review_list(
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_customer_user)
 ):
     service = CustomerPortalService(db)
-    return service.get_firs_for_customer_list(current_user.customer_id)
+    return service.get_firs_for_customer_list_paginated(
+        customer_id=current_user.customer_id, 
+        page=page, 
+        size=size
+    )
 
 
 @router.get("/firs/{inward_id}", response_model=InwardForCustomer)

@@ -47,15 +47,18 @@ def read_all_external_deviations(
     return deviations
 
 
-@router.get("/{deviation_id}", response_model=schemas.ExternalDeviation)
+@router.get("/{deviation_id}", response_model=DeviationDetailOut)
 def read_single_external_deviation(deviation_id: int, db: Session = Depends(get_db)):
     """
-    Retrieve a single external deviation by its ID.
+    Retrieve a single external deviation by its ID, mapped to the unified frontend schema.
     """
-    db_deviation = services.get_external_deviation(db, deviation_id=deviation_id)
-    if db_deviation is None:
+    # We pass the NEGATIVE ID to the unified service so it correctly fetches the external record
+    unified_detail = unified_svc.get_deviation_detail_for_staff(db, deviation_id=-deviation_id)
+    
+    if unified_detail is None:
         raise HTTPException(status_code=404, detail="External deviation not found")
-    return db_deviation
+        
+    return unified_detail
 
 @router.patch("/{deviation_id}", response_model=DeviationDetailOut) # CHANGED response_model
 def update_existing_external_deviation(

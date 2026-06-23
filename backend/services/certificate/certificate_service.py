@@ -5,7 +5,7 @@ import logging  # Added for debugging
 from sqlalchemy import text, or_  # Added or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
- 
+from sqlalchemy import func
 from backend.models.certificate.certificate import HTWCertificate
 from backend.services.certificate.certificate_assets_helper import get_certificate_asset_urls
 from backend.models.htw.htw_job import HTWJob
@@ -18,6 +18,7 @@ from backend.services.htw import htw_repeatability_services as repeat_services
 from backend.services.htw.htw_const_coverage_factor_service import get_active_coverage_factor_k
 from backend.models.external_upload import ExternalUpload
 from backend.models.lab_scope import LabScope
+from backend.models.equipment_flow_config import EquipmentFlowConfig
 # Set up logger
 logger = logging.getLogger(__name__)
  
@@ -874,36 +875,144 @@ def get_certificate_for_customer(db: Session, certificate_id: int, customer_id: 
     return cert
  
  
-def list_srf_groups_with_eligible_equipment(db: Session) -> List[Dict[str, Any]]:
+def list_srf_groups_with_eligible_equipment(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    inward_id: Optional[int] = None,
+    status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    is_htw: Optional[bool] = None
+) -> Dict[str, Any]:
     """
-    List SRFs (inwards) with all equipments eligible for certificate.
-    Eligible = equipment has a calibration job (htw_job) in a finished state
-    (Calibrated, Completed - OOT, or Completed).
-    For each equipment, includes certificate if it exists.
+    List SRFs (inwards) with equipments eligible for certificate.
+    ENTERPRISE OPTIMIZED: Strict DB-Level Filtering and Pagination.
     """
-    from sqlalchemy.orm import joinedload
- 
+    
+    # 1. Pre-fetch valid equipment types from config to prevent slow JOINs
+    flow_configs = db.query(EquipmentFlowConfig.equipment_type).filter(EquipmentFlowConfig.is_active == True).all()
+    valid_types = [c[0].strip().lower() for c in flow_configs if c[0]]
+
+    if not valid_types:
+        return {"total_count": 0, "items": []}
+
+    eligible_statuses = ["calibrated", "completed - oot", "completed"]
+
+    # 2. FAST BASE QUERY: Join all necessary tables to filter properly
+    base_query = db.query(Inward.inward_id).join(
+        InwardEquipment, Inward.inward_id == InwardEquipment.inward_id
+    ).join(
+        HTWJob, InwardEquipment.inward_eqp_id == HTWJob.inward_eqp_id
+    ).outerjoin(
+        HTWCertificate, HTWJob.job_id == HTWCertificate.job_id
+    ).filter(
+        Inward.is_draft.is_(False),
+        func.lower(func.trim(HTWJob.job_status)).in_(eligible_statuses),
+        func.lower(func.trim(InwardEquipment.material_description)).in_(valid_types)
+    )
+
+    # Apply strict database filters
+    if inward_id:
+        base_query = base_query.filter(Inward.inward_id == inward_id)
+
+    if status:
+        base_query = base_query.filter(HTWCertificate.status == status)
+
+    if start_date:
+        base_query = base_query.filter(HTWCertificate.date_of_calibration >= start_date)
+        
+    if end_date:
+        base_query = base_query.filter(HTWCertificate.date_of_calibration <= f"{end_date} 23:59:59")
+
+    if search:
+        search_term = f"%{search}%"
+        base_query = base_query.filter(
+            or_(
+                Inward.srf_no.ilike(search_term),
+                Inward.customer_details.ilike(search_term),
+                Inward.customer_dc_no.ilike(search_term),
+                InwardEquipment.nepl_id.ilike(search_term),
+                HTWCertificate.certificate_no.ilike(search_term),
+                HTWCertificate.ulr_no.ilike(search_term)
+            )
+        )
+
+    # 3. GET EXACT TOTAL COUNT (Extremely fast distinct count)
+    total_count = base_query.distinct().count()
+
+    if total_count == 0:
+        return {"total_count": 0, "items": []}
+
+    # 4. GET PAGINATED INWARD IDs
+    paginated_ids_query = (
+        base_query.distinct()
+        .order_by(Inward.inward_id.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    paginated_inward_ids = [row[0] for row in paginated_ids_query.all()]
+
+    if not paginated_inward_ids:
+        return {"total_count": total_count, "items": []}
+
+    # 5. FETCH RICH DATA ONLY FOR THE PAGINATED IDs (Eliminates N+1)
     inwards = (
         db.query(Inward)
-        .options(joinedload(Inward.equipments))
-        .filter(Inward.is_draft.is_(False))
-        .order_by(Inward.created_at.desc())
+        .options(selectinload(Inward.equipments))
+        .filter(Inward.inward_id.in_(paginated_inward_ids))
+        .order_by(Inward.inward_id.desc())
         .all()
     )
-    cert_by_job = {c.job_id: c for c in db.query(HTWCertificate).all()}
-    job_by_eqp = {j.inward_eqp_id: j for j in db.query(HTWJob).all()}
- 
+
+    eqp_ids = []
+    for inward in inwards:
+        if inward.equipments:
+            eqp_ids.extend([eq.inward_eqp_id for eq in inward.equipments])
+
+    jobs = db.query(HTWJob).filter(HTWJob.inward_eqp_id.in_(eqp_ids)).all()
+    job_by_eqp = {j.inward_eqp_id: j for j in jobs}
+    job_ids = [j.job_id for j in jobs]
+
+    certs = db.query(HTWCertificate).filter(HTWCertificate.job_id.in_(job_ids)).all() if job_ids else []
+    cert_by_job = {c.job_id: c for c in certs}
+
+    # 6. ASSEMBLE THE JSON PAYLOAD (Re-enforce filters to prune siblings)
     result = []
     for i in inwards:
         eligible = []
         for eq in (i.equipments or []):
+            eq_desc = (eq.material_description or "").strip().lower()
+            if eq_desc not in valid_types:
+                continue
+
             job = job_by_eqp.get(eq.inward_eqp_id)
             if not job:
                 continue
-            if not job_status_allows_certificate_generation(job.job_status):
+            
+            job_status_lower = (job.job_status or "").strip().lower()
+            if job_status_lower not in eligible_statuses:
                 continue
-            cert = cert_by_job.get(job.job_id) if job else None
-            cal_date = job.date
+                
+            cert = cert_by_job.get(job.job_id)
+            
+            # STRICT TAB/DATE FILTERING: Hide siblings inside the SRF that don't belong in this Tab
+            if status and getattr(cert, "status", None) != status:
+                continue
+            
+            cal_date = getattr(cert, "date_of_calibration", None)
+            if start_date or end_date:
+                if not cal_date:
+                    continue
+                c_date_str = cal_date.strftime("%Y-%m-%d") if hasattr(cal_date, "strftime") else str(cal_date)[:10]
+                if start_date and c_date_str < start_date:
+                    continue
+                if end_date and c_date_str > end_date:
+                    continue
+            
+            job_cal_date = getattr(job, "date", None)
+            
             eligible.append({
                 "inward_eqp_id": eq.inward_eqp_id,
                 "nepl_id": eq.nepl_id or "",
@@ -913,37 +1022,44 @@ def list_srf_groups_with_eligible_equipment(db: Session) -> List[Dict[str, Any]]
                 "serial_no": eq.serial_no or "",
                 "job_id": job.job_id,
                 "job_status": job.job_status or "",
-                "calibration_date": cal_date.isoformat() if cal_date else None,
+                "calibration_date": job_cal_date.isoformat() if job_cal_date else None,
                 "certificate": {
                     "certificate_id": cert.certificate_id,
-                    "certificate_no": cert.certificate_no,
-                    "date_of_calibration": cert.date_of_calibration.isoformat() if cert.date_of_calibration else None,
-                    "ulr_no": cert.ulr_no,
-                    "status": cert.status,
-                    "job_id": cert.job_id,
-                    "inward_id": cert.inward_id,
-                    "inward_eqp_id": cert.inward_eqp_id,
-                    "field_of_parameter": cert.field_of_parameter,
-                    "recommended_cal_due_date": cert.recommended_cal_due_date.isoformat() if cert.recommended_cal_due_date else None,
-                    "item_status": cert.item_status or "Satisfactory",
-                    "authorised_signatory": cert.authorised_signatory,
+                    "certificate_no": getattr(cert, "certificate_no", ""),
+                    "date_of_calibration": cert.date_of_calibration.isoformat() if getattr(cert, "date_of_calibration", None) else None,
+                    "ulr_no": getattr(cert, "ulr_no", ""),
+                    "status": getattr(cert, "status", ""),
+                    "job_id": getattr(cert, "job_id", None),
+                    "inward_id": getattr(cert, "inward_id", None),
+                    "inward_eqp_id": getattr(cert, "inward_eqp_id", None),
+                    "field_of_parameter": getattr(cert, "field_of_parameter", ""),
+                    "recommended_cal_due_date": cert.recommended_cal_due_date.isoformat() if getattr(cert, "recommended_cal_due_date", None) else None,
+                    "item_status": getattr(cert, "item_status", None) or "Satisfactory",
+                    "authorised_signatory": getattr(cert, "authorised_signatory", ""),
                     "admin_rework_comment": getattr(cert, "admin_rework_comment", None) or "",
-                    "qr_token": cert.qr_token if cert else None,
-                    "qr_image_base64": cert.qr_image_base64 if cert else None,
-                    "qr_generated_at": cert.qr_generated_at.isoformat() if cert and cert.qr_generated_at else None,
+                    "qr_token": getattr(cert, "qr_token", None),
+                    "qr_image_base64": getattr(cert, "qr_image_base64", None),
+                    "qr_generated_at": cert.qr_generated_at.isoformat() if getattr(cert, "qr_generated_at", None) else None,
                 } if cert else None,
             })
+        
         if eligible:
-            total_equipment = len(i.equipments or [])
             result.append({
                 "inward_id": i.inward_id,
                 "srf_no": str(i.srf_no) if i.srf_no else "",
                 "customer_details": i.customer_details or "",
                 "customer_dc_no": i.customer_dc_no or "",
-                "total_equipment_count": total_equipment,
+                "total_equipment_count": len(i.equipments or []),
                 "equipments": eligible,
             })
-    return result
+
+    result_lookup = {r["inward_id"]: r for r in result}
+    sorted_result = [result_lookup[inw_id] for inw_id in paginated_inward_ids if inw_id in result_lookup]
+
+    return {
+        "total_count": total_count,
+        "items": sorted_result
+    }
 
 def get_customer_portal_certificates(db: Session, customer_id: int):
     logger.info(f"--- START get_customer_portal_certificates for customer_id: {customer_id} ---")

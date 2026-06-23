@@ -59,7 +59,6 @@ import CalibrationReminderDetailsPage from "../components/CalibrationReminderDet
 import EngineerDashboard from "../components/EngineerDashboard";
 import {
   DeviationPage,
-  SrfDeviationRecordsPage,
   DeviationDetailPage,
 } from "../components/DeviationComponents";
 import { BarcodeScanner }from "../components/BarcodeScanner";
@@ -611,7 +610,6 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
                 <Route path="uncertainty-budget/:inwardId/:equipmentId" element={<UncertaintyBudgetPage />} />
                 <Route path="certificates" element={<CertificatesPage />} />
                 <Route path="deviations" element={<DeviationPage />} />
-                <Route path="deviations/srf/:section/:srfKey" element={<SrfDeviationRecordsPage />} />
                 <Route path="deviations/:deviationId" element={<DeviationDetailPage />} />
                 <Route path="final-inspection/:inwardId" element={<FinalInspectionView />} />
                 <Route path="calibration-reminders/:customerId" element={<CalibrationReminderDetailsPage />} />

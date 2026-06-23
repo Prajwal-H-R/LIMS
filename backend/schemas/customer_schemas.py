@@ -177,3 +177,8 @@ class TrackingResponse(BaseModel):
 
 
 
+class PaginatedFIRResponse(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: List[InwardForCustomer]
