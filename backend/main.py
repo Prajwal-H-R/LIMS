@@ -1,6 +1,7 @@
 import asyncio
 import time
 import logging
+import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -145,12 +146,20 @@ app = FastAPI(title="LIMS Backend", version="1.0", lifespan=lifespan)
 
 
 # --- CORS CONFIGURATION ---
+# This will look for ALLOWED_ORIGINS in your .env file.
+origins_env = os.getenv("ALLOWED_ORIGINS", "")
+
+# This safely splits the URLs by comma
+origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+
+print("Allowed origins for Production:", origins)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=origins, 
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"], 
+    allow_headers=["Content-Type", "Authorization", "Accept"], 
 )
 
 

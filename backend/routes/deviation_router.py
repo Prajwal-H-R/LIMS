@@ -1,7 +1,7 @@
-from typing import List
-
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from backend.auth import check_staff_role
 from backend.db import get_db
@@ -11,6 +11,8 @@ from backend.schemas.deviation_schemas import (
     EngineerRemarksUpdate,
     ManualDeviationCreate,
     VisibilityUpdate,
+    PaginatedDeviationItemOut,
+    PaginatedDeviationsResponse
 )
 from backend.schemas.user_schemas import UserResponse
 from backend.services import deviation_service as svc
@@ -40,16 +42,27 @@ def create_manual_deviation(
         )
     return created
 
-@router.get("/all-staff", response_model=List[CustomerDeviationItem])
+
+# --- UPDATED PAGINATED ENDPOINT ---
+@router.get("/all-staff", response_model=PaginatedDeviationsResponse)
 def list_all_deviations_for_staff(
+    skip: int = Query(0, description="Records to skip"),
+    limit: int = Query(100, description="Records per page"),
+    search: Optional[str] = Query(None, description="Search by SRF, NEPL ID, or Customer"),
+    deviation_type: Optional[str] = Query(None, description="Filter by OOT or MANUAL"),
     db: Session = Depends(get_db),
     _current_user: UserResponse = Depends(check_staff_role),
 ):
     """
-    Returns a unified list of all OOT and MANUAL deviations from all sources
-    for the staff deviation page.
+    Returns a HIGHLY OPTIMIZED, paginated list of all OOT and MANUAL deviations.
     """
-    return svc.list_all_deviations_for_staff(db)
+    if limit > 1000:
+        limit = 1000
+    
+    # We call the new paginated service function here
+    return svc.list_all_deviations_paginated(db, skip, limit, search, deviation_type)
+
+
 @router.post("/{deviation_id}/attachments", response_model=DeviationDetailOut)
 async def upload_deviation_attachments(
     deviation_id: int,
@@ -114,10 +127,12 @@ def terminate_deviation_job(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deviation not found")
     return updated
+
+
 @router.patch("/{deviation_id}/visibility", response_model=DeviationDetailOut)
 def update_deviation_visibility(
     deviation_id: int,
-    body: VisibilityUpdate, # Use the new schema here
+    body: VisibilityUpdate,
     db: Session = Depends(get_db),
     _current_user: UserResponse = Depends(check_staff_role),
 ):

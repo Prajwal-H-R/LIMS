@@ -10,6 +10,7 @@ class Customer(Base):
 
     customer_id = Column(Integer, primary_key=True)
     customer_details = Column(Text, nullable=False)
+    location_name = Column(String(255), nullable=True)
     contact_person = Column(String(255))
     phone = Column(String(50))
     email = Column(String(320))

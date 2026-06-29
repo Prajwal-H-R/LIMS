@@ -1,8 +1,8 @@
 # backend/api/v1/endpoints/equipment_flow.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from backend.db import get_db
 from backend.schemas import equipment_flow_config as schemas
@@ -10,7 +10,6 @@ from backend.schemas import equipment_flow_config as schemas
 from backend.schemas.equipment_flow_config import SystemDrivenJob 
 from backend.schemas.inward_schemas import InwardEquipmentResponse
 from backend.services import equipment_flow_service as service
-
 router = APIRouter(
     tags=["Flow Configuration"])
 
@@ -160,21 +159,16 @@ def get_system_driven_job_details(inward_id: int, db: Session = Depends(get_db))
 
 @router.get(
     "/flow-configs/manual-calibration-groups",
-    response_model=List[schemas.ManualSrfGroup],
-    summary="Get All SRF Groups for Manual Calibration",
-    description="""
-    **High-performance endpoint.**
-    Fetches a summarized list of all SRF groups that contain at least one piece 
-    of equipment designated for manual calibration (i.e., its material_description 
-    is not found in the active equipment_flow_config).
-    """
+    summary="Get All SRF Groups for Manual Calibration"
 )
-def get_manual_calibration_groups(db: Session = Depends(get_db)):
-    """
-    Returns a clean, aggregated list of SRF groups, perfect for the initial
-    page load of the Manual Calibration screen.
-    """
-    return service.get_manual_calibration_srf_groups(db)
+def get_manual_calibration_groups(
+    skip: int = Query(0, description="Records to skip"),
+    limit: int = Query(10, description="Records per page"),
+    search: Optional[str] = Query(None, description="Search by SRF or Customer"),
+    db: Session = Depends(get_db)
+):
+    # Pass the pagination parameters to the service
+    return service.get_manual_calibration_srf_groups(db, skip, limit, search)
 
 @router.get(
     "/flow-configs/manual-calibration-groups/{srf_no}/equipment",

@@ -326,3 +326,16 @@ class SrfApiResponse(BaseModel):
     pending: List[SrfResponse]
     approved: List[SrfResponse]
     rejected: List[SrfResponse]
+
+class WorkItemResponse(BaseModel):
+    id: int
+    type: str
+    displayNumber: str
+    customer_name: Optional[str]
+    date: str
+    status: str
+    isDraft: bool
+
+class WorkItemsPaginatedResponse(BaseModel):
+    total: int
+    items: List[WorkItemResponse]

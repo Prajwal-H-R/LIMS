@@ -6,8 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session, selectinload 
-from sqlalchemy import select
-
+from sqlalchemy import select, func
+from sqlalchemy import or_
 from backend.auth import get_current_user
 from backend.core import security
 from backend.core.security import LOCAL_TIMEZONE
@@ -16,8 +16,7 @@ from ..db import get_db
 
 # Import User and Customer Models
 from backend.models.users import User 
-from backend.models.customers import Customer # <--- Added this import
-
+from backend.models.customers import Customer
 from backend.schemas.user_schemas import (
     AdminUserUpdateRequest,
     CurrentUserResponse,
@@ -25,11 +24,12 @@ from backend.schemas.user_schemas import (
     LogoutRequest,
     RefreshTokenRequest,
     TokenRefreshResponse,
-    UserListResponse,
+    UserStatsResponse,
     UserResponse,
     UserProfileUpdateRequest,
     UserStatusUpdateRequest,
-    BatchCustomerUserStatusRequest, # <--- Added this import
+    BatchCustomerUserStatusRequest, 
+    UserListPaginatedResponse
 )
 from backend.services import token_service
 from backend.services.email_services import send_welcome_email
@@ -50,6 +50,30 @@ router = APIRouter(
     tags=["Authentication & Users"]
 )
 
+@router.get("/stats", response_model=UserStatsResponse)
+def get_user_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Returns lightning-fast counts for the Admin Dashboard cards."""
+    if current_user.role.lower() != 'admin':
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    # Let the database do the counting (extremely fast)
+    total_users = db.scalar(select(func.count(User.user_id))) or 0
+    active_users = db.scalar(select(func.count(User.user_id)).where(User.is_active == True)) or 0
+    inactive_users = db.scalar(select(func.count(User.user_id)).where(User.is_active == False)) or 0
+    admin_users = db.scalar(select(func.count(User.user_id)).where(User.role.ilike('admin'))) or 0
+    engineer_users = db.scalar(select(func.count(User.user_id)).where(User.role.ilike('engineer'))) or 0
+    customer_users = db.scalar(select(func.count(User.user_id)).where(User.role.ilike('customer'))) or 0
+    return {
+        "total_users": total_users,
+        "active_users": active_users,
+        "inactive_users": inactive_users,
+        "admin_users": admin_users,
+        "engineer_users": engineer_users,
+        "customer_users": customer_users
+    }
 
 @router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
 def login(
@@ -218,31 +242,56 @@ def admin_update_user(
     return user_orm_to_response(updated_user)
 
 
-@router.get("", response_model=UserListResponse)
+@router.get("", response_model=UserListPaginatedResponse)
 def get_all_users_list(
+    skip: int = 0,
+    limit: int = 100,
+    search: str | None = None, # NEW: Accept search term
+    role: str | None = None,   # NEW: Accept role filter
     db: Session = Depends(get_db),
     current_user: UserResponse = Depends(get_current_user),
 ):
-    """Returns a list of all users with Customer Details. Requires Admin privileges."""
     if current_user.role.lower() != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Must be an administrator."
-        )
+        raise HTTPException(status_code=403, detail="Access denied.")
 
-    # Fetch users and eager load customer details
-    stmt = (
-        select(User)
-        .options(selectinload(User.customer)) 
-        .order_by(User.user_id)
-    )
+    if limit > 100:
+        limit = 100
+
+    # 1. Build Query Conditions based on Search and Role
+    conditions = []
+    if search:
+        search_term = f"%{search}%"
+        conditions.append(
+            or_(
+                User.username.ilike(search_term),
+                User.email.ilike(search_term),
+                User.full_name.ilike(search_term),
+            )
+        )
+    
+    if role and role.lower() != "all":
+        conditions.append(User.role.ilike(role))
+
+    # 2. Get True Total Count matching the filters
+    count_stmt = select(func.count()).select_from(User)
+    if conditions:
+        count_stmt = count_stmt.where(*conditions)
+    total_count = db.scalar(count_stmt) or 0
+
+    # 3. Fetch Paginated Users matching the filters
+    stmt = select(User).options(selectinload(User.customer))
+    if conditions:
+        stmt = stmt.where(*conditions)
+        
+    stmt = stmt.order_by(User.user_id).offset(skip).limit(limit)
     users = db.scalars(stmt).all()
     
-    # Map full user + customer profile fields for admin edit prefill
     user_responses = [user_orm_to_response(u) for u in users]
 
-    return UserListResponse(users=user_responses)
-
+    return UserListPaginatedResponse(
+        total_count=total_count,
+        users=user_responses
+    )
 
 @router.patch("/{user_id}/status", response_model=UserResponse)
 def update_user_status(
@@ -268,7 +317,6 @@ def update_user_status(
     return UserResponse.from_orm(updated_user)
 
 
-# --- NEW ENDPOINT: Batch Update Status by Customer ---
 @router.post("/batch-status-by-customer")
 def update_users_status_by_customer(
     payload: BatchCustomerUserStatusRequest,

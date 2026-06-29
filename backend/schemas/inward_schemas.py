@@ -1,3 +1,5 @@
+# backend/schemas/inward_schemas.py
+
 import json
 import datetime
 from typing import List, Optional, Any, Dict
@@ -66,24 +68,17 @@ class InwardEquipmentResponse(BaseModel):
     barcode: Optional[str] = None
     engineer_remarks: Optional[str] = Field(None, alias='engineer_remarks')
     customer_remarks: Optional[str] = None 
-    
-    # --- STATUS FIELD FOR FILTERING ---
     status: Optional[str] = None 
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 # === Response Schemas for various listings ===
-
 class ReviewedFirResponse(BaseModel):
     inward_id: int
     srf_no: str
     updated_at: Optional[datetime.datetime] = None
     customer: Optional[CustomerInfo] = None
-    
-    # Overall Inward Status
     status: str 
-    
-    # List of Equipments (which now includes their individual status)
     equipments: List[InwardEquipmentResponse] = [] 
 
     @field_validator('srf_no', mode='before')
@@ -271,3 +266,15 @@ class FailedNotificationsResponse(BaseModel):
 
 class BatchExportRequest(BaseModel):
     inward_ids: List[int]
+
+# =========================================================
+# NEW: PAGINATION SCHEMA FOR INWARDS
+# =========================================================
+class InwardListPaginatedResponse(BaseModel):
+    total_count: int
+    inwards: List[InwardResponse]
+
+
+class ExportablePaginatedResponse(BaseModel):
+    total_count: int
+    inwards: List[UpdatedInwardSummary]

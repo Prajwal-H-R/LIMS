@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom'; // <-- Added createPortal
 import { Link } from 'react-router-dom';
 import { 
   Award, Eye, Loader2, X, ChevronLeft, 
@@ -9,7 +10,6 @@ import { api, ENDPOINTS } from '../api/config';
 import { CustomerCertificatePrintView } from './CustomerCertificatePrintView';
 import type { CertificateTemplateData } from './CustomerCertificatePrintView';
 
-// Updated interface to include nepl_id
 interface Certificate {
   certificate_id: number | string; 
   job_id: number;
@@ -46,6 +46,18 @@ export const CustomerCertificatesPage: React.FC = () => {
   const [selectedCertId, setSelectedCertId] = useState<number | string | null>(null);
   const [printData, setPrintData] = useState<{ template_data: CertificateTemplateData } | null>(null);
   const [printLoading, setPrintLoading] = useState(false);
+
+  // Background Scroll Lock
+  useEffect(() => {
+    if (showPrintModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showPrintModal]);
 
   const fetchCertificates = useCallback(async () => {
     setIsLoading(true);
@@ -250,7 +262,6 @@ export const CustomerCertificatesPage: React.FC = () => {
                     <tr key={cert.certificate_id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-
                           <span className="font-bold text-gray-900 text-base">
                             {cert.nepl_id || 'N/A'}
                           </span>
@@ -288,9 +299,9 @@ export const CustomerCertificatesPage: React.FC = () => {
           </div>
         )}
 
-        {/* Modal Preview */}
-        {showPrintModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowPrintModal(false)}>
+        {/* Modal Preview wrapped in createPortal to prevent Header Overlap */}
+        {showPrintModal && createPortal(
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowPrintModal(false)}>
             <div className="bg-white rounded-2xl shadow-2xl flex flex-col max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between px-6 py-4 border-b">
                 <div className="flex flex-col">
@@ -302,7 +313,6 @@ export const CustomerCertificatesPage: React.FC = () => {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Moved download button here to avoid prop mismatch */}
                   {!printLoading && printData && (
                     <button 
                       onClick={() => {
@@ -332,7 +342,8 @@ export const CustomerCertificatesPage: React.FC = () => {
                 )}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body // <-- This forces the modal over the entire website ignoring headers
         )}
       </div>
     </div>

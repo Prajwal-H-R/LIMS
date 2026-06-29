@@ -297,37 +297,62 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
     const [finals, setFinals] = useState<FinalReport[]>([]);
     const [certificateCount, setCertificateCount] = useState(0);
     const [deviationCount, setDeviationCount] = useState(0);
-    const [loading, setLoading] = useState(true);
+     const [loading, setLoading] = useState(true);
+    const hasFetched = useRef<number | null>(null); 
 
     const fetchData = useCallback(async () => {
         if (!user?.user_id) return;
         try {
-            const firsRes = await api.get<FirForReview[]>('/portal/firs-for-review');
-            const reportsRes = await api.get<{firs: any, finals: FinalReport[]}>('/final-inspections/customer/dashboard-reports');
-            const srfsRes = await api.get<SrfApiResponse>('/portal/srfs');
-            const [certs, devs] = await Promise.all([
-                api.get<unknown[]>(ENDPOINTS.PORTAL.CERTIFICATES),
-                api.get<unknown[]>(ENDPOINTS.PORTAL.DEVIATIONS)
+            // 1. FETCH ONLY THE CRITICAL DATA (This is very fast)
+            const [firsRes, reportsRes, srfsRes] = await Promise.all([
+                api.get('/portal/firs-for-review'),
+                api.get('/final-inspections/customer/dashboard-reports'),
+                api.get('/portal/srfs')
             ]);
 
-            setFirs(firsRes.data || []);
+            setFirs(firsRes.data?.items || []);
             setFinals(reportsRes.data?.finals || []);
-            setSrfs([...(srfsRes.data.pending || []), ...(srfsRes.data.approved || []), ...(srfsRes.data.rejected || [])]);
-            setCertificateCount(Array.isArray(certs.data) ? certs.data.length : 0);
-            setDeviationCount(Array.isArray(devs.data) ? devs.data.length : 0);
-        } catch (err) { console.error("Portal Fetch Error:", err); }
+            setSrfs([
+                ...(srfsRes.data?.pending || []), 
+                ...(srfsRes.data?.approved || []), 
+                ...(srfsRes.data?.rejected || [])
+            ]);
+
+            // 2. TURN OFF SKELETON IMMEDIATELY!
+            // The user will see the UI immediately after the fast APIs finish.
+            setLoading(false);
+
+            // 3. FETCH THE HEAVY COUNTS IN THE BACKGROUND
+            // These will not block the UI. The numbers will just update when ready.
+            api.get(ENDPOINTS.PORTAL.CERTIFICATES).then(res => {
+                setCertificateCount(Array.isArray(res.data) ? res.data.length : 0);
+            }).catch(console.error);
+
+            api.get(ENDPOINTS.PORTAL.DEVIATIONS).then(res => {
+                setDeviationCount(Array.isArray(res.data) ? res.data.length : 0);
+            }).catch(console.error);
+
+        } catch (err) { 
+            console.error("Portal Fetch Error:", err); 
+            setLoading(false); // Ensure skeleton turns off even on error
+        }
     }, [user?.user_id]);
 
     useEffect(() => {
+        if (!user?.user_id) return;
+        if (hasFetched.current === user.user_id) return;
+
         const initialLoad = async () => {
             setLoading(true);
+            hasFetched.current = user.user_id; 
             await fetchData();
-            setLoading(false);
         };
+        
         initialLoad();
+        
         const interval = setInterval(fetchData, 30000);
         return () => clearInterval(interval);
-    }, [fetchData]);
+    }, [fetchData, user?.user_id]);
 
     const dashboardStats: DashboardStats = {
         totalSrfs: srfs.length,

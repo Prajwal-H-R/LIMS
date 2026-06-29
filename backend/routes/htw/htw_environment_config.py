@@ -35,7 +35,7 @@ def read_active_environment_config(db: Session = Depends(get_db)):
 # ==================================================================
 
 # CREATE
-@router.post("/", response_model=HTWEnvironmentConfigResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=HTWEnvironmentConfigResponse, status_code=status.HTTP_201_CREATED)
 def create_environment_config(
     config_in: HTWEnvironmentConfigCreate, 
     db: Session = Depends(get_db)
@@ -44,7 +44,7 @@ def create_environment_config(
     return service.create_config(config_in)
 
 # READ ALL
-@router.get("/", response_model=List[HTWEnvironmentConfigResponse])
+@router.get("", response_model=List[HTWEnvironmentConfigResponse])
 def read_environment_configs(
     skip: int = 0, 
     limit: int = 100, 
@@ -58,7 +58,7 @@ def read_environment_configs(
 # ==================================================================
 
 # READ ONE BY ID
-@router.get("/{config_id}", response_model=HTWEnvironmentConfigResponse)
+@router.get("{config_id}", response_model=HTWEnvironmentConfigResponse)
 def read_environment_config(
     config_id: int, 
     db: Session = Depends(get_db)
@@ -67,7 +67,7 @@ def read_environment_config(
     return service.get_config_by_id(config_id)
 
 # UPDATE BY ID
-@router.put("/{config_id}", response_model=HTWEnvironmentConfigResponse)
+@router.put("{config_id}", response_model=HTWEnvironmentConfigResponse)
 def update_environment_config(
     config_id: int, 
     config_update: HTWEnvironmentConfigUpdate, 
@@ -77,7 +77,7 @@ def update_environment_config(
     return service.update_config(config_id, config_update)
 
 # DELETE BY ID
-@router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("{config_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_environment_config(
     config_id: int, 
     db: Session = Depends(get_db)

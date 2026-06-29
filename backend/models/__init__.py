@@ -14,6 +14,7 @@ from .password_reset_token import PasswordResetToken
 from .refresh_token import RefreshToken
 from .delayed_email_tasks import DelayedEmailTask
 from .inward_equipments import InwardEquipment
+from .htw.htw_environment_config import HTWEnvironmentConfig
 from .htw.htw_master_standard import HTWMasterStandard
 from .htw.htw_manufacturer_spec import HTWManufacturerSpec
 from .htw.htw_pressure_gauge_resolution import HTWPressureGaugeResolution

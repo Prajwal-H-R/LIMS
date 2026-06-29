@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import axios from 'axios';
-
+import { api } from "../api/config";
 /** 
  * Data interface matching the backend schema.
  */
@@ -81,24 +80,20 @@ export const CustomerCertificatePrintView: React.FC<{
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // 1. Fetch Data
+  // 1. Fetch Data
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       setError(null);
       try {
-        const token = localStorage.getItem('access_token') || localStorage.getItem('token');
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const response = await axios.post(
-          '/api/certificates/render-preview', 
+        // Look how clean this is! 
+        // 1. We use `api` instead of `axios`
+        // 2. We removed the manual token logic (your interceptor does it)
+        // 3. We removed '/api' from the URL (your config.ts baseURL already adds it!)
+        const response = await api.post(
+          '/certificates/render-preview', 
           data,
-          { 
-            headers,
-            responseType: 'text' 
-          }
+          { responseType: 'text' }
         );
         
         // Inject CSS to hide scrollbars strictly within the iframe
@@ -114,7 +109,8 @@ export const CustomerCertificatePrintView: React.FC<{
 
       } catch (err: any) {
         console.error("Fetch error:", err);
-        if (axios.isAxiosError(err) && err.response?.status === 401) {
+        // Updated error check since we aren't using raw axios
+        if (err.response?.status === 401) {
             setError("Session expired. Please log in.");
         } else {
             setError("Failed to load preview.");
@@ -158,12 +154,6 @@ export const CustomerCertificatePrintView: React.FC<{
     }
   };
 
-  const handlePrint = () => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      iframeRef.current.contentWindow.focus();
-      iframeRef.current.contentWindow.print();
-    }
-  };
 
   return (
     <div className="flex flex-col items-center gap-4 w-full bg-gray-100 py-8">

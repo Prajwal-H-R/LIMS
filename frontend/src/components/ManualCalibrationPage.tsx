@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { createPortal } from "react-dom"; 
 import { api } from "../api/config";
 import {
   ArrowLeft,
   ChevronRight,
+  ChevronLeft,
   ClipboardEdit,
   UploadCloud,
   Eye,
@@ -38,6 +40,7 @@ import {
 interface SrfGroupSummary {
   srf_no: string;
   customer_name: string;
+  customer_dc_no?: string; // <-- ADDED
   received_date: string;
   equipment_count: number;
 }
@@ -1331,6 +1334,8 @@ const DeviationModal: React.FC<{
   equipment: BasicEquipment;
   onSuccess: () => void;
 }> = ({ isOpen, isEditMode, onClose, equipment, onSuccess }) => {
+  const [mounted, setMounted] = useState(false);
+
   const [deviationId, setDeviationId] = useState<number | null>(null);
   const [deviationType, setDeviationType] = useState<"OOT" | "NC">("OOT");
   const [toolStatus, setToolStatus] = useState("");
@@ -1348,6 +1353,10 @@ const DeviationModal: React.FC<{
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1391,7 +1400,6 @@ const DeviationModal: React.FC<{
     const nextVal = !hideCustomerVisibility;
     setHideCustomerVisibility(nextVal);
 
-    // Dynamic patch only for OOT (the button is already hidden for NC)
     if (deviationId && deviationType === "OOT") {
       setIsUpdatingVisibility(true);
       try {
@@ -1452,7 +1460,6 @@ const DeviationModal: React.FC<{
       customer_decision: customerDecision,
     };
 
-    // ONLY send visibility status for OOT cases
     if (deviationType === "OOT") {
       payload.hide_customer_visibility = hideCustomerVisibility;
     }
@@ -1491,10 +1498,10 @@ const DeviationModal: React.FC<{
       ? url
       : `${api.defaults.baseURL?.split("/api")[0]}${url}`;
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
+  const modalContent = (
+    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[9999] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="flex justify-between items-center p-6 border-b bg-white">
           <div className="flex items-center gap-3">
@@ -1718,23 +1725,13 @@ const DeviationModal: React.FC<{
                         </span>
                         <div className="flex gap-1">
                           <button
-                            onClick={() =>
-                              handleView(
-                                getFileFullUrl(a.file_url),
-                                a.file_name
-                              )
-                            }
+                            onClick={() => window.open(getFileFullUrl(a.file_url), '_blank')}
                             className="p-2 text-blue-600"
                           >
                             <Eye size={16} />
                           </button>
                           <button
-                            onClick={() =>
-                              handleDownload(
-                                getFileFullUrl(a.file_url),
-                                a.file_name
-                              )
-                            }
+                            onClick={() => window.open(getFileFullUrl(a.file_url), '_blank')}
                             className="p-2 text-green-600"
                           >
                             <Download size={16} />
@@ -1818,6 +1815,8 @@ const DeviationModal: React.FC<{
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 };
 
 // ─────────────────────────────────────────────
@@ -2008,7 +2007,7 @@ const EquipmentItem: React.FC<{
 };
 
 // ─────────────────────────────────────────────
-// LIST COMPONENTS
+// DETAIL COMPONENT
 // ─────────────────────────────────────────────
 
 const EquipmentDetailList: React.FC<{
@@ -2140,33 +2139,154 @@ const EquipmentDetailList: React.FC<{
     </div>
   );
 };
+// ─────────────────────────────────────────────
+// MAIN COMPONENT WITH PAGINATION
+// ─────────────────────────────────────────────
 
 const ManualCalibrationPage: React.FC = () => {
   const navigate = useNavigate();
-  const [groups, setGroups] = useState<SrfGroupSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedGroup, setSelectedGroup] =
-    useState<SrfGroupSummary | null>(null);
   const currentUserRole = localStorage.getItem("role") ?? "engineer";
 
+  // State
+  const [groups, setGroups] = useState<SrfGroupSummary[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<SrfGroupSummary | null>(null);
+
+  // Smooth Pagination & Search State
+  const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 500];
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  
+  const [currentPage, setCurrentPage] = useState(1); 
+  const [limit, setLimit] = useState(100);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Loading & Behavior States
+  const [isFetchingData, setIsFetchingData] = useState(false);
+  const [showLoaderOverlay, setShowLoaderOverlay] = useState(false);
+  const [isServerPaginated, setIsServerPaginated] = useState(false);
+
+  const hasDownloadedAll = useRef(false);
+
+  // 1. Smooth Loading Effect
   useEffect(() => {
-    api
-      .get("/flow-configs/manual-calibration-groups")
-      .then((r) => setGroups(r.data))
-      .finally(() => setLoading(false));
-  }, []);
-  const filtered = groups.filter(
-    (g) =>
-      g.srf_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      g.customer_name.toLowerCase().includes(searchTerm.toLowerCase())
+    let timer: NodeJS.Timeout;
+    if (isFetchingData) {
+      timer = setTimeout(() => setShowLoaderOverlay(true), 200); 
+    } else {
+      setShowLoaderOverlay(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isFetchingData]);
+
+  // 2. Debounce Search Term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (debouncedSearch !== searchTerm) {
+        setDebouncedSearch(searchTerm);
+        setCurrentPage(1); // Reset page on new search
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm, debouncedSearch]);
+
+  // 3. Central Data Fetcher
+  const fetchGroups = useCallback(async () => {
+    setIsFetchingData(true);
+    try {
+      const skip = (currentPage - 1) * limit;
+      const params: any = { skip, limit };
+      if (debouncedSearch) params.search = debouncedSearch;
+
+      const res = await api.get<any>('/flow-configs/manual-calibration-groups', { params });
+      
+      if (res.data && typeof res.data === 'object' && 'total_count' in res.data) {
+          // Backend is paginated
+          setGroups(res.data.groups || res.data.data || res.data.items || []);
+          setTotalCount(res.data.total_count || 0);
+          setIsServerPaginated(true);
+      } else {
+          // Backend returned EVERYTHING. 
+          const data = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
+          setGroups(data);
+          setTotalCount(data.length);
+          setIsServerPaginated(false);
+          hasDownloadedAll.current = true; // Lock the API!
+      }
+    } catch (error) {
+      console.error("Failed to load calibration groups", error);
+    } finally {
+      setIsFetchingData(false);
+    }
+  }, [currentPage, limit, debouncedSearch]);
+
+  // 4. Trigger Fetch ONLY when necessary
+  useEffect(() => {
+    if (selectedGroup) return; // Don't fetch if viewing details
+
+    // If we already downloaded the FULL dataset, NEVER hit the API again.
+    if (hasDownloadedAll.current) {
+        return; 
+    }
+
+    fetchGroups();
+  }, [fetchGroups, selectedGroup]);
+
+  // 5. Client-Side Slicing & Math (Runs instantly if API is locked)
+  const filteredGroups = useMemo(() => {
+    if (isServerPaginated) return groups;
+    if (!debouncedSearch) return groups;
+    
+    const lower = debouncedSearch.toLowerCase();
+    return groups.filter(g =>
+      (g.srf_no && g.srf_no.toLowerCase().includes(lower)) ||
+      (g.customer_dc_no && g.customer_dc_no.toLowerCase().includes(lower))
+    );
+  }, [groups, debouncedSearch, isServerPaginated]);
+
+  const actualTotalCount = isServerPaginated ? totalCount : filteredGroups.length;
+  const totalPages = Math.max(1, Math.ceil(actualTotalCount / limit));
+  const startRecord = actualTotalCount === 0 ? 0 : ((currentPage - 1) * limit) + 1;
+  const endRecord = Math.min(currentPage * limit, actualTotalCount);
+
+  const displayedGroups = useMemo(() => {
+    if (isServerPaginated) return filteredGroups;
+    const skip = (currentPage - 1) * limit;
+    return filteredGroups.slice(skip, skip + limit);
+  }, [filteredGroups, currentPage, limit, isServerPaginated]);
+
+
+  // 6. Reusable Pagination Controls
+  const PaginationControls = () => (
+    <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm">
+      <button
+        disabled={currentPage === 1 || isFetchingData}
+        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+        className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        <ChevronLeft size={16} /> Prev
+      </button>
+      
+      <div className="px-4 py-1.5 text-sm font-bold text-gray-700 min-w-[100px] text-center">
+        Page {currentPage} <span className="text-gray-400 font-medium">of {totalPages}</span>
+      </div>
+      
+      <button
+        disabled={currentPage === totalPages || isFetchingData || actualTotalCount === 0}
+        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+        className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        Next <ChevronRight size={16} />
+      </button>
+    </div>
   );
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-6xl mx-auto space-y-6">
+        
+        {/* Header Title Area */}
         {!selectedGroup && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-blue-600 text-white rounded-xl shadow-lg">
                 <ClipboardEdit size={28} />
@@ -2182,65 +2302,132 @@ const ManualCalibrationPage: React.FC = () => {
             </div>
             <button
               onClick={() => navigate("/engineer")}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm shadow-sm"
+              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm shadow-sm transition-colors"
             >
               <ArrowLeft size={16} /> Dashboard
             </button>
           </div>
         )}
-        {loading ? (
-          <div className="space-y-4">
-            {[1, 2].map((i) => (
-              <div
-                key={i}
-                className="h-24 bg-white border border-gray-200 rounded-xl animate-pulse"
-              />
-            ))}
-          </div>
-        ) : selectedGroup ? (
+
+        {/* View Router */}
+        {selectedGroup ? (
           <EquipmentDetailList
             group={selectedGroup}
             onBack={() => setSelectedGroup(null)}
             currentUserRole={currentUserRole}
           />
         ) : (
-          <div className="space-y-4">
-            <div className="bg-white p-5 border border-gray-200 rounded-2xl shadow-sm">
-              <div className="relative max-w-md">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-3.5" />
+          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden relative z-0">
+            
+            {/* Top Toolbar (Search & Controls) */}
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4 z-10 relative shrink-0">
+              
+              {/* Search Bar */}
+              <div className="relative w-full sm:max-w-md">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                  <Search size={16} />
+                </div>
                 <input
                   type="text"
+                  placeholder="Search by SRF No or DC No..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search..."
-                  className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm outline-none"
+                  className="pl-10 pr-4 py-2.5 w-full text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm outline-none transition-shadow"
                 />
               </div>
-            </div>
-            <div className="space-y-3">
-              {filtered.map((g) => (
-                <div
-                  key={g.srf_no}
-                  onClick={() => setSelectedGroup(g)}
-                  className="flex items-center justify-between p-5 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl transition-all cursor-pointer group shadow-sm hover:shadow-md"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="mt-1 p-2.5 bg-gray-100 text-gray-400 group-hover:bg-blue-100 group-hover:text-blue-600 rounded-full">
-                      <FileText size={20} />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-lg text-gray-800">
-                        SRF No: {g.srf_no}
-                      </p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {g.customer_name} — Items: {g.equipment_count}
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transform group-hover:translate-x-1" />
+
+              {/* Records per page & Pagination (Top) */}
+              <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+                <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:inline">Records:</span>
+                    <select 
+                        value={limit} 
+                        onChange={(e) => {
+                            setLimit(Number(e.target.value));
+                            setCurrentPage(1);
+                        }}
+                        className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white cursor-pointer font-bold text-gray-700 shadow-sm outline-none"
+                    >
+                        {PAGE_SIZE_OPTIONS.map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                    </select>
                 </div>
-              ))}
+                <div className="hidden lg:block">
+                  <PaginationControls />
+                </div>
+              </div>
+
             </div>
+
+            {/* ── Table Body ── */}
+            <div className="relative min-h-[400px] bg-white p-4 sm:p-6">
+                {/* Overlay that sits ON TOP of the list to prevent unmounting lag */}
+                {showLoaderOverlay && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/50 backdrop-blur-[2px] transition-all duration-300">
+                     <Loader2 className="w-10 h-10 animate-spin text-blue-600 shadow-sm rounded-full mb-3" />
+                     <p className="text-sm font-bold text-blue-800 bg-white/90 px-4 py-1.5 rounded-full shadow-sm border border-blue-100">
+                       Loading Groups...
+                     </p>
+                  </div>
+                )}
+
+                {displayedGroups.length === 0 && !isFetchingData ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                        <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
+                            <Package className="h-10 w-10 text-gray-300" />
+                        </div>
+                        <h3 className="text-lg font-medium text-gray-900">No SRFs or DCs found</h3>
+                        <p className="text-gray-500 mt-1 max-w-sm mx-auto">No groups match your current search.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        {displayedGroups.map((g) => (
+                          <div
+                            key={g.srf_no}
+                            onClick={() => setSelectedGroup(g)}
+                            className="flex items-center justify-between p-5 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl transition-all cursor-pointer group shadow-sm hover:shadow-md"
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className="mt-1 p-2.5 bg-gray-50 text-gray-400 group-hover:bg-blue-100 group-hover:text-blue-600 rounded-full transition-colors">
+                                <FileText size={20} />
+                              </div>
+                              <div>
+                                <p className="font-bold text-lg text-gray-800 group-hover:text-blue-700 transition-colors">
+                                  SRF No: {g.srf_no}
+                                </p>
+                                <p className="text-sm text-gray-500 mt-1 font-medium">
+                                  {g.customer_name}
+                                  {g.customer_dc_no && (
+                                    <>
+                                      <span className="mx-2 text-gray-300">|</span> 
+                                      DC: <span className="font-semibold text-gray-700">{g.customer_dc_no}</span>
+                                    </>
+                                  )}
+                                  <span className="mx-2 text-gray-300">|</span> 
+                                  Items: <span className="font-bold text-gray-700">{g.equipment_count}</span>
+                                </p>
+                              </div>
+                            </div>
+                            <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-600 transform group-hover:translate-x-1 transition-all" />
+                          </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Bottom Pagination Footer */}
+         {actualTotalCount > 0 && (
+             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row items-center justify-between z-10 relative gap-4">
+                <span className="text-sm text-gray-600 font-medium">
+                  Showing <span className="font-bold">{startRecord}</span> to{' '}
+                  <span className="font-bold">{endRecord}</span> of{' '}
+                  <span className="font-bold">{actualTotalCount}</span> records
+                </span>
+                
+                <PaginationControls />
+             </div>
+           )}
           </div>
         )}
       </div>

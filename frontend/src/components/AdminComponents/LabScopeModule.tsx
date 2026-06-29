@@ -286,25 +286,24 @@ export const LabScopeModule: React.FC<LabScopeModuleProps> = ({ onBack }) => {
         </div>
       )}
 
-      {showAddModal && createPortal(
+      {/* Render Modals directly (Portal handles teleporting inside the component) */}
+      {showAddModal && (
         <LabScopeFormModal
           key={`add-${addModalKey}`}
           onClose={() => setShowAddModal(false)}
           onSave={(fd) => handleSave(fd, false)}
           submitting={submitting}
-        />,
-        document.body
+        />
       )}
 
-      {editingItem && createPortal(
+      {editingItem && (
         <LabScopeFormModal
           key={`edit-${editingItem.id}`}
           initialData={editingItem}
           onClose={() => setEditingItem(null)}
           onSave={(fd) => handleSave(fd, true)}
           submitting={submitting}
-        />,
-        document.body
+        />
       )}
     </div>
   );
@@ -375,159 +374,172 @@ const LabScopeFormModal: React.FC<LabScopeFormModalProps> = ({
     }
   };
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  // Use createPortal to break out of all z-index stacking contexts
+  return createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[99999] p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md animate-fadeIn overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+      {/* Changed to flex-col and max-h-[95vh] to enable internal scrolling */}
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md animate-fadeIn flex flex-col max-h-[95vh]">
+        
+        {/* Fixed Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 shrink-0 rounded-t-xl">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <Building2 className="text-blue-500" size={20} />
             {isEdit ? 'Edit Laboratory Scope' : 'Add New Laboratory Scope'}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-md hover:bg-gray-200">
             <X size={20} />
           </button>
         </div>
 
-        {err && (
-          <div className="mx-6 mt-4 p-3 bg-red-50 text-red-700 rounded-lg flex items-center gap-2 text-sm">
-            <AlertCircle size={16} /> {err}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Laboratory Name <span className="text-red-500">*</span></label>
-            <div className="relative">
-              <Building2 className="absolute left-3 top-2.5 text-gray-400" size={18} />
-              <input
-                type="text"
-                name="laboratory_name"
-                value={formData.laboratory_name}
-                onChange={handleChange}
-                required
-                placeholder="e.g. NABL Accredited Lab"
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
+        {/* Scrollable Form Body */}
+        <div className="overflow-y-auto overflow-x-hidden p-6 flex-1">
+          {err && (
+            <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg flex items-center gap-2 text-sm">
+              <AlertCircle size={16} /> {err}
             </div>
-          </div>
+          )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Accreditation Standard</label>
-            <div className="relative">
-              <ShieldCheck className="absolute left-3 top-2.5 text-gray-400" size={18} />
-              <input
-                type="text"
-                name="accreditation_standard"
-                value={formData.accreditation_standard}
-                onChange={handleChange}
-                placeholder="e.g. ISO/IEC 17025:2017"
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Lab Unique Number</label>
-            <p className="text-xs text-gray-500 mb-1">Displayed under right logo in certificates</p>
-            <div className="relative">
-              <Hash className="absolute left-3 top-2.5 text-gray-400" size={18} />
-              <input
-                type="text"
-                name="lab_unique_number"
-                value={formData.lab_unique_number}
-                onChange={handleChange}
-                placeholder="e.g. TC-1234"
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Valid From</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
-              <input
-                type="date"
-                name="valid_from"
-                value={formData.valid_from}
-                onChange={handleChange}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
-              <input
-                type="date"
-                name="valid_upto"
-                value={formData.valid_upto}
-                onChange={handleChange}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center pt-2">
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                name="is_active"
-                checked={formData.is_active}
-                onChange={handleChange}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-              <span className="ml-3 text-sm font-medium text-gray-900">Active (used in certificates)</span>
-            </label>
-          </div>
-
-          <div className="border-t border-gray-100 pt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
-              <FileText size={16} className="text-gray-500" />
-              Supporting document
-            </label>
-            <p className="text-xs text-gray-500 mb-2">PDF, Word (.doc, .docx), or Excel (.xls, .xlsx). Max 25 MB. Stored in the database.</p>
-            <input
-              type="file"
-              accept={DOC_ACCEPT}
-              onChange={handleFileChange}
-              className="block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
-            {selectedFile && (
-              <p className="mt-2 text-xs text-gray-600">Selected: {selectedFile.name}</p>
-            )}
-            {isEdit && initialData?.has_document && !selectedFile && (
-              <div className="mt-3 space-y-2">
-                <p className="text-xs text-gray-600">
-                  Current file: <span className="font-medium">{initialData.document_filename || 'attached'}</span>
-                </p>
-                <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={removeDocument}
-                    onChange={(e) => setRemoveDocument(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  Remove attached document
-                </label>
+          <form id="labScopeForm" onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Laboratory Name <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <Building2 className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  name="laboratory_name"
+                  value={formData.laboratory_name}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g. NABL Accredited Lab"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
               </div>
-            )}
-          </div>
+            </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-              Cancel
-            </button>
-            <button type="submit" disabled={submitting} className="flex items-center px-6 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-70">
-              {submitting ? <Loader2 size={18} className="animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
-              {isEdit ? 'Update' : 'Save'}
-            </button>
-          </div>
-        </form>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Accreditation Standard</label>
+              <div className="relative">
+                <ShieldCheck className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  name="accreditation_standard"
+                  value={formData.accreditation_standard}
+                  onChange={handleChange}
+                  placeholder="e.g. ISO/IEC 17025:2017"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Lab Unique Number</label>
+              <p className="text-xs text-gray-500 mb-1">Displayed under right logo in certificates</p>
+              <div className="relative">
+                <Hash className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  name="lab_unique_number"
+                  value={formData.lab_unique_number}
+                  onChange={handleChange}
+                  placeholder="e.g. TC-1234"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valid From</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input
+                  type="date"
+                  name="valid_from"
+                  value={formData.valid_from}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valid Upto</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input
+                  type="date"
+                  name="valid_upto"
+                  value={formData.valid_upto}
+                  onChange={handleChange}
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center pt-2">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="is_active"
+                  checked={formData.is_active}
+                  onChange={handleChange}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                <span className="ml-3 text-sm font-medium text-gray-900">Active (used in certificates)</span>
+              </label>
+            </div>
+
+            <div className="border-t border-gray-100 pt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+                <FileText size={16} className="text-gray-500" />
+                Supporting document
+              </label>
+              <p className="text-xs text-gray-500 mb-2">PDF, Word (.doc, .docx), or Excel (.xls, .xlsx). Max 25 MB.</p>
+              <input
+                type="file"
+                accept={DOC_ACCEPT}
+                onChange={handleFileChange}
+                className="block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+              {selectedFile && (
+                <p className="mt-2 text-xs text-gray-600">Selected: {selectedFile.name}</p>
+              )}
+              {isEdit && initialData?.has_document && !selectedFile && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-gray-600">
+                    Current file: <span className="font-medium">{initialData.document_filename || 'attached'}</span>
+                  </p>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={removeDocument}
+                      onChange={(e) => setRemoveDocument(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Remove attached document
+                  </label>
+                </div>
+              )}
+            </div>
+          </form>
+        </div>
+
+        {/* Fixed Footer */}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0 bg-white rounded-b-xl">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+          {/* Note: the form="labScopeForm" attribute links this external button to the <form> inside the scrollable body */}
+          <button type="submit" form="labScopeForm" disabled={submitting} className="flex items-center px-6 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-70 transition-colors">
+            {submitting ? <Loader2 size={18} className="animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
+            {isEdit ? 'Update' : 'Save'}
+          </button>
+        </div>
+
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

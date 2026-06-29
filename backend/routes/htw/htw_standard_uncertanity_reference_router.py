@@ -55,7 +55,7 @@ async def import_htw_standard_uncertainty_reference(
 # POST
 # ---------------------------------------------------------------------------
 @router.post(
-    "",
+    "/",
     response_model=HTWStandardUncertaintyReferenceResponse,
     status_code=201,
 )
@@ -70,7 +70,7 @@ def create_htw_standard_uncertainty_reference(
 # GET (ALL)
 # ---------------------------------------------------------------------------
 @router.get(
-    "",
+    "/",
     response_model=List[HTWStandardUncertaintyReferenceResponse],
     status_code=200,
 )

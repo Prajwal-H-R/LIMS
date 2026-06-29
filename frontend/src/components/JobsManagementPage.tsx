@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { api, ENDPOINTS } from "../api/config";
 import {
   Loader2,
@@ -20,6 +20,7 @@ import {
   Filter,
   X,
   ChevronRight,
+  ChevronLeft,
   Ban,
   Lock,
   AlertTriangle
@@ -27,8 +28,6 @@ import {
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
 // --- Interfaces ---
-
-// ⭐ UPDATED to match the new high-performance backend response
 interface InwardJob {
   inward_id: number;
   srf_no: string;
@@ -84,8 +83,7 @@ interface FlowConfig {
 
 type EquipmentTab = "pending" | "in_progress" | "completed" | "terminated";
 
-// --- Skeleton Components (Unchanged) ---
-
+// --- Skeleton Components ---
 const JobListSkeleton: React.FC = () => {
   return (
     <div className="space-y-4">
@@ -158,6 +156,7 @@ const JobsManagementPage: React.FC = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // URL Params Routing State
   const activeJobId = searchParams.get("jobId") ? Number(searchParams.get("jobId")) : null;
   const activeDetailTab = (searchParams.get("tab") as EquipmentTab) || "pending";
   const viewMode = activeJobId ? "detail" : "list";
@@ -168,105 +167,141 @@ const JobsManagementPage: React.FC = () => {
   const [selectedJob, setSelectedJob] = useState<InwardDetailResponse | null>(null);
 
   const [jobs, setJobs] = useState<InwardJob[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filterStartDate, setFilterStartDate] = useState("");
   const [filterEndDate, setFilterEndDate] = useState("");
   const [expiredStandards, setExpiredStandards] = useState<string[]>([]);
   const [systemDrivenTypes, setSystemDrivenTypes] = useState<string[]>([]);
 
+  // --- Smooth Pagination & Search State ---
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  
+  const [currentPage, setCurrentPage] = useState(1); 
+  const [limit, setLimit] = useState(100);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
+  const [isServerPaginated, setIsServerPaginated] = useState(false);
+
+  const [isFetchingData, setIsFetchingData] = useState(false);
+  const [showLoaderOverlay, setShowLoaderOverlay] = useState(false);
+
+  // 1. Debounce Search Term
   useEffect(() => {
-    fetchJobs();
+    const timer = setTimeout(() => {
+      if (debouncedSearch !== searchTerm) {
+        setDebouncedSearch(searchTerm);
+        setCurrentPage(1); // Reset page on new search
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm, debouncedSearch]);
+
+  // 2. Smooth Loading Overlay
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isFetchingData) {
+      timer = setTimeout(() => setShowLoaderOverlay(true), 200);
+    } else {
+      setShowLoaderOverlay(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isFetchingData]);
+
+  // 3. Mount Calls
+  useEffect(() => {
     fetchSystemDrivenTypes();
     checkExpiry();
   }, []);
 
+  // 4. Fetch Trigger
+  useEffect(() => {
+    if (!activeJobId) {
+      fetchJobs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, limit, debouncedSearch, filterStartDate, filterEndDate]);
+
   const fetchSystemDrivenTypes = async () => {
     try {
       const res = await api.get<FlowConfig[]>('/flow-configs');
-      const activeTypes = res.data
-        .filter(config => config.is_active)
-        .map(config => config.equipment_type.toLowerCase().trim());
+      const activeTypes = res.data.filter(c => c.is_active).map(c => c.equipment_type.toLowerCase().trim());
       setSystemDrivenTypes(activeTypes);
-    } catch (error) {
-      console.error("Failed to fetch equipment flow configurations", error);
-    }
+    } catch (error) {}
   };
 
   const checkExpiry = async () => {
     try {
         const todayStr = new Date().toISOString().split('T')[0];
         const res = await api.post<ExpiryCheckResponse>('/calibration/check-expiry', { reference_date: todayStr });
-        if (res.data) {
-            if ('affected_tables' in res.data && Array.isArray(res.data.affected_tables)) {
-                setExpiredStandards(res.data.affected_tables);
-            } else if (Array.isArray(res.data)) {
-                setExpiredStandards(res.data as unknown as string[]);
-            } else {
-                setExpiredStandards([]);
-            }
-        }
-    } catch (error) {
-        console.error("Failed to check expiry", error);
-    }
+        if (res.data?.affected_tables) setExpiredStandards(res.data.affected_tables);
+    } catch (error) {}
   };
 
+  // Route Handling
   useEffect(() => {
     const state = location.state as { viewJobId?: number; activeTab?: EquipmentTab } | null;
     if (state?.viewJobId) {
-        setSearchParams({ 
-            jobId: state.viewJobId.toString(), 
-            tab: state.activeTab || "pending" 
-        });
+        setSearchParams({ jobId: state.viewJobId.toString(), tab: state.activeTab || "pending" });
         window.history.replaceState({}, document.title);
     }
   }, [location, setSearchParams]);
 
+  // Detail View Data Fetcher
   useEffect(() => {
-    if (activeJobId) {
-        if ((!selectedJob || selectedJob.inward_id !== activeJobId) && systemDrivenTypes.length > 0) {
-            fetchJobDetails(activeJobId);
-        }
-    } else {
+    if (activeJobId && (!selectedJob || selectedJob.inward_id !== activeJobId) && systemDrivenTypes.length > 0) {
+        fetchJobDetails(activeJobId);
+    } else if (!activeJobId) {
         setSelectedJob(null);
     }
   }, [activeJobId, systemDrivenTypes]);
 
-  // ✅ SIMPLIFIED AND FAST
-  const fetchJobs = async () => {
+  // ✅ SMART FETCH FUNCTION
+  const fetchJobs = useCallback(async () => {
     try {
-      if (!activeJobId) setLoading(true);
+      setIsFetchingData(true);
       setErrorMsg(null);
-      console.log(`[JobsManagementPage] ==> Fetching LIST and COUNTS from SINGLE high-performance endpoint: '/flow-configs/system-driven-jobs'`);
-      const res = await api.get<InwardJob[]>('/flow-configs/system-driven-jobs');
-      const data = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
-      console.log(`[JobsManagementPage] ✅ Received ${data.length} jobs with pre-calculated counts. Page will load instantly.`);
-      setJobs(data);
+      
+      const skip = (currentPage - 1) * limit;
+      const params: any = { skip, limit };
+
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (filterStartDate) params.start_date = filterStartDate;
+      if (filterEndDate) params.end_date = filterEndDate;
+
+      const res = await api.get<any>('/flow-configs/system-driven-jobs', { params });
+      
+      if (res.data && typeof res.data === 'object' && 'total_count' in res.data) {
+          // Backend is paginated
+          setJobs(res.data.jobs || []);
+          setServerTotalCount(res.data.total_count || 0);
+          setIsServerPaginated(true);
+      } else {
+          // Backend returned EVERYTHING. Frontend pagination takes over.
+          const data = Array.isArray(res.data) ? res.data : (res.data as any).data || [];
+          setJobs(data);
+          setIsServerPaginated(false);
+      }
     } catch (error) {
-      console.error("Failed to fetch inward jobs", error);
       setErrorMsg("Failed to load jobs list.");
     } finally {
-      if (!activeJobId) setLoading(false);
+      setIsFetchingData(false);
     }
-  };
+  }, [currentPage, limit, debouncedSearch, filterStartDate, filterEndDate]);
 
   const fetchJobDetails = async (id: number) => {
     try {
       setLoading(true);
       setErrorMsg(null);
       const url = `${ENDPOINTS.STAFF.INWARDS}/${id}`;
-      console.log(`[JobsManagementPage] ==> Fetching ALL details for a single job from ORIGINAL endpoint: '${url}'`);
       
       const res = await api.get<InwardDetailResponse>(url);
       const inwardData = res.data;
 
       if (inwardData.equipments) {
-        console.log(`[JobsManagementPage] Filtering ${inwardData.equipments.length} equipments against ${systemDrivenTypes.length} system-driven rules.`);
         const filteredEquipmentList = inwardData.equipments.filter(eq =>
           systemDrivenTypes.includes(eq.material_description.toLowerCase().trim())
         );
         inwardData.equipments = filteredEquipmentList;
-        console.log(`[JobsManagementPage] Found ${filteredEquipmentList.length} matching system-driven equipments.`);
       }
       
       if (inwardData.equipments && inwardData.equipments.length > 0) {
@@ -277,7 +312,6 @@ const JobsManagementPage: React.FC = () => {
                     const jobData = jobRes.data.length > 0 ? jobRes.data[0] : null;
                     return { ...eq, job_id: jobData?.job_id, job_status: jobData?.job_status };
                 } catch (err) {
-                    console.error(`Failed to fetch job status for eqp ${eq.inward_eqp_id}`, err);
                     return { ...eq, job_id: null, job_status: null };
                 }
             })
@@ -291,7 +325,6 @@ const JobsManagementPage: React.FC = () => {
 
       setSelectedJob(inwardData);
     } catch (error: any) {
-      console.error("Failed to fetch job details:", error);
       setErrorMsg("Could not load details.");
     } finally {
       setLoading(false);
@@ -321,7 +354,7 @@ const JobsManagementPage: React.FC = () => {
   };
 
   const handleBackToList = () => {
-    setSearchParams({});
+    setSearchParams({}); // Clears URL routing params to go back to list
   };
 
   const handleStartCalibration = (inwardId: number, equipmentId: number) => {
@@ -351,9 +384,7 @@ const JobsManagementPage: React.FC = () => {
 
   const formatDate = (dateString?: string | null) => {
     if (!dateString) return "-";
-    return new Date(dateString).toLocaleDateString("en-GB", {
-        day: '2-digit', month: 'short', year: 'numeric'
-    });
+    return new Date(dateString).toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
   const getStatusConfig = (status: string | null | undefined) => {
@@ -364,26 +395,67 @@ const JobsManagementPage: React.FC = () => {
     return { iconBg: "bg-teal-100", iconText: "text-teal-600", badge: "bg-gray-100 text-gray-600 border-gray-200", icon: Clock };
   };
 
+  // ---------------------------------------------------------
+  // ✅ DATA SLICING & MATH
+  // ---------------------------------------------------------
   const filteredJobs = useMemo(() => {
     let result = jobs;
-    if (searchTerm) {
-      const lowerTerm = searchTerm.toLowerCase();
-      result = result.filter(job => 
-        job.srf_no.toLowerCase().includes(lowerTerm) || 
-        job.customer_dc_no.toLowerCase().includes(lowerTerm)
-      );
+    if (!isServerPaginated && debouncedSearch) {
+      const lowerTerm = debouncedSearch.toLowerCase();
+      result = result.filter(job => job.srf_no.toLowerCase().includes(lowerTerm) || job.customer_dc_no.toLowerCase().includes(lowerTerm));
     }
-    if (filterStartDate) {
+    if (!isServerPaginated && filterStartDate) {
       result = result.filter(job => job.customer_dc_date && new Date(job.customer_dc_date) >= new Date(filterStartDate));
     }
-    if (filterEndDate) {
+    if (!isServerPaginated && filterEndDate) {
       result = result.filter(job => job.customer_dc_date && new Date(job.customer_dc_date) <= new Date(filterEndDate));
     }
     return result;
-  }, [jobs, searchTerm, filterStartDate, filterEndDate]);
+  }, [jobs, debouncedSearch, filterStartDate, filterEndDate, isServerPaginated]);
+
+  const actualTotalCount = isServerPaginated ? serverTotalCount : filteredJobs.length;
+  const totalPages = Math.max(1, Math.ceil(actualTotalCount / limit));
+  const startRecord = actualTotalCount === 0 ? 0 : ((currentPage - 1) * limit) + 1;
+  const endRecord = Math.min(currentPage * limit, actualTotalCount);
+
+  const displayedJobs = useMemo(() => {
+    if (isServerPaginated) return filteredJobs;
+    const skip = (currentPage - 1) * limit;
+    return filteredJobs.slice(skip, skip + limit);
+  }, [filteredJobs, currentPage, limit, isServerPaginated]);
 
   const isStandardsExpired = expiredStandards.length > 0;
 
+  // --- Reusable Pagination Controls ---
+  const PaginationControls = () => (
+    <div className="flex justify-center w-full sm:w-auto">
+        <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm">
+          <button
+            disabled={currentPage === 1 || isFetchingData}
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft size={16} /> Prev
+          </button>
+          
+          <div className="px-4 py-1.5 text-sm font-bold text-gray-700 min-w-[100px] text-center">
+            Page {currentPage} <span className="text-gray-400 font-medium">of {totalPages}</span>
+          </div>
+          
+          <button
+            disabled={currentPage === totalPages || isFetchingData || actualTotalCount === 0}
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
+    </div>
+  );
+
+  // =========================================================
+  // DETAIL VIEW
+  // =========================================================
   if (viewMode === "detail") {
     if (loading || !selectedJob) {
         return <JobDetailSkeleton />;
@@ -495,6 +567,10 @@ const JobsManagementPage: React.FC = () => {
                             filteredEquipments.map((item) => {
                                 const displayStatus = selectedJob.inward_srf_flag ? "Terminated" : (item.job_status || "Not Started");
                                 const statusConfig = getStatusConfig(selectedJob.inward_srf_flag ? "terminated" : item.job_status);
+                                
+                                // Check if the item is terminated (either entire SRF is terminated, or item is in terminated tab)
+                                const isItemTerminated = selectedJob.inward_srf_flag || activeDetailTab === "terminated";
+
                                 return (
                                 <tr key={item.inward_eqp_id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4 font-medium text-blue-600 align-top">{item.nepl_id}</td>
@@ -508,9 +584,9 @@ const JobsManagementPage: React.FC = () => {
                                     </td>
                                     <td className="px-6 py-4 text-center align-middle">
                                         <div className="flex flex-col gap-2 w-full">
-                                            {selectedJob.inward_srf_flag ? (
-                                                <span className="text-xs text-red-500 italic flex items-center justify-center gap-1">
-                                                    <Ban className="h-3 w-3" /> Action Disabled
+                                            {isItemTerminated ? (
+                                                <span className="text-xs text-red-500 italic flex items-center justify-center gap-1 font-semibold">
+                                                    <Ban className="h-3.5 w-3.5" /> Action Disabled
                                                 </span>
                                             ) : (
                                                 <>
@@ -565,12 +641,17 @@ const JobsManagementPage: React.FC = () => {
     );
   }
 
+  // =========================================================
+  // LIST VIEW
+  // =========================================================
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-6xl mx-auto space-y-6">
+        
+        {/* Header Title Area */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-teal-50 text-teal-600 rounded-xl border border-teal-100">
+            <div className="p-3 bg-teal-50 text-teal-600 rounded-xl border border-teal-100 shadow-sm">
               <ClipboardList className="h-8 w-8" />
             </div>
             <div>
@@ -578,99 +659,168 @@ const JobsManagementPage: React.FC = () => {
               <p className="text-gray-500 text-sm mt-1">Overview of Inwards, SRFs, and Customer DCs</p>
             </div>
           </div>
-          <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm">
+          <button type="button" onClick={() => navigate("/engineer")} className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm transition-all shadow-sm">
             <ArrowLeft size={16} />
             <span>Back to Dashboard</span>
           </button>
         </div>
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
-           <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 rounded-t-2xl">
+
+        {/* Master Container for Search, Pagination, and List */}
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col relative z-0">
+           
+           {/* Top Search & Filter Actions */}
+           <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50 z-10 relative">
               <div className="relative max-w-md w-full">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Search className="h-4 w-4 text-gray-400" />
                   </div>
-                  <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search by SRF or DC No..." className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-shadow bg-white" />
+                  <input 
+                      type="text" 
+                      value={searchTerm} 
+                      onChange={(e) => setSearchTerm(e.target.value)} 
+                      placeholder="Search by SRF or DC No..." 
+                      className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-shadow bg-white outline-none" 
+                  />
               </div>
               <div className="flex items-center gap-2">
-                  <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg border transition-colors ${(showFilters || filterStartDate || filterEndDate) ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
-                      <Filter className="h-4 w-4" />
-                      Filters
+                  <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg border transition-colors ${(showFilters || filterStartDate || filterEndDate) ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
+                      <Filter className="h-4 w-4" /> Filters
                   </button>
               </div>
            </div>
+
+           {/* Expandable Filter Box */}
            {(showFilters || filterStartDate || filterEndDate) && (
-              <div className="px-5 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-4 animate-in fade-in slide-in-from-top-2">
+              <div className="px-5 py-4 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-4 z-10 relative">
                   <div>
                       <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">DC Start Date</label>
-                      <input type="date" value={filterStartDate} onChange={(e) => setFilterStartDate(e.target.value)} className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500" />
+                      <input type="date" value={filterStartDate} onChange={(e) => { setFilterStartDate(e.target.value); setCurrentPage(1); }} className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none" />
                   </div>
                   <div>
                       <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">DC End Date</label>
-                      <input type="date" value={filterEndDate} onChange={(e) => setFilterEndDate(e.target.value)} className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500" />
+                      <input type="date" value={filterEndDate} onChange={(e) => { setFilterEndDate(e.target.value); setCurrentPage(1); }} className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none" />
                   </div>
                   {(filterStartDate || filterEndDate) && (
-                      <button onClick={() => { setFilterStartDate(""); setFilterEndDate(""); }} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1">
+                      <button onClick={() => { setFilterStartDate(""); setFilterEndDate(""); setCurrentPage(1); }} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1">
                           <X className="h-4 w-4" /> Clear
                       </button>
                   )}
               </div>
            )}
+
+           {/* TOP PAGINATION CONTROLS */}
+           <div className="px-6 py-4 border-b border-gray-100 flex flex-col md:flex-row items-center justify-between gap-4 bg-white z-10 relative">
+               <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                   <div className="flex items-center gap-2">
+                       <span className="text-xs text-gray-500 font-bold uppercase tracking-wider hidden sm:inline">Records:</span>
+                       <select 
+                            value={limit} 
+                            onChange={(e) => {
+                                setLimit(Number(e.target.value));
+                                setCurrentPage(1);
+                            }}
+                            className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white cursor-pointer font-bold text-gray-700 shadow-sm outline-none"
+                        >
+                            <option value={10}>10</option>
+                            <option value={20}>20</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                            <option value={500}>500</option>
+                       </select>
+                   </div>
+               </div>
+               
+               <div className="hidden sm:block">
+                 <PaginationControls />
+               </div>
+           </div>
+
            {errorMsg && (
-              <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
-                  <AlertCircle className="h-5 w-5" />
-                  <span>{errorMsg}</span>
+              <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700 z-10 relative">
+                  <AlertCircle className="h-5 w-5" /> <span>{errorMsg}</span>
               </div>
            )}
-           <div className="p-4 sm:p-6">
-                {loading ? (
-                    <JobListSkeleton />
-                ) : filteredJobs.length === 0 ? (
+
+           {/* ── Table Body ── */}
+           <div className="relative min-h-[400px] bg-white p-4 sm:p-6 flex-1">
+               {/* Overlay that sits ON TOP of the list to prevent unmounting lag */}
+               {showLoaderOverlay && (
+                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/50 backdrop-blur-[2px] transition-all duration-300">
+                    <Loader2 className="w-10 h-10 animate-spin text-teal-600 shadow-sm rounded-full mb-3" />
+                    <p className="text-sm font-bold text-teal-800 bg-white/90 px-4 py-1.5 rounded-full shadow-sm border border-teal-100">
+                      Loading Jobs...
+                    </p>
+                 </div>
+               )}
+
+                {displayedJobs.length === 0 && !isFetchingData ? (
                     <div className="text-center py-16">
                         <div className="inline-flex items-center justify-center p-4 bg-gray-50 rounded-full mb-4">
-                            <Package className="h-8 w-8 text-gray-300" />
+                            <Package className="h-10 w-10 text-gray-300" />
                         </div>
                         <h3 className="text-lg font-medium text-gray-900">No jobs found</h3>
-                        <p className="text-gray-500 mt-1 max-w-sm mx-auto">No system-driven jobs match your current search criteria.</p>
+                        <p className="text-gray-500 mt-1 max-w-sm mx-auto">No jobs match your search criteria.</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
-                        {filteredJobs.map((job) => {
+                        {displayedJobs.map((job) => {
                             const config = getStatusConfig(job.status);
                             return (
-                                <div key={job.inward_id} onClick={() => handleOpenJob(job.inward_id)} className="flex items-center justify-between p-5 bg-gray-50 hover:bg-blue-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm hover:shadow-md cursor-pointer">
+                                <div 
+                                  key={job.inward_id} 
+                                  onClick={() => handleOpenJob(job.inward_id)} 
+                                  className="flex items-center justify-between p-5 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl transition-all cursor-pointer group shadow-sm hover:shadow-md"
+                                >
                                     <div className="flex items-start gap-4">
-                                        <div className="mt-1">
-                                            <div className={`p-2 rounded-full ${config.iconBg} ${config.iconText}`}>
-                                                <config.icon className="h-5 w-5" />
-                                            </div>
+                                        <div className={`mt-1 p-2.5 rounded-full transition-colors ${config.iconBg} ${config.iconText}`}>
+                                            <config.icon size={20} />
                                         </div>
                                         <div>
-                                            <div className="flex items-center gap-3">
-                                                <p className="font-semibold text-lg text-gray-800">SRF No: {job.srf_no || "N/A"}</p>
-                                            </div>
-                                            <p className="text-sm text-gray-600 mt-1">DC: <span className="font-medium text-gray-900">{job.customer_dc_no || "N/A"}</span> — Received on <span className="font-medium text-gray-700">{formatDate(job.customer_dc_date)}</span></p>
-                                            
-                                            {/* ✅ COUNTS RENDERED DIRECTLY FROM THE API RESPONSE */}
-                                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                              <span className="px-2 py-0.5 rounded-full border bg-gray-100 text-gray-700 border-gray-200">
-                                                Pending: {job.pending_count}
-                                              </span>
-                                              <span className="px-2 py-0.5 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
-                                                In Progress: {job.in_progress_count}
-                                              </span>
-                                              <span className="px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">
-                                                Completed: {job.completed_count}
-                                              </span>
+                                            <p className="font-bold text-lg text-gray-800 group-hover:text-blue-700 transition-colors">
+                                                SRF No: {job.srf_no || "N/A"}
+                                            </p>
+                                            <div className="text-sm text-gray-500 mt-1 font-medium flex items-center flex-wrap gap-y-2">
+                                                <span className="text-gray-700">DC: {job.customer_dc_no || "N/A"}</span>
+                                                <span className="mx-2 text-gray-300">|</span>
+                                                <span>Received: {formatDate(job.customer_dc_date)}</span>
+                                                <span className="mx-2 hidden sm:inline text-gray-300">|</span>
+                                                
+                                                {/* Compact Inline Badges */}
+                                                <div className="flex items-center gap-2 sm:ml-1 w-full sm:w-auto">
+                                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-bold tracking-wide border bg-gray-50 text-gray-600 border-gray-200">
+                                                        Pending: {job.pending_count}
+                                                    </span>
+                                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-bold tracking-wide border bg-blue-50 text-blue-600 border-blue-200">
+                                                        In Progress: {job.in_progress_count}
+                                                    </span>
+                                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-bold tracking-wide border bg-green-50 text-green-600 border-green-200">
+                                                        Completed: {job.completed_count}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
-                                    <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-colors" />
+                                    <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-600 transform group-hover:translate-x-1 transition-all flex-shrink-0 ml-2" />
                                 </div>
                             );
                         })}
                     </div>
                 )}
            </div>
+
+           {/* BOTTOM PAGINATION CONTROLS */}
+           {actualTotalCount > 0 && (
+             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row items-center justify-between z-10 relative shrink-0 gap-4">
+                <span className="text-sm text-gray-600 font-medium">
+                  Showing <span className="font-bold">{startRecord}</span> to{' '}
+                  <span className="font-bold">{endRecord}</span> of{' '}
+                  <span className="font-bold">{actualTotalCount}</span> records
+                </span>
+                
+                <PaginationControls />
+             </div>
+           )}
+
         </div>
       </div>
     </div>
