@@ -56,4 +56,3 @@ uploads/
 
 # Allow package-lock.json for frontend
 !frontend/package-lock.json
-

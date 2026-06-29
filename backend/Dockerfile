@@ -1,39 +1,39 @@
-# backend/Dockerfile
-
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 WORKDIR /app
- 
-# Install system deps needed for build & Postgres client libs
-RUN apt-get update && apt-get install -y \
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
- 
-# Copy requirements and install (use pip upgrade for wheel/build stability)
+
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-WORKDIR /app/backend
- 
-# Ensure pip/wheel are fresh, then install
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r /app/backend/requirements.txt
 
-# Install Playwright browser binaries
-RUN python -m playwright install --with-deps chromium
- 
-# Copy backend source
+# Install browser binaries into a shared path
+RUN mkdir -p /ms-playwright \
+    && python -m playwright install --with-deps chromium \
+    && chmod -R 755 /ms-playwright
+
 COPY backend /app/backend
 
-WORKDIR /app
+RUN mkdir -p /app/backend/uploads/inward_photos \
+    && chmod -R 755 /app/backend/uploads
 
-# Create uploads directory with proper permissions
-RUN mkdir -p /app/uploads/inward_photos && chmod -R 755 /app/uploads
- 
-# Set Python path
-ENV PYTHONPATH=/app
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app /ms-playwright
+
+USER appuser
 
 EXPOSE 8000
 
-# Use reload for development
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

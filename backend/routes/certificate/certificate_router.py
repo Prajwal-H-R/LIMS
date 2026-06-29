@@ -190,7 +190,7 @@ def view_certificate_by_qr(
         recommended_cal_due_date=rec_str,
         calibration_status=cert_service.get_calibration_status(cert),
         template_data=template_data,
-        print_pdf_url=f"{base_url}/api/certificates/{cert.certificate_id}/download-pdf",
+        print_pdf_url=f"/api/certificates/{cert.certificate_id}/download-pdf",
     )
 
 
@@ -219,7 +219,7 @@ def view_certificate_by_id_for_qr(
         recommended_cal_due_date=rec_str,
         calibration_status=cert_service.get_calibration_status(cert),
         template_data=template_data,
-        print_pdf_url=f"{base_url}/api/certificates/{cert.certificate_id}/download-pdf",
+        print_pdf_url=f"/api/certificates/{cert.certificate_id}/download-pdf",
     )
 
 
@@ -238,7 +238,7 @@ def view_certificate_page_by_id_for_qr(
     cal_str = cert.date_of_calibration.strftime("%d-%m-%Y") if cert.date_of_calibration else "-"
     rec_str = cert.recommended_cal_due_date.strftime("%d-%m-%Y") if cert.recommended_cal_due_date else "-"
     cal_status = cert_service.get_calibration_status(cert)
-    pdf_url = f"{base_url}/api/certificates/{cert.certificate_id}/download-pdf"
+    pdf_url = f"/api/certificates/{cert.certificate_id}/download-pdf"
 
     html = f"""
 <!doctype html>
