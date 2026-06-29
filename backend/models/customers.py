@@ -1,4 +1,4 @@
-# backend/models/customer.py
+# backend/models/customer.py for testing
 
 from sqlalchemy import Column, Integer, Text, String, Boolean, TIMESTAMP, func
 from sqlalchemy.orm import relationship
