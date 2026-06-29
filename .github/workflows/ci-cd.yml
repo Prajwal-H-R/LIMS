@@ -139,4 +139,3 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker push ghcr.io/${{ github.repository_owner }}/yatharthatalims-frontend:latest
-we have this in code file inthe main branch but still dcoker image is not generating and not pushing into ghcr?
