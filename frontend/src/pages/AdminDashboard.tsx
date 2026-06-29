@@ -1,24 +1,27 @@
 // frontend/src/pages/AdminDashboard.tsx
-
+ 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { api, ENDPOINTS } from '../api/config';
-
+import { fetchLicenseStatus, LicenseStatus } from '../api/license';
+import LicenseModal from '../components/LicenseModal';
+ 
 import Header   from '../components/Header';
 import Footer   from '../components/Footer';
 import ProfilePage from '../components/ProfilePage';
-
+ 
 import { MasterStandardModule }    from '../components/AdminComponents/MasterStandardModule';
 import { CertificateApprovalModule } from '../components/AdminComponents/CertificateApprovalModule';
 import { LabScopeModule }          from '../components/AdminComponents/LabScopeModule';
 import { HTWEnvironmentManager }   from '../components/AdminComponents/HTWEnvironmentManager';
-
+ 
+ 
 import {
   AdminNotificationsPanel,
   extractCompanyFromNotification,
 } from '../components/AdminComponents/AdminNotifications';
-
+ 
 import { AdminDashboardHome }      from '../components/AdminDashboardHome';
 import {
   UserManagementSystem,
@@ -26,7 +29,7 @@ import {
   User,
   Customer,
 } from '../components/AdminComponents/AdminUserManagements';
-
+ 
 import {
   AlertCircle, Settings, Info,
   Bell, Users, UserPlus, UserCog,
@@ -34,22 +37,22 @@ import {
   ChevronLeft, Menu,
   LayoutDashboard,
 } from 'lucide-react';
-
+ 
 import type { AdminNotificationItem, UnlockNotificationItem } from
   '../components/AdminComponents/AdminNotifications';
-
+ 
 // ====================================================================
 // CONSTANTS
 // ====================================================================
-
+ 
 const UNLOCK_LAST_READ_KEY            = 'admin_unlock_last_read_at';
 const PROFILE_UPDATE_LAST_POPUP_SEEN_KEY = 'admin_profile_update_last_popup_seen_id';
 const PROFILE_UPDATE_LAST_READ_KEY    = 'admin_profile_update_last_read_id';
-
+ 
 // ====================================================================
 // RESPONSE TYPES
 // ====================================================================
-
+ 
 export interface UserStats {
   total_users: number;
   active_users: number;
@@ -57,18 +60,17 @@ export interface UserStats {
   admin_users: number;
 }
 
-// Updated to match the new paginated backend response
 interface UsersResponse { 
   total_count: number;
   users: User[]; 
 }
 interface AdminNotificationsResponse { notifications: AdminNotificationItem[]; }
 interface ExpiryCheckResponse      { message: string; affected_tables: string[]; }
-
+ 
 // ====================================================================
 // SKELETON
 // ====================================================================
-
+ 
 const AdminSkeleton: React.FC<{ type: 'dashboard' | 'users' }> = ({ type }) => {
   if (type === 'dashboard') {
     return (
@@ -108,7 +110,7 @@ const AdminSkeleton: React.FC<{ type: 'dashboard' | 'users' }> = ({ type }) => {
       </div>
     );
   }
-
+ 
   return (
     <div className="animate-pulse h-full flex flex-col w-full">
       <div className="mb-6 space-y-2">
@@ -151,11 +153,11 @@ const AdminSkeleton: React.FC<{ type: 'dashboard' | 'users' }> = ({ type }) => {
     </div>
   );
 };
-
+ 
 // ====================================================================
 // SIDEBAR
 // ====================================================================
-
+ 
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (val: boolean) => void;
@@ -163,7 +165,7 @@ interface SidebarProps {
   setActiveSection: (val: string) => void;
   unreadNotificationCount: number;
 }
-
+ 
 const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   setIsOpen,
@@ -175,7 +177,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     label: string;
     top: number;
   } | null>(null);
-
+ 
   const mainNavItems = [
     { id: 'dashboard',     label: 'Dashboard',      icon: <LayoutDashboard size={20} /> },
     { id: 'profile',       label: 'My Profile',     icon: <UserCog size={20} /> },
@@ -183,7 +185,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'invite-users',  label: 'Invite User',    icon: <UserPlus size={20} /> },
     { id: 'users',         label: 'User Management',icon: <Users size={20} /> },
   ];
-
+ 
   const adminToolItems = [
     { id: 'certificate-approval', label: 'Certificate Approval', icon: <Award size={20} /> },
     { id: 'master-standard',      label: 'Master Standards',     icon: <Ruler size={20} /> },
@@ -191,7 +193,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'htw-environment',      label: 'Environment Ranges',   icon: <Thermometer size={20} /> },
     { id: 'settings',             label: 'Settings',             icon: <Settings size={20} /> },
   ];
-
+ 
   const handleMouseEnter = (
     e: React.MouseEvent<HTMLButtonElement>,
     label: string
@@ -200,7 +202,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     setHoveredItem({ label, top: rect.top + rect.height / 2 });
   };
-
+ 
   const renderNavButton = (item: {
     id: string;
     label: string;
@@ -211,7 +213,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       item.id === 'notifications' && unreadNotificationCount > 0;
     const badgeLabel =
       unreadNotificationCount > 99 ? '99+' : unreadNotificationCount;
-
+ 
     return (
       <button
         key={item.id}
@@ -260,7 +262,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
     );
   };
-
+ 
   return (
     <>
       <aside
@@ -322,11 +324,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
-
+ 
 // ====================================================================
 // PROFILE UPDATE POPUP
 // ====================================================================
-
+ 
 const ProfileUpdatePopup: React.FC<{
   latestCompany: string | null;
   onDismiss: () => void;
@@ -373,19 +375,24 @@ const ProfileUpdatePopup: React.FC<{
     </div>
   </div>
 );
-
+ 
 // ====================================================================
 // MAIN DASHBOARD COMPONENT
 // ====================================================================
-
+ 
 const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSection = searchParams.get('section') || 'dashboard';
-
+ 
+  // ── License popup state (admin only; never blocks actions) ─────────
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [licenseValidUntil, setLicenseValidUntil] = useState('');
+  const [showLicensePopup, setShowLicensePopup] = useState(false);
+ 
   // ── Core state ────────────────────────────────────────────────────
   const [users,          setUsers]          = useState<User[]>([]);
-  const [userStats,      setUserStats]      = useState<UserStats | null>(null); // NEW: Track Dashboard Stats separately
+  const [userStats,      setUserStats]      = useState<UserStats | null>(null);
   const [totalUserCount, setTotalUserCount] = useState<number>(0);
   const [customers,      setCustomers]      = useState<Customer[]>([]);
   const [loading,        setLoading]        = useState(true);
@@ -397,28 +404,28 @@ const AdminDashboard: React.FC = () => {
   const [isSidebarOpen,  setSidebarOpen]    = useState(true);
   const [expiredTables,  setExpiredTables]  = useState<string[]>([]);
   const expiryCheckedRef = useRef(false);
-
+ 
   // ── Profile notifications ─────────────────────────────────────────
   const [profileNotifications,    setProfileNotifications]    = useState<AdminNotificationItem[]>([]);
   const [profileNotifLoading,     setProfileNotifLoading]     = useState(false);
   const [profileNotifError,       setProfileNotifError]       = useState<string | null>(null);
   const [showProfileUpdatePopup,  setShowProfileUpdatePopup]  = useState(false);
   const [unreadProfileCount,      setUnreadProfileCount]      = useState(0);
-
+ 
   // ── Unlock notifications ──────────────────────────────────────────
   const [unlockRequests,   setUnlockRequests]   = useState<UnlockNotificationItem[]>([]);
   const [unlockLoading,    setUnlockLoading]    = useState(false);
   const [unlockError,      setUnlockError]      = useState<string | null>(null);
   const [unreadUnlockCount,setUnreadUnlockCount]= useState(0);
-
+ 
   const totalUnreadCount = unreadProfileCount + unreadUnlockCount;
-
+ 
   // ── Navigation ────────────────────────────────────────────────────
   const handleNavigate = (section: string) =>
     setSearchParams({ section });
-
+ 
   const handleLogout = () => { if (logout) logout(); };
-
+ 
   // ── Calibration expiry check ──────────────────────────────────────
   const checkCalibrationExpiry = useCallback(async () => {
     if (expiryCheckedRef.current) return;
@@ -440,20 +447,19 @@ const AdminDashboard: React.FC = () => {
       console.error('Backend expiry check failed', err);
     }
   }, []);
-
-  // ── Core data fetch (MODIFIED) ────────────────────────────────────
+ 
+  // ── Core data fetch ───────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const [usersRes, customersRes, statsRes] = await Promise.all([
-        api.get<UsersResponse>(`${ENDPOINTS.USERS.ALL_USERS}?skip=0&limit=1000`), // Fetch first 1000
+        api.get<UsersResponse>(`${ENDPOINTS.USERS.ALL_USERS}?skip=0&limit=1000`),
         api.get<Customer[]>(ENDPOINTS.PORTAL.CUSTOMERS_DROPDOWN),
-        api.get<UserStats>('/users/stats') // NEW: Fetch ultra-fast dashboard stats
+        api.get<UserStats>('/users/stats')
       ]);
       
-      // Update states with new backend schemas
-      setUsers(usersRes.data.users || []); 
+      setUsers(usersRes.data.users || []);
       setTotalUserCount(usersRes.data.total_count || 0);
       setCustomers(customersRes.data);
       setUserStats(statsRes.data);
@@ -471,7 +477,7 @@ const AdminDashboard: React.FC = () => {
       setLoading(false);
     }
   }, []);
-
+ 
   // ── Profile notifications fetch ───────────────────────────────────
   const fetchProfileNotifications = useCallback(async () => {
     setProfileNotifLoading(true);
@@ -480,7 +486,7 @@ const AdminDashboard: React.FC = () => {
       const res = await api.get<AdminNotificationsResponse>(ENDPOINTS.NOTIFICATIONS);
       const notifs = res.data.notifications || [];
       setProfileNotifications(notifs);
-
+ 
       const newestId        = notifs[0]?.id;
       const lastPopupSeenId = Number(
         localStorage.getItem(PROFILE_UPDATE_LAST_POPUP_SEEN_KEY) || '0'
@@ -489,7 +495,7 @@ const AdminDashboard: React.FC = () => {
         setShowProfileUpdatePopup(true);
         localStorage.setItem(PROFILE_UPDATE_LAST_POPUP_SEEN_KEY, String(newestId));
       }
-
+ 
       const lastReadId = Number(
         localStorage.getItem(PROFILE_UPDATE_LAST_READ_KEY) || '0'
       );
@@ -511,7 +517,7 @@ const AdminDashboard: React.FC = () => {
       setProfileNotifLoading(false);
     }
   }, [activeSection]);
-
+ 
   // ── Unlock requests fetch ─────────────────────────────────────────
   const fetchUnlockRequests = useCallback(async () => {
     setUnlockLoading(true);
@@ -538,29 +544,55 @@ const AdminDashboard: React.FC = () => {
       setUnlockLoading(false);
     }
   }, []);
-
+ 
   // ── Effects ───────────────────────────────────────────────────────
   useEffect(() => { checkCalibrationExpiry(); }, [checkCalibrationExpiry]);
-
+ 
+  // Fetch license status once authenticated
+  useEffect(() => {
+    const run = async () => {
+      if (!user) return;
+      const role = (user as any)?.role?.toString().toLowerCase();
+      if (role !== 'admin') return;
+ 
+      try {
+        const res = await fetchLicenseStatus();
+        if (res?.show_popup) {
+          setLicenseStatus(res.status);
+          setLicenseValidUntil(res.valid_until);
+          setShowLicensePopup(true);
+        } else {
+          setLicenseStatus(res?.status ?? null);
+          setLicenseValidUntil(res?.valid_until ?? '');
+          setShowLicensePopup(false);
+        }
+      } catch {
+        // keep UI unchanged
+      }
+    };
+ 
+    run();
+  }, [user]);
+ 
   useEffect(() => {
     if (['dashboard', 'users', 'invite-users', 'notifications']
         .includes(activeSection)) {
       fetchData();
     }
   }, [fetchData, activeSection]);
-
+ 
   useEffect(() => {
     fetchProfileNotifications();
     const id = setInterval(fetchProfileNotifications, 30_000);
     return () => clearInterval(id);
   }, [fetchProfileNotifications]);
-
+ 
   useEffect(() => {
     fetchUnlockRequests();
     const id = setInterval(fetchUnlockRequests, 30_000);
     return () => clearInterval(id);
   }, [fetchUnlockRequests]);
-
+ 
   useEffect(() => {
     if (activeSection === 'notifications') {
       setShowProfileUpdatePopup(false);
@@ -570,7 +602,7 @@ const AdminDashboard: React.FC = () => {
       setUnreadProfileCount(0);
     }
   }, [activeSection, profileNotifications]);
-
+ 
   // ── Toggle user status ────────────────────────────────────────────
   const handleToggleStatus = useCallback(
     async (userId: number, currentStatus: boolean) => {
@@ -601,21 +633,21 @@ const AdminDashboard: React.FC = () => {
     },
     []
   );
-
+ 
   // ── Derived data ──────────────────────────────────────────────────
   const userName = user?.full_name || user?.username || 'User';
   const userRole = user?.role || 'Admin';
-
+ 
   // Latest company for popup
 const latestPopupCompany =
   profileNotifications[0]
     ? extractCompanyFromNotification(profileNotifications[0])
     : null;
-
+ 
   // ====================================================================
   // RENDER
   // ====================================================================
-
+ 
   return (
     <div className="flex flex-col h-screen bg-[#f8f9fc] font-sans text-gray-900 overflow-hidden">
       {/* ── Top Bar ── */}
@@ -628,7 +660,7 @@ const latestPopupCompany =
           notificationsPath="/admin?section=notifications"
         />
       </div>
-
+ 
       <div className="flex flex-1 overflow-hidden relative">
         {/* ── Sidebar ── */}
         <div className="flex-none h-full bg-white border-r border-gray-200 z-40">
@@ -640,12 +672,12 @@ const latestPopupCompany =
             unreadNotificationCount={totalUnreadCount}
           />
         </div>
-
+ 
         {/* ── Main Content ── */}
         <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-white to-blue-50 relative z-0">
           <div className="flex flex-col min-h-full">
             <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
-
+ 
               {/* Global error */}
               {error && (
                 <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 animate-fadeIn">
@@ -653,28 +685,28 @@ const latestPopupCompany =
                   <span>{error}</span>
                 </div>
               )}
-
+ 
               {/* ── DASHBOARD ── */}
               {activeSection === 'dashboard' && (
                 loading ? (
                   <AdminSkeleton type="dashboard" />
                 ) : (
                   <AdminDashboardHome
-                    users={users} // Still passing this for backward compatibility if needed
-                    userStats={userStats} // NEW: Passing the exact numbers to the dashboard cards
+                    users={users}
+                    userStats={userStats}
                     onNavigate={handleNavigate}
                     expiredTables={expiredTables}
                   />
                 )
               )}
-
+ 
               {/* ── PROFILE ── */}
               {activeSection === 'profile' && (
                 <div className="animate-fadeIn w-full max-w-3xl mx-auto">
                   <ProfilePage />
                 </div>
               )}
-
+ 
               {/* ── NOTIFICATIONS ── */}
               {activeSection === 'notifications' && (
                 <div className="animate-fadeIn">
@@ -700,14 +732,14 @@ const latestPopupCompany =
                   />
                 </div>
               )}
-
+ 
               {/* ── INVITE USERS ── */}
               {activeSection === 'invite-users' && (
                 <div className="animate-fadeIn">
                   <InviteUsersSection existingCustomers={customers} />
                 </div>
               )}
-
+ 
               {/* ── USER MANAGEMENT ── */}
               {activeSection === 'users' && (
                 loading ? (
@@ -736,7 +768,7 @@ const latestPopupCompany =
                         </div>
                       )}
                       <UserManagementSystem
-                        users={users} // The initial 1000 users. We will implement pagination in this file next.
+                        users={users}
                         updatingUserId={updatingUserId}
                         onToggleStatus={handleToggleStatus}
                         onRefreshData={fetchData}
@@ -745,7 +777,7 @@ const latestPopupCompany =
                   </div>
                 )
               )}
-
+ 
               {/* ── TOOL SECTIONS ── */}
               {activeSection === 'certificate-approval' && (
                 <div className="animate-slideUp">
@@ -779,14 +811,42 @@ const latestPopupCompany =
                 </div>
               )}
             </div>
-
+ 
             <footer className="w-full bg-white border-t border-gray-200 mt-auto">
               <Footer />
             </footer>
           </div>
         </main>
       </div>
-
+ 
+      {/* ── License Popup ── */}
+      {showLicensePopup &&
+        (licenseStatus === 'EXPIRED' || licenseStatus === 'EXPIRING_SOON') &&
+        licenseStatus && (
+          <LicenseModal
+            status={licenseStatus}
+            validUntil={licenseValidUntil}
+            onExtended={async () => {
+              // After successful extension, re-fetch to get latest status
+              try {
+                const res = await fetchLicenseStatus();
+                if (res?.show_popup) {
+                  setLicenseStatus(res.status);
+                  setLicenseValidUntil(res.valid_until);
+                  setShowLicensePopup(true);
+                } else {
+                  setLicenseStatus(res?.status ?? null);
+                  setLicenseValidUntil(res?.valid_until ?? '');
+                  setShowLicensePopup(false);
+                }
+              } catch {
+                setShowLicensePopup(false);
+              }
+            }}
+            onClose={() => setShowLicensePopup(false)}
+          />
+        )}
+ 
       {/* ── Profile Update Popup ── */}
       {showProfileUpdatePopup && (
         <ProfileUpdatePopup
@@ -801,5 +861,5 @@ const latestPopupCompany =
     </div>
   );
 };
-
+ 
 export default AdminDashboard;

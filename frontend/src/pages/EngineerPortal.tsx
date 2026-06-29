@@ -35,7 +35,9 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { User } from "../types";
 import { api, ENDPOINTS } from "../api/config";
-
+import { fetchLicenseStatus, LicenseStatus } from "../api/license";
+import LicenseModal from "../components/LicenseModal";
+ 
 // --- Page Components ---
 import { CreateInwardPage } from "../components/CreateInwardPage";
 import { ViewUpdateInward } from "../components/ViewUpdateInward";
@@ -54,21 +56,22 @@ import ManualCalibrationPage from "../components/ManualCalibrationPage";
 import { FinalInspectionView } from "../components/FinalInspectionView";
 import CalibrationReminderWidget from "../components/CalibrationReminder";
 import CalibrationReminderDetailsPage from "../components/CalibrationReminderDetailsPage";
-
+ 
 // --- Split Components ---
 import EngineerDashboard from "../components/EngineerDashboard";
 import {
   DeviationPage,
+DeviationSRFEquipmentPage,
   DeviationDetailPage,
 } from "../components/DeviationComponents";
 import { BarcodeScanner }from "../components/BarcodeScanner";
 // ── Interfaces ────────────────────────────────────────────────────
-
+ 
 interface EngineerPortalProps {
   user: User | null;
   onLogout: () => void;
 }
-
+ 
 interface EngineerNotificationItem {
   id: number;
   subject: string;
@@ -77,13 +80,13 @@ interface EngineerNotificationItem {
   status: string;
   error?: string | null;
 }
-
+ 
 interface EngineerNotificationsResponse {
   notifications: EngineerNotificationItem[];
 }
-
+ 
 // ── Helpers ───────────────────────────────────────────────────────
-
+ 
 const extractCompanyFromNotification = (
   notification?: EngineerNotificationItem | null
 ): string | null => {
@@ -100,9 +103,9 @@ const extractCompanyFromNotification = (
     return subjectMatch[1].trim();
   return null;
 };
-
+ 
 // ── Active section resolver ───────────────────────────────────────
-
+ 
 const getActiveSectionFromPath = (
   pathname: string
 ): string => {
@@ -135,22 +138,22 @@ const getActiveSectionFromPath = (
     return "manual-calibration";
   if (pathname.includes("/engineer/deviations"))
     return "deviations";
-  if (pathname.includes("/engineer/scan")) 
+  if (pathname.includes("/engineer/scan"))
     return "barcode-scanner";
   if (pathname.includes("/engineer/certificates"))
     return "certificates";
   return "dashboard";
 };
-
+ 
 // ── Quick Action items (Sidebar) ──────────────────────────────────
-
+ 
 interface QuickActionItem {
   id: string;
   label: string;
   icon: React.ReactNode;
   route: string;
 }
-
+ 
 const quickActionItems: QuickActionItem[] = [
     {
     id: "barcode-scanner",
@@ -207,15 +210,15 @@ const quickActionItems: QuickActionItem[] = [
     route: "/engineer/certificates",
   },
 ];
-
+ 
 // ── Inside View: Inward Management Hub ────────────────────────────
-
+ 
 /**
  * Inside View Hub for Inward Management
  */
-const InwardManagementHub: React.FC = () => {
-  const navigate = useNavigate();
-
+const InwardManagementHub: React.FC<{
+  onNavigate: (route: string) => void;
+}> = ({ onNavigate }) => {
   const modules = [
     {
       title: "Create Inward",
@@ -239,7 +242,7 @@ const InwardManagementHub: React.FC = () => {
       iconBg: "bg-emerald-50",
     },
   ];
-
+ 
   return (
     <div className="animate-fadeIn">
       <div className="mb-8 flex items-center justify-between">
@@ -248,25 +251,25 @@ const InwardManagementHub: React.FC = () => {
           <p className="text-gray-500 mt-2">Manage equipment entry, updates, and reporting from one place.</p>
         </div>
         <button
-          onClick={() => navigate("/engineer")}
+          onClick={() => onNavigate("/engineer")}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all"
         >
           <ChevronLeft size={16} /> Back to Dashboard
         </button>
       </div>
-
+ 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {modules.map((m) => (
           <button
             key={m.title}
-            onClick={() => navigate(m.route)}
+            onClick={() => onNavigate(m.route)}
             className="group flex flex-col p-8 bg-white border border-gray-100 rounded-[2rem] shadow-sm hover:shadow-xl hover:border-blue-200 transition-all duration-300 text-left h-full w-full"
           >
             {/* Icon Section */}
             <div className={`w-14 h-14 ${m.iconBg} rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300`}>
               {m.icon}
             </div>
-
+ 
             {/* Content Section */}
             <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-blue-700 transition-colors">
               {m.title}
@@ -274,10 +277,10 @@ const InwardManagementHub: React.FC = () => {
             <p className="text-gray-500 text-sm leading-relaxed mb-8 flex-1">
               {m.desc}
             </p>
-
+ 
             {/* Visual Footer (Matches your second image) */}
             <div className="mt-auto flex items-center text-blue-600 font-semibold text-sm transition-all group-hover:gap-1">
-              Open Section 
+              Open Section
               <ArrowRight size={16} className="ml-2 group-hover:translate-x-1 transition-transform" />
             </div>
           </button>
@@ -286,9 +289,9 @@ const InwardManagementHub: React.FC = () => {
     </div>
   );
 };
-
+ 
 // ── Sidebar ───────────────────────────────────────────────────────
-
+ 
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (val: boolean) => void;
@@ -297,7 +300,7 @@ interface SidebarProps {
   notificationCount: number;
   onLogout: () => void;
 }
-
+ 
 const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   setIsOpen,
@@ -310,10 +313,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     label: string;
     top: number;
   } | null>(null);
-
+ 
   const [quickActionsExpanded, setQuickActionsExpanded] =
     useState(true);
-
+ 
   useEffect(() => {
     const isQuickAction = quickActionItems.some(
       (item) => item.id === activeSection
@@ -322,7 +325,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setQuickActionsExpanded(true);
     }
   }, [activeSection]);
-
+ 
   const mainNavItems = [
     {
       id: "dashboard",
@@ -343,7 +346,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       route: "/engineer/notifications",
     },
   ];
-
+ 
   const handleMouseEnter = (
     e: React.MouseEvent<HTMLButtonElement | HTMLDivElement>,
     label: string
@@ -352,7 +355,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     setHoveredItem({ label, top: rect.top + rect.height / 2 });
   };
-
+ 
   const renderNavButton = (item: {
     id: string;
     label: string;
@@ -362,7 +365,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const isActive = activeSection === item.id;
     const showBadge = item.id === "notifications" && notificationCount > 0;
     const badgeLabel = notificationCount > 99 ? "99+" : notificationCount;
-
+ 
     return (
       <button
         key={item.id}
@@ -393,7 +396,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
     );
   };
-
+ 
   const renderQuickActionItem = (item: QuickActionItem) => {
     const isActive = activeSection === item.id;
     return (
@@ -417,7 +420,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
     );
   };
-
+ 
   const renderQuickActionsGroup = () => {
     const hasActiveChild = quickActionItems.some((item) => item.id === activeSection);
     if (isOpen) {
@@ -455,7 +458,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
     );
   };
-
+ 
   return (
     <>
       <aside className={`relative bg-white border-r border-gray-200 flex flex-col h-full transition-all duration-300 ${isOpen ? "w-64" : "w-[4.5rem]"}`}>
@@ -487,9 +490,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
-
+ 
 // ── Settings Page (Placeholder) ───────────────────────────────────
-
+ 
 const SettingsPage: React.FC = () => (
   <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400 animate-fadeIn">
     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
@@ -499,9 +502,9 @@ const SettingsPage: React.FC = () => (
     <p className="text-gray-500 mt-2">Coming soon.</p>
   </div>
 );
-
+ 
 // ── Notifications Page ────────────────────────────────────────────
-
+ 
 const EngineerNotificationsPage: React.FC<{ notifications: EngineerNotificationItem[]; loading: boolean; error: string | null }> = ({ notifications, loading, error }) => {
   const navigate = useNavigate();
   return (
@@ -523,25 +526,54 @@ const EngineerNotificationsPage: React.FC<{ notifications: EngineerNotificationI
     </div>
   );
 };
-
+ 
 // ── Engineer Portal (Main) ────────────────────────────────────────
-
+ 
 const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
   const username = user?.full_name || user?.email || "Engineer";
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const activeSection = getActiveSectionFromPath(location.pathname);
-
+ 
+  // ── License popup state (engineer only; customer/admin handled elsewhere) ──
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [licenseValidUntil, setLicenseValidUntil] = useState("");
+  const [showLicensePopup, setShowLicensePopup] = useState(false);
+  const [pendingRoute, setPendingRoute] = useState<string | null>(null);
+ 
+  // Keep backend-derived values separate from UI open/close state.
+  const [backendWantsPopup, setBackendWantsPopup] = useState(false);
+ 
+  // Prevent auto-open from re-triggering after user-dismiss.
+  const autoOpenDoneRef = React.useRef(false);
+  const dismissedRef = React.useRef(false);
+ 
+  const dismissLicensePopup = useCallback(
+    (afterDismiss?: boolean) => {
+      dismissedRef.current = true;
+      setShowLicensePopup(false);
+ 
+      if (afterDismiss && pendingRoute) {
+        const route = pendingRoute;
+        setPendingRoute(null);
+        navigate(route);
+      } else {
+        setPendingRoute(null);
+      }
+    },
+    [navigate, pendingRoute]
+  );
+ 
   // ── Notification state ──
   const [profileUpdateNotifications, setProfileUpdateNotifications] = useState<EngineerNotificationItem[]>([]);
   const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
   const [profileUpdateError, setProfileUpdateError] = useState<string | null>(null);
   const [showProfileUpdatePopup, setShowProfileUpdatePopup] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-
+ 
   const latestPopupCompany = extractCompanyFromNotification(profileUpdateNotifications[0]);
-
+ 
   const fetchProfileUpdateNotifications = useCallback(async () => {
     setProfileUpdateLoading(true);
     try {
@@ -561,7 +593,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
       setProfileUpdateLoading(false);
     }
   }, [activeSection]);
-
+ 
   useEffect(() => {
     fetchProfileUpdateNotifications();
     const interval = setInterval(
@@ -570,18 +602,91 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
     );
     return () => clearInterval(interval);
   }, [fetchProfileUpdateNotifications]);
-
+ 
+  // Fetch license status only after auth and only for staff engineer
+  useEffect(() => {
+    const run = async () => {
+      if (!user) return;
+ 
+      const role = (user as any)?.role?.toString().toLowerCase();
+      if (role !== "engineer") return;
+ 
+      const res = await fetchLicenseStatus();
+ 
+      setBackendWantsPopup(!!res?.show_popup);
+      setLicenseStatus((res?.status as LicenseStatus) ?? null);
+      setLicenseValidUntil(res?.valid_until ?? "");
+ 
+      // Auto-open exactly once after login (prevents reopen loops after dismiss).
+      if (!autoOpenDoneRef.current) {
+        autoOpenDoneRef.current = true;
+        if (res?.show_popup) {
+          dismissedRef.current = false;
+          setShowLicensePopup(true);
+        } else {
+          setShowLicensePopup(false);
+        }
+      }
+    };
+ 
+    run().catch(() => {
+      // keep UI unchanged if license call fails
+    });
+  }, [user]);
+ 
+  const handleNavigateWithLicense = useCallback(
+    (route: string) => {
+      const role = (user as any)?.role?.toString().toLowerCase();
+ 
+      if (
+        role === "engineer" &&
+        licenseStatus === "EXPIRED" &&
+        (route === "/engineer/create-inward" ||
+          route.startsWith("/engineer/create-inward"))
+      ) {
+        // Manual reopen only for Create Inward when EXPIRED.
+        dismissedRef.current = false;
+        setPendingRoute(route);
+        setShowLicensePopup(true);
+        return;
+      }
+ 
+      navigate(route);
+    },
+    [navigate, user, licenseStatus]
+  );
+ 
+  // If user lands directly on create-inward routes while license is expired,
+  // open modal and redirect away from the form.
+  useEffect(() => {
+    const role = (user as any)?.role?.toString().toLowerCase();
+    if (role !== "engineer" || licenseStatus !== "EXPIRED") return;
+ 
+    const path = location.pathname;
+    const isCreateInwardRoute =
+      path === "/engineer/create-inward" ||
+      path.startsWith("/engineer/create-inward");
+ 
+    if (isCreateInwardRoute) {
+      // Landing directly on create-inward while expired => manual reopen.
+      dismissedRef.current = false;
+      setPendingRoute(path + location.search);
+      setShowLicensePopup(true);
+      navigate("/engineer", { replace: true });
+    }
+  }, [location.pathname, location.search, navigate, user, licenseStatus]);
+ 
   return (
     <div className="flex flex-col h-screen bg-[#f8f9fc] font-sans text-gray-900 overflow-hidden">
       <div className="flex-none w-full bg-white border-b border-gray-200 shadow-sm z-50">
         <Header username={username} role="Engineer" onLogout={onLogout} profilePath="/engineer/profile" notificationsPath="/engineer/notifications" />
       </div>
-
+ 
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-none h-full bg-white border-r border-gray-200 z-40">
-          <Sidebar isOpen={isSidebarOpen} setIsOpen={setSidebarOpen} activeSection={activeSection} onNavigate={navigate} notificationCount={unreadCount} onLogout={onLogout} />
+          <Sidebar isOpen={isSidebarOpen} setIsOpen={setSidebarOpen} activeSection={activeSection} onNavigate={handleNavigateWithLicense} notificationCount={unreadCount} onLogout={onLogout} />
         </div>
-
+ 
         <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-white to-blue-50 relative z-0">
           <div className="flex flex-col min-h-full">
             <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
@@ -590,10 +695,13 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
                 <Route path="notifications" element={<EngineerNotificationsPage notifications={profileUpdateNotifications} loading={profileUpdateLoading} error={profileUpdateError} />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="/" element={<EngineerDashboard />} />
-                
+               
                 {/* NEW HUB ROUTE */}
-                <Route path="inward-management" element={<InwardManagementHub />} />
-
+                <Route
+                  path="inward-management"
+                  element={<InwardManagementHub onNavigate={handleNavigateWithLicense} />}
+                />
+ 
                 {/* Sub Routes */}
                 <Route path="create-inward" element={<CreateInwardPage />} />
                 <Route path="create-inward/form" element={<InwardForm />} />
@@ -614,16 +722,55 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
                 <Route path="final-inspection/:inwardId" element={<FinalInspectionView />} />
                 <Route path="calibration-reminders/:customerId" element={<CalibrationReminderDetailsPage />} />
                   <Route path="scan" element={<BarcodeScanner />} />
-
+                  <Route path="deviations" element={<DeviationPage />} />
+ 
+                {/* ✅ ADD THIS ROUTE */}
+                <Route
+                  path="deviations/srf/:srfNo"
+                  element={<DeviationSRFEquipmentPage />}
+                />
+ 
+                {/* ⚠️ MUST stay BELOW the srf route */}
+                <Route
+                  path="deviations/:deviationId"
+                  element={<DeviationDetailPage />}
+                />
               </Routes>
             </div>
             <footer className="w-full bg-white border-t border-gray-200 mt-auto"><Footer /></footer>
           </div>
         </main>
       </div>
-
+ 
       <CalibrationReminderWidget onCustomerSelect={(id) => navigate(`/engineer/calibration-reminders/${id}`)} />
-
+ 
+      {/* License Popup (Engineer only) */}
+      {showLicensePopup &&
+        (licenseStatus === "EXPIRED" || licenseStatus === "EXPIRING_SOON") &&
+        licenseStatus && (
+          <LicenseModal
+            status={licenseStatus}
+            validUntil={licenseValidUntil}
+            onExtended={(newDate) => {
+              // Extending activates license; close modal permanently.
+              dismissedRef.current = true;
+              setLicenseValidUntil(newDate);
+              setLicenseStatus("ACTIVE");
+              setShowLicensePopup(false);
+ 
+              if (pendingRoute) {
+                const route = pendingRoute;
+                setPendingRoute(null);
+                navigate(route);
+              }
+            }}
+            onClose={() => {
+              // Close/OK/X should keep it closed for this lifecycle until Create Inward re-opens (EXPIRED).
+              dismissLicensePopup(false);
+            }}
+          />
+        )}
+ 
       {/* Profile Update Popup */}
       {showProfileUpdatePopup && (
         <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -660,5 +807,5 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
     </div>
   );
 };
-
+ 
 export default EngineerPortal;

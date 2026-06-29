@@ -305,44 +305,35 @@ def get_customer_dashboard_reports(
         raise HTTPException(status_code=403, detail="Access denied. Customers only.")
     if limit > 1000: limit = 1000
 
-    # 1. High Speed Pagination for FIRs
-    firs_query = db.query(Inward).filter(
+    # 1. High Speed Query for FIRs
+    firs = db.query(Inward).filter(
         Inward.customer_id == current_user.customer_id,
         Inward.status == "PENDING_CUSTOMER_REMARKS"
-    )
-    fir_count = firs_query.count()
-    firs = firs_query.order_by(Inward.inward_id.desc()).offset(skip).limit(limit).all()
+    ).order_by(Inward.inward_id.desc()).offset(skip).limit(limit).all()
 
-    # 2. High Speed Pagination for Finals
-    finals_query = db.query(FinalInspection).filter(
+    # 2. High Speed Query for Finals
+    finals = db.query(FinalInspection).filter(
         FinalInspection.customer_id == current_user.customer_id
-    )
-    finals_count = finals_query.count()
-    finals = finals_query.order_by(FinalInspection.id.desc()).offset(skip).limit(limit).all()
+    ).order_by(FinalInspection.id.desc()).offset(skip).limit(limit).all()
 
+    # Reverted back to Arrays so the frontend map() functions do not break
     return {
-        "firs": {
-            "total_count": fir_count,
-            "items": [
-                {
-                    "inward_id": f.inward_id,
-                    "srf_no": f.srf_no,
-                    "material_inward_date": f.created_at,
-                    "status": f.status
-                } for f in firs
-            ]
-        },
-        "finals": {
-            "total_count": finals_count,
-            "items": [
-                {
-                    "inward_id": res.inward_id,
-                    "srf_no": res.srf_no,
-                    "report_sent_at": res.report_sent_at,
-                    "status": res.status
-                } for res in finals
-            ]
-        }
+        "firs": [
+            {
+                "inward_id": f.inward_id,
+                "srf_no": f.srf_no,
+                "material_inward_date": f.created_at,
+                "status": f.status
+            } for f in firs
+        ],
+        "finals": [
+            {
+                "inward_id": res.inward_id,
+                "srf_no": res.srf_no,
+                "report_sent_at": res.report_sent_at,
+                "status": res.status
+            } for res in finals
+        ]
     }
 
 @router.get("/inward/{inward_id}/customer-view", response_model=FinalInspectionResponse)

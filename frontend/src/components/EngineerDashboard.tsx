@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Wrench, FileText, Award, ClipboardList, AlertTriangle,
@@ -8,7 +8,7 @@ import {
 import { api, ENDPOINTS } from "../api/config";
 import { DelayedEmailManager } from "./DelayedEmailManager";
 import { FailedNotificationsManager } from "./FailedNotificationManager";
-
+ 
 // --- INTERFACES ---
 interface DelayedTask {
   task_id: number;
@@ -29,7 +29,7 @@ interface ExpiryCheckResponse {
   message: string;
   affected_tables: string[];
 }
-
+ 
 // --- HELPERS ---
 const formatTableName = (tableName: string) => {
   return tableName
@@ -41,7 +41,7 @@ const formatTableName = (tableName: string) => {
     )
     .join(" ");
 };
-
+ 
 // --- SKELETON ---
 const DashboardSkeleton: React.FC = () => (
   <div className="animate-pulse w-full">
@@ -75,7 +75,7 @@ const DashboardSkeleton: React.FC = () => (
     </div>
   </div>
 );
-
+ 
 // --- ACTION BUTTON ---
 const ActionButton: React.FC<{
   label: string;
@@ -119,13 +119,13 @@ const ActionButton: React.FC<{
     </div>
   </button>
 );
-
+ 
 // ============================================================
 // ENGINEER DASHBOARD
 // ============================================================
 const EngineerDashboard: React.FC = () => {
   const navigate = useNavigate();
-
+ 
   const [pendingEmailCount, setPendingEmailCount] = useState(0);
   const [failedNotificationCount, setFailedNotificationCount] = useState(0);
   const [showDelayedEmails, setShowDelayedEmails] = useState(false);
@@ -134,40 +134,80 @@ const EngineerDashboard: React.FC = () => {
   const [reviewedFirCount, setReviewedFirCount] = useState(0);
   const [expiredStandards, setExpiredStandards] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
+ 
+  const inFlightRef = useRef(false);
+  const lastFetchAtRef = useRef(0);
+ 
   const fetchDashboardData = useCallback(
     async (isInitialLoad = false) => {
+      // Prevent request storms caused by auth refresh / focus handlers.
+      if (inFlightRef.current) return;
+ 
+      // Throttle focus-triggered refreshes; initial load must still run.
+      const now = Date.now();
+      if (!isInitialLoad && now - lastFetchAtRef.current < 30_000) return;
+      lastFetchAtRef.current = now;
+ 
+      inFlightRef.current = true;
       if (isInitialLoad) setIsLoading(true);
+ 
       try {
         const timestamp = new Date().getTime();
         const todayStr = new Date().toISOString().split("T")[0];
-
+ 
+        // Avoid running expiry POST on every focus refresh; it triggers blinking.
+        const shouldCheckExpiry = isInitialLoad;
+ 
+        const results = await Promise.allSettled([
+          api.get<DelayedTask[]>(
+            `${ENDPOINTS.STAFF.INWARDS}/delayed-emails/pending?_t=${timestamp}`
+          ),
+          api.get<FailedNotificationsResponse>(
+            `${ENDPOINTS.STAFF.INWARDS}/notifications/failed?_t=${timestamp}`
+          ),
+          api.get<AvailableDraft[]>(
+            `${ENDPOINTS.STAFF.INWARDS}/drafts?_t=${timestamp}`
+          ),
+          api.get<ReviewedFir[]>(
+            `${ENDPOINTS.STAFF.INWARDS}/reviewed-firs?_t=${timestamp}`
+          ),
+          shouldCheckExpiry
+            ? api.post<ExpiryCheckResponse>("/calibration/check-expiry", {
+                reference_date: todayStr,
+              })
+            : // Ensure `expiryRes.value.data` exists to satisfy TS when we skip the expiry call.
+              Promise.resolve({ data: { message: "", affected_tables: [] } } as any),
+        ]);
+ 
         const [
           pendingEmailsRes,
           failedNotifsRes,
           draftsRes,
           reviewedFirsRes,
           expiryRes,
-        ] = await Promise.allSettled([
-          api.get<DelayedTask[]>(`${ENDPOINTS.STAFF.INWARDS}/delayed-emails/pending?_t=${timestamp}`),
-          api.get<FailedNotificationsResponse>(`${ENDPOINTS.STAFF.INWARDS}/notifications/failed?_t=${timestamp}`),
-          api.get<AvailableDraft[]>(`${ENDPOINTS.STAFF.INWARDS}/drafts?_t=${timestamp}`),
-          api.get<ReviewedFir[]>(`${ENDPOINTS.STAFF.INWARDS}/reviewed-firs?_t=${timestamp}`),
-          api.post<ExpiryCheckResponse>("/calibration/check-expiry", { reference_date: todayStr }),
-        ]);
-
-        if (pendingEmailsRes.status === "fulfilled") setPendingEmailCount(pendingEmailsRes.value.data.length);
-        if (failedNotifsRes.status === "fulfilled") setFailedNotificationCount(failedNotifsRes.value.data.failed_notifications.length);
-        if (draftsRes.status === "fulfilled") setAvailableDrafts(draftsRes.value.data || []);
-        if (reviewedFirsRes.status === "fulfilled") setReviewedFirCount(reviewedFirsRes.value.data.length);
-
-        if (expiryRes.status === "fulfilled" && expiryRes.value.data) {
-          const data = expiryRes.value.data;
-          setExpiredStandards(Array.isArray(data.affected_tables) ? data.affected_tables : (Array.isArray(data) ? data : []));
+        ] = results;
+ 
+        if (pendingEmailsRes.status === "fulfilled")
+          setPendingEmailCount(pendingEmailsRes.value.data.length);
+        if (failedNotifsRes.status === "fulfilled")
+          setFailedNotificationCount(
+            failedNotifsRes.value.data.failed_notifications.length
+          );
+        if (draftsRes.status === "fulfilled")
+          setAvailableDrafts(draftsRes.value.data || []);
+        if (reviewedFirsRes.status === "fulfilled")
+          setReviewedFirCount(reviewedFirsRes.value.data.length);
+ 
+        if (shouldCheckExpiry && expiryRes.status === "fulfilled") {
+          const data = expiryRes.value.data as ExpiryCheckResponse;
+          setExpiredStandards(
+            Array.isArray(data.affected_tables) ? data.affected_tables : []
+          );
         }
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
+        inFlightRef.current = false;
         if (isInitialLoad) {
           setTimeout(() => setIsLoading(false), 300);
         }
@@ -175,14 +215,14 @@ const EngineerDashboard: React.FC = () => {
     },
     []
   );
-
+ 
   useEffect(() => {
     fetchDashboardData(true);
     const onFocus = () => fetchDashboardData(false);
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [fetchDashboardData]);
-
+ 
   const quickActions = [
     {
       label: "Inward Management",
@@ -229,11 +269,11 @@ const EngineerDashboard: React.FC = () => {
       colorClasses: "bg-gradient-to-r from-purple-500 to-indigo-600",
     },
   ];
-
+ 
   if (isLoading) {
     return <DashboardSkeleton />;
   }
-
+ 
   return (
     <div>
       {/* Header */}
@@ -252,7 +292,7 @@ const EngineerDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-
+ 
       {/* Expired Standards Warning */}
       {expiredStandards.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6 shadow-lg relative overflow-hidden">
@@ -280,7 +320,7 @@ const EngineerDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
+ 
       {/* Notifications Banners (Delayed Emails & Failed Notifs) */}
       <div className="space-y-4 mb-6">
         {pendingEmailCount > 0 && (
@@ -297,7 +337,7 @@ const EngineerDashboard: React.FC = () => {
             </button>
           </div>
         )}
-
+ 
         {failedNotificationCount > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-6 shadow-md flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -313,7 +353,7 @@ const EngineerDashboard: React.FC = () => {
           </div>
         )}
       </div>
-
+ 
       {/* Quick Actions Grid */}
       <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
         <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b pb-3">
@@ -329,7 +369,7 @@ const EngineerDashboard: React.FC = () => {
           ))}
         </div>
       </div>
-
+ 
       {/* Modals */}
       {showDelayedEmails && (
         <DelayedEmailManager onClose={() => { setShowDelayedEmails(false); fetchDashboardData(true); }} />
@@ -340,5 +380,5 @@ const EngineerDashboard: React.FC = () => {
     </div>
   );
 };
-
+ 
 export default EngineerDashboard;

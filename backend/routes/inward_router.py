@@ -21,6 +21,7 @@ from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 # ✅ IMPORT HTWJob
 from backend.models.htw.htw_job import HTWJob 
+from backend.license.license_models import LicenseMaster
 # ------------------------------------------------------------------
 from backend.services.inward_services import InwardService
 from backend.services.delayed_email_services import DelayedEmailService
@@ -158,10 +159,22 @@ async def submit_inward(
     srf_no: str = Form(...),
     inward_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
-    current_user: UserSchema = Depends(check_staff_role)
+    current_user: UserSchema = Depends(check_staff_role),
 ):
+     # Enforce license restriction:
+    # - Engineer is blocked from Create Inward only when license is EXPIRED.
+    lic = db.query(LicenseMaster).first()
+    if not lic:
+        raise HTTPException(status_code=500, detail="License not initialized")
+ 
+    today = date.today()
+    is_expired = today > lic.valid_until
+ 
+    user_role = (getattr(current_user, "role", "") or "").lower()
+    if user_role == "engineer" and is_expired:
+        raise HTTPException(status_code=403, detail="Create Inward forbidden: license expired")
     try:
-        inward_data = InwardCreate(
+            inward_data = InwardCreate(
             material_inward_date=material_inward_date,
             customer_dc_date=customer_dc_date,
             customer_dc_no=customer_dc_no,
