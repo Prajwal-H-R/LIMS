@@ -120,22 +120,26 @@ jobs:
         if: always()
         run: docker compose --env-file .env.docker down -v
 
+      - name: Convert repository owner to lowercase
+        if: github.event_name != 'pull_request'
+        run: echo "REPO_OWNER=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Tag backend image for GHCR
         if: github.event_name != 'pull_request'
         run: |
-          docker tag yatharthatalims-backend:latest ghcr.io/${{ github.repository_owner }}/yatharthatalims-backend:latest
+          docker tag yatharthatalims-backend:latest ghcr.io/$REPO_OWNER/yatharthatalims-backend:latest
 
       - name: Tag frontend image for GHCR
         if: github.event_name != 'pull_request'
         run: |
-          docker tag yatharthatalims-frontend:latest ghcr.io/${{ github.repository_owner }}/yatharthatalims-frontend:latest
+          docker tag yatharthatalims-frontend:latest ghcr.io/$REPO_OWNER/yatharthatalims-frontend:latest
 
       - name: Push backend image to GHCR
         if: github.event_name != 'pull_request'
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/yatharthatalims-backend:latest
+          docker push ghcr.io/$REPO_OWNER/yatharthatalims-backend:latest
 
       - name: Push frontend image to GHCR
         if: github.event_name != 'pull_request'
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/yatharthatalims-frontend:latest
+          docker push ghcr.io/$REPO_OWNER/yatharthatalims-frontend:latest
