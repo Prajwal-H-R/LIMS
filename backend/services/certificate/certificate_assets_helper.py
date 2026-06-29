@@ -48,7 +48,7 @@ def get_asset_url(base_url: str, filename: str) -> str:
     base = (base_url or "").rstrip("/")
     if not base:
         return _PLACEHOLDER_DATA_URI
-    return f"{base}/api/certificate-assets/{filename}"
+    return f"/api/certificate-assets/{filename}"
 
 
 def get_certificate_asset_urls(base_url: str | None = None, use_data_uris: bool = False) -> dict[str, str]:
