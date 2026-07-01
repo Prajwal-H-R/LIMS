@@ -29,6 +29,7 @@ interface SrfEquipmentData {
 interface EquipmentData {
   inward_eqp_id: number;
   material_description?: string;
+  make?: string;
   model?: string;
   serial_no?: string;
   range?: string;
@@ -87,7 +88,7 @@ interface Props {
 const SrfDetailSkeleton: React.FC = () => {
   return (
     <div className="p-6 md:p-8 bg-white rounded-2xl shadow-lg border border-slate-200 space-y-10 animate-pulse">
-      
+
       {/* Header Skeleton */}
       <div className="border-b border-slate-200 pb-6">
         <div className="flex justify-between items-center mb-4">
@@ -122,7 +123,7 @@ const SrfDetailSkeleton: React.FC = () => {
             </div>
           ))}
           <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
-             <div className="h-5 w-40 bg-slate-200 rounded mb-3"></div>
+            <div className="h-5 w-40 bg-slate-200 rounded mb-3"></div>
           </div>
           {[1, 2].map((i) => (
             <div key={i}>
@@ -130,10 +131,10 @@ const SrfDetailSkeleton: React.FC = () => {
               <div className="h-10 w-full bg-slate-100 rounded"></div>
             </div>
           ))}
-           <div className="md:col-span-2">
-              <div className="h-3 w-16 bg-slate-200 rounded mb-2"></div>
-              <div className="h-10 w-full bg-slate-100 rounded"></div>
-           </div>
+          <div className="md:col-span-2">
+            <div className="h-3 w-16 bg-slate-200 rounded mb-2"></div>
+            <div className="h-10 w-full bg-slate-100 rounded"></div>
+          </div>
         </div>
       </section>
 
@@ -144,21 +145,21 @@ const SrfDetailSkeleton: React.FC = () => {
           <div className="h-6 w-48 bg-slate-300 rounded"></div>
         </div>
         <div className="p-6 space-y-8">
-            <div>
-                <div className="h-5 w-48 bg-slate-300 rounded mb-3"></div>
-                <div className="flex gap-4">
-                    <div className="h-4 w-32 bg-slate-200 rounded"></div>
-                    <div className="h-4 w-32 bg-slate-200 rounded"></div>
-                </div>
+          <div>
+            <div className="h-5 w-48 bg-slate-300 rounded mb-3"></div>
+            <div className="flex gap-4">
+              <div className="h-4 w-32 bg-slate-200 rounded"></div>
+              <div className="h-4 w-32 bg-slate-200 rounded"></div>
             </div>
-            <div>
-                <div className="h-5 w-40 bg-slate-300 rounded mb-3"></div>
-                <div className="h-10 w-full max-w-sm bg-slate-100 rounded"></div>
-            </div>
-            <div>
-                <div className="h-5 w-32 bg-slate-300 rounded mb-2"></div>
-                <div className="h-24 w-full bg-slate-100 rounded"></div>
-            </div>
+          </div>
+          <div>
+            <div className="h-5 w-40 bg-slate-300 rounded mb-3"></div>
+            <div className="h-10 w-full max-w-sm bg-slate-100 rounded"></div>
+          </div>
+          <div>
+            <div className="h-5 w-32 bg-slate-300 rounded mb-2"></div>
+            <div className="h-24 w-full bg-slate-100 rounded"></div>
+          </div>
         </div>
       </section>
 
@@ -169,24 +170,24 @@ const SrfDetailSkeleton: React.FC = () => {
           <div className="h-6 w-40 bg-slate-300 rounded"></div>
         </div>
         <div className="overflow-x-auto">
-            <div className="w-full">
-                <div className="bg-slate-100 px-3 py-3 grid grid-cols-7 gap-4">
-                    {[...Array(7)].map((_, i) => (
-                        <div key={i} className="h-4 bg-slate-300 rounded w-full"></div>
-                    ))}
-                </div>
-                {[1, 2, 3].map((row) => (
-                    <div key={row} className="px-3 py-2 grid grid-cols-7 gap-4 border-b border-slate-100">
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                         <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
-                    </div>
-                ))}
+          <div className="w-full">
+            <div className="bg-slate-100 px-3 py-3 grid grid-cols-7 gap-4">
+              {[...Array(7)].map((_, i) => (
+                <div key={i} className="h-4 bg-slate-300 rounded w-full"></div>
+              ))}
             </div>
+            {[1, 2, 3].map((row) => (
+              <div key={row} className="px-3 py-2 grid grid-cols-7 gap-4 border-b border-slate-100">
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+                <div className="col-span-1 h-10 bg-slate-100 rounded"></div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -222,16 +223,16 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
     try {
       const response = await api.get(`${ENDPOINTS.SRFS}${srfId}`);
       const data: SrfData = response.data;
-      
+
       // Data Normalization
       if (data.date) data.date = data.date.split("T")[0];
-      
+
       if (data.inward) {
         if (data.inward.customer_dc_date) {
-            data.inward.customer_dc_date = data.inward.customer_dc_date.split("T")[0];
+          data.inward.customer_dc_date = data.inward.customer_dc_date.split("T")[0];
         }
         if (data.inward.material_inward_date) {
-            data.inward.material_inward_date = data.inward.material_inward_date.split("T")[0];
+          data.inward.material_inward_date = data.inward.material_inward_date.split("T")[0];
         }
       }
 
@@ -239,20 +240,20 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
       data.certificate_issue_address = certAddr;
 
       if (typeof data.turnaround_time === 'number') {
-          data.turnaround_time = data.turnaround_time.toString();
+        data.turnaround_time = data.turnaround_time.toString();
       }
 
       data.calibration_frequency = data.calibration_frequency ?? "As per Standard";
       data.statement_of_conformity = typeof data.statement_of_conformity === "boolean" ? data.statement_of_conformity : false;
-      
+
       setSrfData(data);
     } catch (err: any) {
       console.error("Error loading SRF:", err);
       // specific check for 404 which might return HTML if API base URL is wrong
       if (err.response?.headers?.['content-type']?.includes('text/html')) {
-         setError("API Configuration Error: Server returned HTML. Check API_BASE_URL.");
+        setError("API Configuration Error: Server returned HTML. Check API_BASE_URL.");
       } else {
-         setError(err.response?.data?.detail || err.message || "Error loading SRF details");
+        setError(err.response?.data?.detail || err.message || "Error loading SRF details");
       }
     } finally {
       setLoading(false);
@@ -292,16 +293,16 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
       };
 
       await api.put(`${ENDPOINTS.SRFS}${srfData.srf_id}`, srfPayload);
-      
+
       // 2. IF REJECTED: Update Inward Table (inward_srf_flag -> True)
       if (status === 'rejected' && srfData.inward?.inward_id) {
         const inwardId = srfData.inward.inward_id;
         try {
-            await api.patch(`${ENDPOINTS.STAFF.INWARDS}/${inwardId}`, { 
-                inward_srf_flag: true 
-            });
+          await api.patch(`${ENDPOINTS.STAFF.INWARDS}/${inwardId}`, {
+            inward_srf_flag: true
+          });
         } catch (inwardErr) {
-            console.error("Network error updating inward flag:", inwardErr);
+          console.error("Network error updating inward flag:", inwardErr);
         }
       }
 
@@ -309,22 +310,22 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
       const updatedSrfData: SrfData = {
         ...srfData,
         status,
-        remarks: status === 'rejected' ? remarks : srfData.remarks 
+        remarks: status === 'rejected' ? remarks : srfData.remarks
       };
 
       if (status === 'rejected' && updatedSrfData.inward) {
-          updatedSrfData.inward = {
-              ...updatedSrfData.inward,
-              inward_srf_flag: true
-          };
+        updatedSrfData.inward = {
+          ...updatedSrfData.inward,
+          inward_srf_flag: true
+        };
       }
 
       setSrfData(updatedSrfData);
-      
-      if(onStatusChange) {
+
+      if (onStatusChange) {
         onStatusChange(srfData.srf_id, status);
       }
-      
+
       if (status === 'rejected') {
         setShowRejectionModal(false);
         setRejectionReason("");
@@ -348,17 +349,17 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
 
   // --- UI State & Classes ---
   if (loading) return <SrfDetailSkeleton />; // UPDATED to use Skeleton
-  
+
   if (error) return <div className="p-8 text-center text-red-700 bg-red-50 rounded-lg border border-red-200">{error}</div>;
   if (!srfData) return <div className="flex items-center justify-center h-96 text-slate-500">SRF not found.</div>;
- 
+
   // Logic for Read-Only State: Approved/Rejected status OR Locked by another user
   const isStatusReadOnly = srfData.status === 'approved' || srfData.status === 'rejected';
   const isReadOnly = isStatusReadOnly || isRecordLocked;
- 
+
   const readOnlyInputClasses = "block w-full rounded-md bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed sm:text-sm focus:ring-0 focus:border-slate-200";
   const editableInputClasses = "block w-full rounded-md border-slate-300 shadow-sm sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors duration-150";
- 
+
   const statusInfo = ({
     approved: { label: "Approved", color: "bg-green-100 text-green-800", icon: <CheckCircle2 className="h-4 w-4" /> },
     rejected: { label: "Rejected", color: "bg-red-100 text-red-800", icon: <XCircle className="h-4 w-4" /> },
@@ -366,28 +367,28 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
     inward_completed: { label: "Pending Your Approval", color: "bg-blue-100 text-blue-800", icon: <Clock className="h-4 w-4" /> },
     created: { label: "New", color: "bg-slate-100 text-slate-800", icon: <FileText className="h-4 w-4" /> },
   } as const)[srfData.status] || { label: srfData.status, color: "bg-slate-100 text-slate-800", icon: <FileText className="h-4 w-4" /> };
- 
+
   const customerNameDisplay = srfData.inward?.customer?.customer_details || "";
-  
+
   // Dynamic Style for Locked State
   const formOpacity = isRecordLocked ? "opacity-70 pointer-events-none select-none" : "opacity-100";
- 
+
   return (
     <>
       <div className="p-6 md:p-8 bg-white rounded-2xl shadow-lg border border-slate-200 space-y-10 relative overflow-hidden">
-        
+
         {/* --- LOCKED BANNER --- */}
         {isRecordLocked && (
           <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-3 relative z-10 mb-4 -mx-6 -mt-6 rounded-t-2xl">
-              <div className="p-1.5 bg-amber-100 rounded-full text-amber-600">
-                  <Lock className="h-5 w-5 animate-pulse" />
-              </div>
-              <div>
-                  <h3 className="text-sm font-bold text-amber-800 uppercase tracking-wide">Read-Only Mode</h3>
-                  <p className="text-xs text-amber-700">
-                      This record is currently being edited by another user. You cannot make changes until they finish.
-                  </p>
-              </div>
+            <div className="p-1.5 bg-amber-100 rounded-full text-amber-600">
+              <Lock className="h-5 w-5 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-amber-800 uppercase tracking-wide">Read-Only Mode</h3>
+              <p className="text-xs text-amber-700">
+                This record is currently being edited by another user. You cannot make changes until they finish.
+              </p>
+            </div>
           </div>
         )}
 
@@ -404,172 +405,251 @@ const CustomerSrfDetailView: React.FC<Props> = ({ onStatusChange }) => {
           <h1 className="text-4xl font-bold text-slate-800">SRF Details</h1>
           <p className="text-slate-500 mt-2">Please review the details below. You can edit contact information and special instructions before approving.</p>
         </header>
- 
+
         {srfData.status === 'rejected' && srfData.remarks && (
           <div className="p-4 bg-red-50 border-l-4 border-red-400">
             <div className="flex"><div className="flex-shrink-0"><XCircle className="h-5 w-5 text-red-500" /></div><div className="ml-3"><h3 className="text-sm font-medium text-red-800">Rejection Reason</h3><p className="mt-1 text-sm text-red-700">{srfData.remarks}</p></div></div>
           </div>
         )}
-       
-       {/* Applied formOpacity here to visually disable inputs when concurrency locked */}
-       <div className={formOpacity}>
-        <section className="border border-slate-200 rounded-xl">
-          <div className="p-6 border-b border-slate-200 bg-slate-50 rounded-t-xl">
-            <div className="flex items-center gap-3">
-              <UserCircle className="h-7 w-7 text-indigo-500" />
-              <h3 className="text-xl font-semibold text-slate-800">Customer Details</h3>
+
+        {/* Applied formOpacity here to visually disable inputs when concurrency locked */}
+        <div className={formOpacity}>
+          <section className="border border-slate-200 rounded-xl">
+            <div className="p-6 border-b border-slate-200 bg-slate-50 rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <UserCircle className="h-7 w-7 text-indigo-500" />
+                <h3 className="text-xl font-semibold text-slate-800">Customer Details</h3>
+              </div>
             </div>
-          </div>
-         
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-5">
-           
-            <div>
+
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-5">
+
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Customer DC No</label>
                 <input className={readOnlyInputClasses} readOnly value={srfData.inward?.customer_dc_no || "N/A"} />
-            </div>
-            <div>
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Customer DC Date</label>
                 <input type="date" className={readOnlyInputClasses} readOnly value={srfData.inward?.customer_dc_date || ""} />
-            </div>
-            <div>
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Reference (SRF No)</label>
                 <input className={readOnlyInputClasses} readOnly value={srfData.nepl_srf_no} />
-            </div>
-            <div>
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Material Inward Date</label>
                 <input type="date" className={readOnlyInputClasses} readOnly value={srfData.inward?.material_inward_date || ""} />
-            </div>
- 
-            <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
-                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Company Name</label>
-                 <input className={`text-lg font-semibold ${readOnlyInputClasses}`} readOnly value={customerNameDisplay} />
-            </div>
- 
-            <div className="md:col-span-2">
+              </div>
+
+              <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Company Name</label>
+                <input className={`text-lg font-semibold ${readOnlyInputClasses}`} readOnly value={customerNameDisplay} />
+              </div>
+
+              <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Bill To Address</label>
                 <textarea rows={3} className={readOnlyInputClasses} readOnly value={srfData.inward?.customer?.bill_to_address || ""} />
-            </div>
-            <div className="md:col-span-2">
+              </div>
+              <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ship To Address</label>
                 <textarea rows={3} className={readOnlyInputClasses} readOnly value={srfData.inward?.customer?.ship_to_address || ""} />
-            </div>
- 
-            <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
+              </div>
+
+              <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
                 <h4 className="text-sm font-semibold text-indigo-600 mb-3">Contact Information</h4>
-            </div>
-            <div>
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Contact Person</label>
                 <input
-                    className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
-                    value={srfData.contact_person || ""}
-                    onChange={(e) => handleSrfChange("contact_person", e.target.value)}
-                    readOnly={isReadOnly}
+                  className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
+                  value={srfData.contact_person || ""}
+                  onChange={(e) => handleSrfChange("contact_person", e.target.value)}
+                  readOnly={isReadOnly}
                 />
-            </div>
-            <div>
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Phone</label>
                 <input
-                    className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
-                    value={srfData.telephone || ""}
-                    onChange={(e) => handleSrfChange("telephone", e.target.value)}
-                    readOnly={isReadOnly}
+                  className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
+                  value={srfData.telephone || ""}
+                  onChange={(e) => handleSrfChange("telephone", e.target.value)}
+                  readOnly={isReadOnly}
                 />
-            </div>
-            <div className="md:col-span-2">
+              </div>
+              <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email</label>
                 <input
-                    type="email"
-                    className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
-                    value={srfData.email || ""}
-                    onChange={(e) => handleSrfChange("email", e.target.value)}
-                    readOnly={isReadOnly}
+                  type="email"
+                  className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
+                  value={srfData.email || ""}
+                  onChange={(e) => handleSrfChange("email", e.target.value)}
+                  readOnly={isReadOnly}
                 />
-            </div>
- 
-            <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
+              </div>
+
+              <div className="lg:col-span-4 border-t border-slate-100 pt-2 mt-2">
                 <div className="flex items-center gap-2 mb-3">
-                    <Lightbulb className="h-4 w-4 text-yellow-500" />
-                    <h4 className="text-sm font-semibold text-indigo-600">Certificate Information</h4>
+                  <Lightbulb className="h-4 w-4 text-yellow-500" />
+                  <h4 className="text-sm font-semibold text-indigo-600">Certificate Information</h4>
                 </div>
-            </div>
-           
-            <div className="md:col-span-2">
+              </div>
+
+              <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Certificate Issue Name</label>
                 <input
-                    className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
-                    value={srfData.certificate_issue_name || ""}
-                    onChange={(e) => handleSrfChange("certificate_issue_name", e.target.value)}
-                    placeholder="Same as Company Name"
-                    readOnly={isReadOnly}
+                  className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
+                  value={srfData.certificate_issue_name || ""}
+                  onChange={(e) => handleSrfChange("certificate_issue_name", e.target.value)}
+                  placeholder="Same as Company Name"
+                  readOnly={isReadOnly}
                 />
-            </div>
-            <div className="md:col-span-2">
+              </div>
+              <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Certificate Issue Address</label>
                 <textarea
-                    rows={2}
-                    className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
-                    value={srfData.certificate_issue_address || ""}
-                    onChange={(e) => handleSrfChange("certificate_issue_address", e.target.value)}
-                    placeholder="Same as Bill To Address"
-                    readOnly={isReadOnly}
+                  rows={2}
+                  className={isReadOnly ? readOnlyInputClasses : editableInputClasses}
+                  value={srfData.certificate_issue_address || ""}
+                  onChange={(e) => handleSrfChange("certificate_issue_address", e.target.value)}
+                  placeholder="Same as Bill To Address"
+                  readOnly={isReadOnly}
                 />
+              </div>
+
             </div>
- 
-          </div>
-        </section>
- 
-        <section className="border border-slate-200 rounded-xl">
+          </section>
+
+          <section className="border border-slate-200 rounded-xl">
             <div className="p-6 border-b border-slate-200 bg-slate-50 rounded-t-xl"><div className="flex items-center gap-3"><BookOpen className="h-7 w-7 text-indigo-500" /><h3 className="text-xl font-semibold text-slate-800">Special Instructions</h3></div></div>
             <div className="p-6 space-y-8">
-                <div><strong className="text-slate-900 text-base font-semibold">1. Calibration Frequency:</strong><div className="flex flex-col gap-3 mt-3 text-slate-700"><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="radio" name="freq" checked={srfData.calibration_frequency === "As per Standard"} onChange={() => handleSrfChange("calibration_frequency", "As per Standard")} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> As per Standard</label><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="radio" name="freq" checked={srfData.calibration_frequency !== "As per Standard"} onChange={() => !isReadOnly && srfData.calibration_frequency === "As per Standard" && handleSrfChange("calibration_frequency", "")} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> Specify</label>{srfData.calibration_frequency !== "As per Standard" && (<input type="text" className={`mt-1 w-full max-w-sm ${isReadOnly ? readOnlyInputClasses : editableInputClasses}`} value={srfData.calibration_frequency || ""} onChange={(e) => handleSrfChange("calibration_frequency", e.target.value)} placeholder="e.g., 12 Months" readOnly={isReadOnly} />)}</div></div>
-                <div><strong className="text-slate-900 text-base font-semibold">2. Statement of conformity required?</strong><div className="flex gap-6 mt-3 text-slate-700"><label className="flex items-center gap-3 cursor-pointer"><input type="radio" checked={srfData.statement_of_conformity === true} onChange={() => handleSrfChange("statement_of_conformity", true)} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> YES</label><label className="flex items-center gap-3 cursor-pointer"><input type="radio" checked={srfData.statement_of_conformity === false} onChange={() => handleSrfChange("statement_of_conformity", false)} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> NO</label></div>{srfData.statement_of_conformity && (<div className="mt-4 pl-6 border-l-2 border-slate-200"><strong className="text-slate-800 text-base font-semibold">2.1 Decision Rule:</strong><div className="flex flex-col gap-3 mt-3 text-slate-700"><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="checkbox" checked={srfData.ref_iso_is_doc} onChange={e => handleSrfChange("ref_iso_is_doc", e.target.checked)} disabled={isReadOnly} className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" /> Ref. ISO/IS Doc. Standard</label><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="checkbox" checked={srfData.ref_manufacturer_manual} onChange={e => handleSrfChange("ref_manufacturer_manual", e.target.checked)} disabled={isReadOnly} className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" /> Ref. manufacturer Manual</label><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="checkbox" checked={srfData.ref_customer_requirement} onChange={e => handleSrfChange("ref_customer_requirement", e.target.checked)} disabled={isReadOnly} className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" /> Ref. Customer Requirement</label></div></div>)}</div>
-                <div><strong className="text-slate-900 text-base font-semibold">3. Turnaround time:</strong><input className={`mt-2 w-full max-w-sm ${isReadOnly ? readOnlyInputClasses : editableInputClasses}`} value={srfData.turnaround_time || ""} onChange={e => handleSrfChange("turnaround_time", e.target.value)} placeholder="e.g., 7 business days" readOnly={isReadOnly} /></div>
+              <div><strong className="text-slate-900 text-base font-semibold">1. Calibration Frequency:</strong><div className="flex flex-col gap-3 mt-3 text-slate-700"><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="radio" name="freq" checked={srfData.calibration_frequency === "As per Standard"} onChange={() => handleSrfChange("calibration_frequency", "As per Standard")} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> As per Standard</label><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="radio" name="freq" checked={srfData.calibration_frequency !== "As per Standard"} onChange={() => !isReadOnly && srfData.calibration_frequency === "As per Standard" && handleSrfChange("calibration_frequency", "")} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> Specify</label>{srfData.calibration_frequency !== "As per Standard" && (<input type="text" className={`mt-1 w-full max-w-sm ${isReadOnly ? readOnlyInputClasses : editableInputClasses}`} value={srfData.calibration_frequency || ""} onChange={(e) => handleSrfChange("calibration_frequency", e.target.value)} placeholder="e.g., 12 Months" readOnly={isReadOnly} />)}</div></div>
+              <div><strong className="text-slate-900 text-base font-semibold">2. Statement of conformity required?</strong><div className="flex gap-6 mt-3 text-slate-700"><label className="flex items-center gap-3 cursor-pointer"><input type="radio" checked={srfData.statement_of_conformity === true} onChange={() => handleSrfChange("statement_of_conformity", true)} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> YES</label><label className="flex items-center gap-3 cursor-pointer"><input type="radio" checked={srfData.statement_of_conformity === false} onChange={() => handleSrfChange("statement_of_conformity", false)} disabled={isReadOnly} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500" /> NO</label></div>{srfData.statement_of_conformity && (<div className="mt-4 pl-6 border-l-2 border-slate-200"><strong className="text-slate-800 text-base font-semibold">2.1 Decision Rule:</strong><div className="flex flex-col gap-3 mt-3 text-slate-700"><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="checkbox" checked={srfData.ref_iso_is_doc} onChange={e => handleSrfChange("ref_iso_is_doc", e.target.checked)} disabled={isReadOnly} className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" /> Ref. ISO/IS Doc. Standard</label><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="checkbox" checked={srfData.ref_manufacturer_manual} onChange={e => handleSrfChange("ref_manufacturer_manual", e.target.checked)} disabled={isReadOnly} className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" /> Ref. manufacturer Manual</label><label className="flex items-center gap-3 cursor-pointer w-fit"><input type="checkbox" checked={srfData.ref_customer_requirement} onChange={e => handleSrfChange("ref_customer_requirement", e.target.checked)} disabled={isReadOnly} className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" /> Ref. Customer Requirement</label></div></div>)}</div>
+              <div><strong className="text-slate-900 text-base font-semibold">3. Turnaround time:</strong><input className={`mt-2 w-full max-w-sm ${isReadOnly ? readOnlyInputClasses : editableInputClasses}`} value={srfData.turnaround_time || ""} onChange={e => handleSrfChange("turnaround_time", e.target.value)} placeholder="e.g., 7 business days" readOnly={isReadOnly} /></div>
             </div>
             <div className="p-6 pt-0">
-                <strong className="text-slate-900 text-base font-semibold">4. Additional Notes:</strong>
-                <p className="text-sm text-slate-500 mt-1 mb-2">Any other specific instructions or comments for our team can be added here.</p>
-                <textarea
-                    rows={3}
-                    className={`w-full ${isReadOnly ? readOnlyInputClasses : editableInputClasses}`}
-                    value={srfData.remark_special_instructions || ""}
-                    onChange={(e) => handleSrfChange("remark_special_instructions", e.target.value)}
-                    placeholder="e.g., 'Please handle with extra care', 'Call before delivery'"
-                    readOnly={isReadOnly}
-                />
+              <strong className="text-slate-900 text-base font-semibold">4. Additional Notes:</strong>
+              <p className="text-sm text-slate-500 mt-1 mb-2">Any other specific instructions or comments for our team can be added here.</p>
+              <textarea
+                rows={3}
+                className={`w-full ${isReadOnly ? readOnlyInputClasses : editableInputClasses}`}
+                value={srfData.remark_special_instructions || ""}
+                onChange={(e) => handleSrfChange("remark_special_instructions", e.target.value)}
+                placeholder="e.g., 'Please handle with extra care', 'Call before delivery'"
+                readOnly={isReadOnly}
+              />
             </div>
-        </section>
- 
-        <section className="border border-slate-200 rounded-xl">
-            <div className="p-6 border-b border-slate-200 bg-slate-50 rounded-t-xl"><div className="flex items-center gap-3"><Wrench className="h-7 w-7 text-indigo-500" /><h3 className="text-xl font-semibold text-slate-800">Equipment Details</h3></div></div>
-            <div className="overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-xs text-slate-600 uppercase bg-slate-100 font-semibold">
-                <tr><th className="px-3 py-3">Instrument</th><th className="px-3 py-3">Model</th><th className="px-3 py-3">Serial No</th><th className="px-3 py-3">Range</th><th className="px-3 py-3">Unit</th><th className="px-3 py-3">Cal. Points</th><th className="px-3 py-3">Mode of Cal.</th></tr>
-            </thead><tbody className="divide-y divide-slate-200">
-                {srfData.inward?.equipments?.map((eq: EquipmentData) => (<tr key={eq.inward_eqp_id} className="even:bg-slate-50/50">
-                    <td className="px-2 py-2 w-1/5"><input type="text" className={readOnlyInputClasses} readOnly value={eq.material_description || ""} /></td>
-                    <td className="px-2 py-2 w-1/6"><input type="text" className={readOnlyInputClasses} readOnly value={eq.model || ""} /></td>
-                    <td className="px-2 py-2 w-1/6"><input type="text" className={readOnlyInputClasses} readOnly value={eq.serial_no || ""} /></td>
-                    <td className="px-2 py-2 w-1/6"><input type="text" className={readOnlyInputClasses} readOnly value={eq.range || ""} /></td>
-                    <td className="px-2 py-2"><input type="text" className={readOnlyInputClasses} readOnly value={eq.srf_equipment?.unit || ""} /></td>
-                    <td className="px-2 py-2"><input type="text" className={readOnlyInputClasses} readOnly value={eq.srf_equipment?.no_of_calibration_points || ""} /></td>
-                    <td className="px-2 py-2"><input type="text" className={readOnlyInputClasses} readOnly value={eq.srf_equipment?.mode_of_calibration || ""} /></td>
-                </tr>))}
-            </tbody></table></div>
-        </section>
- 
-        {!isReadOnly && (
-          <footer className="flex justify-end items-center gap-4 pt-8 border-t border-slate-200 pointer-events-auto">
-            <button className="flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75 transition-all disabled:opacity-60 disabled:cursor-not-allowed" onClick={() => setShowRejectionModal(true)} disabled={isSubmitting || isRecordLocked}><X className="h-5 w-5" /> Reject</button>
-            <button className="flex items-center justify-center gap-2 px-6 py-2.5 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-all disabled:opacity-60 disabled:cursor-not-allowed" onClick={() => saveAndUpdateStatus("approved")} disabled={isSubmitting || isRecordLocked}><Check className="h-5 w-5" /> Approve</button>
-          </footer>
-        )}
-       </div>
+          </section>
+
+          <section className="border border-slate-200 rounded-xl">
+            <div className="p-6 border-b border-slate-200 bg-slate-50 rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <Wrench className="h-7 w-7 text-indigo-500" />
+                <h3 className="text-xl font-semibold text-slate-800">
+                  Equipment Details
+                </h3>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-max table-auto text-sm text-left">
+                <thead className="bg-slate-100 text-xs font-semibold uppercase text-slate-600">
+                  <tr>
+                    <th className="px-3 py-3 whitespace-nowrap">Instrument</th>
+                    <th className="px-3 py-3 whitespace-nowrap">Model</th>
+                    <th className="px-3 py-3 whitespace-nowrap">Serial No</th>
+                    <th className="px-3 py-3 whitespace-nowrap">Range</th>
+                    <th className="px-3 py-3 whitespace-nowrap">Unit</th>
+                    <th className="px-3 py-3 whitespace-nowrap">Cal. Points</th>
+                    <th className="px-3 py-3 whitespace-nowrap w-32">Cal. Mode</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-200">
+                  {srfData.inward?.equipments?.map((eq: EquipmentData) => (
+                    <tr key={eq.inward_eqp_id} className="even:bg-slate-50/50">
+                      <td className="px-2 py-2 min-w-[180px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.material_description || ""}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 min-w-[140px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.model || ""}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 min-w-[140px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.serial_no || ""}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 min-w-[120px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.range || ""}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 min-w-[80px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.srf_equipment?.unit || ""}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 min-w-[120px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.srf_equipment?.no_of_calibration_points || ""}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 min-w-[140px]">
+                        <input
+                          type="text"
+                          className={readOnlyInputClasses}
+                          readOnly
+                          value={eq.srf_equipment?.mode_of_calibration || ""}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {!isReadOnly && (
+            <footer className="flex justify-end items-center gap-4 pt-8 border-t border-slate-200 pointer-events-auto">
+              <button className="flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75 transition-all disabled:opacity-60 disabled:cursor-not-allowed" onClick={() => setShowRejectionModal(true)} disabled={isSubmitting || isRecordLocked}><X className="h-5 w-5" /> Reject</button>
+              <button className="flex items-center justify-center gap-2 px-6 py-2.5 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-all disabled:opacity-60 disabled:cursor-not-allowed" onClick={() => saveAndUpdateStatus("approved")} disabled={isSubmitting || isRecordLocked}><Check className="h-5 w-5" /> Approve</button>
+            </footer>
+          )}
+        </div>
       </div>
- 
+
       {showRejectionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50 transition-opacity"><div className="bg-white rounded-lg shadow-xl max-w-md w-full"><div className="p-6"><div className="flex items-center gap-3 mb-4"><div className="p-2 bg-red-100 rounded-full"><XCircle className="h-6 w-6 text-red-600" /></div><h3 className="text-xl font-semibold text-slate-900">Confirm Rejection</h3></div><p className="text-slate-600 mb-4">Please provide a clear reason for rejecting this SRF. This will be sent to our team to make the necessary corrections.</p><div><label htmlFor="rejection-reason" className="block text-sm font-medium text-slate-700 mb-1.5">Reason for Rejection <span className="text-red-500">*</span></label><textarea id="rejection-reason" className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500" rows={4} placeholder="e.g., 'The calibration points for the torque wrench are incorrect...'" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} maxLength={500} /><p className="text-xs text-slate-500 mt-1 text-right">{rejectionReason.length}/500 characters</p></div><div className="flex gap-3 justify-end mt-6"><button className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200 transition-colors" onClick={() => setShowRejectionModal(false)} disabled={isSubmitting}>Cancel</button><button className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" onClick={handleRejectSubmit} disabled={isSubmitting || !rejectionReason.trim()}>{isSubmitting ? "Submitting..." : "Confirm Rejection"}</button></div></div></div></div>
       )}
     </>
   );
 };
- 
+
 export default CustomerSrfDetailView;
