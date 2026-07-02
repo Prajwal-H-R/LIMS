@@ -2,6 +2,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
 } from "react";
 import {
   Routes,
@@ -30,6 +31,9 @@ import {
   Zap,
   ScanLine,
   ArrowRight,
+  Filter,
+  X,
+  Building2,
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -37,7 +41,7 @@ import { User } from "../types";
 import { api, ENDPOINTS } from "../api/config";
 import { fetchLicenseStatus, LicenseStatus } from "../api/license";
 import LicenseModal from "../components/LicenseModal";
- 
+
 // --- Page Components ---
 import { CreateInwardPage } from "../components/CreateInwardPage";
 import { ViewUpdateInward } from "../components/ViewUpdateInward";
@@ -56,22 +60,22 @@ import ManualCalibrationPage from "../components/ManualCalibrationPage";
 import { FinalInspectionView } from "../components/FinalInspectionView";
 import CalibrationReminderWidget from "../components/CalibrationReminder";
 import CalibrationReminderDetailsPage from "../components/CalibrationReminderDetailsPage";
- 
+
 // --- Split Components ---
 import EngineerDashboard from "../components/EngineerDashboard";
 import {
   DeviationPage,
-DeviationSRFEquipmentPage,
+  DeviationSRFEquipmentPage,
   DeviationDetailPage,
 } from "../components/DeviationComponents";
-import { BarcodeScanner }from "../components/BarcodeScanner";
+import { BarcodeScanner } from "../components/BarcodeScanner";
 // ── Interfaces ────────────────────────────────────────────────────
- 
+
 interface EngineerPortalProps {
   user: User | null;
   onLogout: () => void;
 }
- 
+
 interface EngineerNotificationItem {
   id: number;
   subject: string;
@@ -80,32 +84,70 @@ interface EngineerNotificationItem {
   status: string;
   error?: string | null;
 }
- 
+
 interface EngineerNotificationsResponse {
   notifications: EngineerNotificationItem[];
 }
- 
+
 // ── Helpers ───────────────────────────────────────────────────────
- 
-const extractCompanyFromNotification = (
+
+const extractCompanyRawFromNotification = (
   notification?: EngineerNotificationItem | null
 ): string | null => {
   if (!notification) return null;
-  const bodyMatch = notification.body_text?.match(
-    /Company:\s*([^|]+)/i
-  );
-  if (bodyMatch?.[1]?.trim())
-    return bodyMatch[1].trim();
-  const subjectMatch = notification.subject?.match(
-    /\(Company:\s*([^)]+)\)/i
-  );
-  if (subjectMatch?.[1]?.trim())
-    return subjectMatch[1].trim();
+  const subjectMatch = notification.subject?.match(/\(Company:\s*([^)]+)\)/i);
+  if (subjectMatch?.[1]?.trim()) return subjectMatch[1].trim();
+  const body = notification.body_text;
+  if (body?.trim()) {
+    const structured = body.match(
+      /Company:\s*([\s\S]*?)\s*\|\s*Customer profile updated/i
+    );
+    if (structured?.[1]?.trim()) return structured[1].trim();
+    const beforePipe = body.match(/Company:\s*([^|\n\r]+)/i);
+    if (beforePipe?.[1]?.trim()) return beforePipe[1].trim();
+  }
   return null;
 };
- 
+
+const canonicalCompanyName = (
+  raw: string | null | undefined
+): string | null => {
+  if (!raw?.trim()) return null;
+  let s =
+    raw
+      .trim()
+      .split(/\r?\n/)
+      .find((line) => line.trim()) ?? raw.trim();
+  s = s.replace(/\s+/g, ' ');
+  const junkIdx = s.search(/\.\s*Changed:/i);
+  if (junkIdx > 0) s = s.slice(0, junkIdx).trim();
+  const leakedPipe = s.match(/^(.+?)(?:\s*\|\s*Customer\b)/i);
+  if (leakedPipe?.[1]?.trim()) s = leakedPipe[1].trim();
+  return s || null;
+};
+
+const extractCompanyFromNotification = (
+  notification?: EngineerNotificationItem | null
+): string | null =>
+  canonicalCompanyName(extractCompanyRawFromNotification(notification));
+
+const notificationRelativeTime = (iso: string): string => {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const sec = Math.round((now - then) / 1000);
+  if (sec < 60) return 'Just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+};
+
+
 // ── Active section resolver ───────────────────────────────────────
- 
+
 const getActiveSectionFromPath = (
   pathname: string
 ): string => {
@@ -144,18 +186,18 @@ const getActiveSectionFromPath = (
     return "certificates";
   return "dashboard";
 };
- 
+
 // ── Quick Action items (Sidebar) ──────────────────────────────────
- 
+
 interface QuickActionItem {
   id: string;
   label: string;
   icon: React.ReactNode;
   route: string;
 }
- 
+
 const quickActionItems: QuickActionItem[] = [
-    {
+  {
     id: "barcode-scanner",
     label: "Scan Barcode",
     icon: <ScanLine size={18} />,
@@ -210,9 +252,9 @@ const quickActionItems: QuickActionItem[] = [
     route: "/engineer/certificates",
   },
 ];
- 
+
 // ── Inside View: Inward Management Hub ────────────────────────────
- 
+
 /**
  * Inside View Hub for Inward Management
  */
@@ -242,7 +284,7 @@ const InwardManagementHub: React.FC<{
       iconBg: "bg-emerald-50",
     },
   ];
- 
+
   return (
     <div className="animate-fadeIn">
       <div className="mb-8 flex items-center justify-between">
@@ -257,7 +299,7 @@ const InwardManagementHub: React.FC<{
           <ChevronLeft size={16} /> Back to Dashboard
         </button>
       </div>
- 
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {modules.map((m) => (
           <button
@@ -269,7 +311,7 @@ const InwardManagementHub: React.FC<{
             <div className={`w-14 h-14 ${m.iconBg} rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300`}>
               {m.icon}
             </div>
- 
+
             {/* Content Section */}
             <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-blue-700 transition-colors">
               {m.title}
@@ -277,7 +319,7 @@ const InwardManagementHub: React.FC<{
             <p className="text-gray-500 text-sm leading-relaxed mb-8 flex-1">
               {m.desc}
             </p>
- 
+
             {/* Visual Footer (Matches your second image) */}
             <div className="mt-auto flex items-center text-blue-600 font-semibold text-sm transition-all group-hover:gap-1">
               Open Section
@@ -289,9 +331,9 @@ const InwardManagementHub: React.FC<{
     </div>
   );
 };
- 
+
 // ── Sidebar ───────────────────────────────────────────────────────
- 
+
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (val: boolean) => void;
@@ -300,7 +342,7 @@ interface SidebarProps {
   notificationCount: number;
   onLogout: () => void;
 }
- 
+
 const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   setIsOpen,
@@ -313,10 +355,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     label: string;
     top: number;
   } | null>(null);
- 
+
   const [quickActionsExpanded, setQuickActionsExpanded] =
     useState(true);
- 
+
   useEffect(() => {
     const isQuickAction = quickActionItems.some(
       (item) => item.id === activeSection
@@ -325,7 +367,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setQuickActionsExpanded(true);
     }
   }, [activeSection]);
- 
+
   const mainNavItems = [
     {
       id: "dashboard",
@@ -346,7 +388,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       route: "/engineer/notifications",
     },
   ];
- 
+
   const handleMouseEnter = (
     e: React.MouseEvent<HTMLButtonElement | HTMLDivElement>,
     label: string
@@ -355,7 +397,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     setHoveredItem({ label, top: rect.top + rect.height / 2 });
   };
- 
+
   const renderNavButton = (item: {
     id: string;
     label: string;
@@ -365,7 +407,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const isActive = activeSection === item.id;
     const showBadge = item.id === "notifications" && notificationCount > 0;
     const badgeLabel = notificationCount > 99 ? "99+" : notificationCount;
- 
+
     return (
       <button
         key={item.id}
@@ -396,7 +438,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
     );
   };
- 
+
   const renderQuickActionItem = (item: QuickActionItem) => {
     const isActive = activeSection === item.id;
     return (
@@ -420,7 +462,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
     );
   };
- 
+
   const renderQuickActionsGroup = () => {
     const hasActiveChild = quickActionItems.some((item) => item.id === activeSection);
     if (isOpen) {
@@ -458,7 +500,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
     );
   };
- 
+
   return (
     <>
       <aside className={`relative bg-white border-r border-gray-200 flex flex-col h-full transition-all duration-300 ${isOpen ? "w-64" : "w-[4.5rem]"}`}>
@@ -490,9 +532,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
- 
+
 // ── Settings Page (Placeholder) ───────────────────────────────────
- 
+
 const SettingsPage: React.FC = () => (
   <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400 animate-fadeIn">
     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
@@ -502,58 +544,196 @@ const SettingsPage: React.FC = () => (
     <p className="text-gray-500 mt-2">Coming soon.</p>
   </div>
 );
- 
+
 // ── Notifications Page ────────────────────────────────────────────
- 
-const EngineerNotificationsPage: React.FC<{ notifications: EngineerNotificationItem[]; loading: boolean; error: string | null }> = ({ notifications, loading, error }) => {
+
+const EngineerNotificationsPage: React.FC<{
+  notifications: EngineerNotificationItem[];
+  loading: boolean;
+  error: string | null;
+}> = ({ notifications, loading, error }) => {
   const navigate = useNavigate();
-  return (
-    <div>
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <div><h2 className="text-2xl font-bold text-gray-900">Notifications</h2><p className="text-gray-500 mt-1 text-sm">Customer profile updates.</p></div>
-        <button type="button" onClick={() => navigate("/engineer")} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 transition shadow-sm"><ChevronLeft size={16} /> Back</button>
+  const [companyFilter, setCompanyFilter] = useState<string | null>(null);
+
+  const companyOptions = useMemo(() => {
+    const names = new Set<string>();
+    notifications.forEach((n) => {
+      const co = extractCompanyFromNotification(n);
+      if (co) names.add(co);
+    });
+    return Array.from(names).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+  }, [notifications]);
+
+  const filtered = useMemo(() => {
+    if (!companyFilter) return notifications;
+    return notifications.filter(
+      (n) => extractCompanyFromNotification(n) === companyFilter
+    );
+  }, [notifications, companyFilter]);
+
+  if (loading && notifications.length === 0) {
+    return <p className="py-4 text-sm text-gray-500">Loading notifications…</p>;
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl">
+        {error}
       </div>
-      {loading && <p>Loading...</p>}
-      {error && <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">{error}</div>}
-      <div className="space-y-3">
-        {notifications.map((n) => (
-          <div key={n.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-            <h3 className="font-semibold text-gray-900">{n.subject}</h3>
-            {n.body_text && <p className="text-sm text-gray-600 mt-1">{n.body_text}</p>}
+    );
+  }
+
+  return (
+    <div className="animate-fadeIn">
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Notifications</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Customer profile updates.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/engineer")}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50"
+        >
+          <ChevronLeft size={16} /> Back
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        {/* Company Filter */}
+        {notifications.length > 0 && (
+          <div className="p-4 bg-white border border-gray-200 rounded-2xl shadow-sm ring-1 ring-gray-100">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <span>Filter by Company</span>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <select
+                  value={companyFilter ?? ''}
+                  onChange={(e) =>
+                    setCompanyFilter(e.target.value === '' ? null : e.target.value)
+                  }
+                  className="w-full min-w-[220px] rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-medium focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/10 sm:w-auto"
+                >
+                  <option value="">All Companies</option>
+                  {companyOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                {companyFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setCompanyFilter(null)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    <X className="w-4 h-4" />
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        ))}
+        )}
+
+        {/* Empty State */}
+        {filtered.length === 0 && !loading && (
+          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+            <Bell size={40} className="mb-3 opacity-40" />
+            <p className="font-medium">
+              {companyFilter
+                ? "No profile update notifications match this filter."
+                : "You have no profile update notifications."}
+            </p>
+          </div>
+        )}
+
+        {/* Notification Cards */}
+        {filtered.map((n) => {
+          const companyName = extractCompanyFromNotification(n);
+          return (
+            <div
+              key={n.id}
+              className="p-5 bg-white border border-gray-200 rounded-2xl shadow-sm transition hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  {companyName && (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 mb-2 text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-100 rounded-full">
+                      <Building2 size={12} />
+                      {companyName}
+                    </div>
+                  )}
+                  <h3 className="text-lg font-bold text-gray-900 break-words">
+                    {n.subject}
+                  </h3>
+                  {n.body_text && (
+                    <ul className="mt-2 space-y-1 text-sm text-gray-700 list-disc pl-5">
+                      {n.body_text
+                        .replace(/^Customer profile updated:\s*/i, '')
+                        .split(',')
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                        .map((item, idx) => (
+                          <li key={idx}>{item}</li>
+                        ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${n.status === 'Sent' || n.status === 'success'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                        : 'bg-gray-50 text-gray-600 border-gray-100'
+                      }`}
+                  >
+                    {n.status}
+                  </span>
+                  <p className="mt-2 text-[10px] text-gray-400">
+                    {notificationRelativeTime(n.created_at)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 };
- 
+
+
 // ── Engineer Portal (Main) ────────────────────────────────────────
- 
+
 const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
   const username = user?.full_name || user?.email || "Engineer";
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const activeSection = getActiveSectionFromPath(location.pathname);
- 
+
   // ── License popup state (engineer only; customer/admin handled elsewhere) ──
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseValidUntil, setLicenseValidUntil] = useState("");
   const [showLicensePopup, setShowLicensePopup] = useState(false);
   const [pendingRoute, setPendingRoute] = useState<string | null>(null);
- 
-  // Keep backend-derived values separate from UI open/close state.
-  const [backendWantsPopup, setBackendWantsPopup] = useState(false);
- 
+
+  
   // Prevent auto-open from re-triggering after user-dismiss.
   const autoOpenDoneRef = React.useRef(false);
   const dismissedRef = React.useRef(false);
- 
+
   const dismissLicensePopup = useCallback(
     (afterDismiss?: boolean) => {
       dismissedRef.current = true;
       setShowLicensePopup(false);
- 
+
       if (afterDismiss && pendingRoute) {
         const route = pendingRoute;
         setPendingRoute(null);
@@ -564,16 +744,16 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
     },
     [navigate, pendingRoute]
   );
- 
+
   // ── Notification state ──
   const [profileUpdateNotifications, setProfileUpdateNotifications] = useState<EngineerNotificationItem[]>([]);
   const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
   const [profileUpdateError, setProfileUpdateError] = useState<string | null>(null);
   const [showProfileUpdatePopup, setShowProfileUpdatePopup] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
- 
+
   const latestPopupCompany = extractCompanyFromNotification(profileUpdateNotifications[0]);
- 
+
   const fetchProfileUpdateNotifications = useCallback(async () => {
     setProfileUpdateLoading(true);
     try {
@@ -593,7 +773,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
       setProfileUpdateLoading(false);
     }
   }, [activeSection]);
- 
+
   useEffect(() => {
     fetchProfileUpdateNotifications();
     const interval = setInterval(
@@ -602,21 +782,21 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
     );
     return () => clearInterval(interval);
   }, [fetchProfileUpdateNotifications]);
- 
+
   // Fetch license status only after auth and only for staff engineer
   useEffect(() => {
     const run = async () => {
       if (!user) return;
- 
+
       const role = (user as any)?.role?.toString().toLowerCase();
       if (role !== "engineer") return;
- 
+
       const res = await fetchLicenseStatus();
- 
-      setBackendWantsPopup(!!res?.show_popup);
+
+      //setBackendWantsPopup(!!res?.show_popup);
       setLicenseStatus((res?.status as LicenseStatus) ?? null);
       setLicenseValidUntil(res?.valid_until ?? "");
- 
+
       // Auto-open exactly once after login (prevents reopen loops after dismiss).
       if (!autoOpenDoneRef.current) {
         autoOpenDoneRef.current = true;
@@ -628,16 +808,16 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
         }
       }
     };
- 
+
     run().catch(() => {
       // keep UI unchanged if license call fails
     });
   }, [user]);
- 
+
   const handleNavigateWithLicense = useCallback(
     (route: string) => {
       const role = (user as any)?.role?.toString().toLowerCase();
- 
+
       if (
         role === "engineer" &&
         licenseStatus === "EXPIRED" &&
@@ -650,23 +830,23 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
         setShowLicensePopup(true);
         return;
       }
- 
+
       navigate(route);
     },
     [navigate, user, licenseStatus]
   );
- 
+
   // If user lands directly on create-inward routes while license is expired,
   // open modal and redirect away from the form.
   useEffect(() => {
     const role = (user as any)?.role?.toString().toLowerCase();
     if (role !== "engineer" || licenseStatus !== "EXPIRED") return;
- 
+
     const path = location.pathname;
     const isCreateInwardRoute =
       path === "/engineer/create-inward" ||
       path.startsWith("/engineer/create-inward");
- 
+
     if (isCreateInwardRoute) {
       // Landing directly on create-inward while expired => manual reopen.
       dismissedRef.current = false;
@@ -675,18 +855,18 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
       navigate("/engineer", { replace: true });
     }
   }, [location.pathname, location.search, navigate, user, licenseStatus]);
- 
+
   return (
     <div className="flex flex-col h-screen bg-[#f8f9fc] font-sans text-gray-900 overflow-hidden">
       <div className="flex-none w-full bg-white border-b border-gray-200 shadow-sm z-50">
         <Header username={username} role="Engineer" onLogout={onLogout} profilePath="/engineer/profile" notificationsPath="/engineer/notifications" />
       </div>
- 
+
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-none h-full bg-white border-r border-gray-200 z-40">
           <Sidebar isOpen={isSidebarOpen} setIsOpen={setSidebarOpen} activeSection={activeSection} onNavigate={handleNavigateWithLicense} notificationCount={unreadCount} onLogout={onLogout} />
         </div>
- 
+
         <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-white to-blue-50 relative z-0">
           <div className="flex flex-col min-h-full">
             <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
@@ -695,13 +875,13 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
                 <Route path="notifications" element={<EngineerNotificationsPage notifications={profileUpdateNotifications} loading={profileUpdateLoading} error={profileUpdateError} />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="/" element={<EngineerDashboard />} />
-               
+
                 {/* NEW HUB ROUTE */}
                 <Route
                   path="inward-management"
                   element={<InwardManagementHub onNavigate={handleNavigateWithLicense} />}
                 />
- 
+
                 {/* Sub Routes */}
                 <Route path="create-inward" element={<CreateInwardPage />} />
                 <Route path="create-inward/form" element={<InwardForm />} />
@@ -721,15 +901,15 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
                 <Route path="deviations/:deviationId" element={<DeviationDetailPage />} />
                 <Route path="final-inspection/:inwardId" element={<FinalInspectionView />} />
                 <Route path="calibration-reminders/:customerId" element={<CalibrationReminderDetailsPage />} />
-                  <Route path="scan" element={<BarcodeScanner />} />
-                  <Route path="deviations" element={<DeviationPage />} />
- 
+                <Route path="scan" element={<BarcodeScanner />} />
+                <Route path="deviations" element={<DeviationPage />} />
+
                 {/* ✅ ADD THIS ROUTE */}
                 <Route
                   path="deviations/srf/:srfNo"
                   element={<DeviationSRFEquipmentPage />}
                 />
- 
+
                 {/* ⚠️ MUST stay BELOW the srf route */}
                 <Route
                   path="deviations/:deviationId"
@@ -741,9 +921,9 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
           </div>
         </main>
       </div>
- 
+
       <CalibrationReminderWidget onCustomerSelect={(id) => navigate(`/engineer/calibration-reminders/${id}`)} />
- 
+
       {/* License Popup (Engineer only) */}
       {showLicensePopup &&
         (licenseStatus === "EXPIRED" || licenseStatus === "EXPIRING_SOON") &&
@@ -757,7 +937,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
               setLicenseValidUntil(newDate);
               setLicenseStatus("ACTIVE");
               setShowLicensePopup(false);
- 
+
               if (pendingRoute) {
                 const route = pendingRoute;
                 setPendingRoute(null);
@@ -770,7 +950,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
             }}
           />
         )}
- 
+
       {/* Profile Update Popup */}
       {showProfileUpdatePopup && (
         <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -807,5 +987,5 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
     </div>
   );
 };
- 
+
 export default EngineerPortal;

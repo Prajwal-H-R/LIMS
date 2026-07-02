@@ -489,11 +489,8 @@ export const ExportInwardPage: React.FC = () => {
               </th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wide">SRF No.</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wide">Customer</th>
-              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wide">Updated At</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wide">Received By</th>
-              <th className="p-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wide">Equipments</th>
-              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wide">Special Instructions</th>
-              <th className="p-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wide">Action</th>
+              
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">
@@ -505,11 +502,8 @@ export const ExportInwardPage: React.FC = () => {
                   <td className="p-4 text-center"><div className="w-5 h-5 bg-gray-200 rounded mx-auto" /></td>
                   <td className="p-4"><div className="w-24 h-4 bg-gray-200 rounded" /></td>
                   <td className="p-4"><div className="w-32 h-4 bg-gray-200 rounded" /></td>
-                  <td className="p-4"><div className="w-24 h-4 bg-gray-200 rounded" /></td>
                   <td className="p-4"><div className="w-20 h-4 bg-gray-200 rounded" /></td>
-                  <td className="p-4"><div className="w-8 h-6 bg-gray-200 rounded-full mx-auto" /></td>
-                  <td className="p-4 space-y-2"><div className="w-32 h-3 bg-gray-200 rounded" /><div className="w-24 h-3 bg-gray-200 rounded" /></td>
-                  <td className="p-4 flex justify-center"><div className="w-20 h-8 bg-gray-200 rounded-lg" /></td>
+              
                 </tr>
               ))
             ) : displayedInwards.length === 0 ? (
@@ -534,35 +528,8 @@ export const ExportInwardPage: React.FC = () => {
                     </td>
                     <td className="p-4 font-mono font-bold text-blue-600">{item.srf_no}</td>
                     <td className="p-4 text-gray-800 font-medium line-clamp-2" title={item.customer_details}>{item.customer_details || "—"}</td>
-                    <td className="p-4 text-gray-600 font-medium">{formatDateTime(item.updated_at)}</td>
                     <td className="p-4 text-gray-600">{item.received_by || "—"}</td>
-                    <td className="p-4 text-center">
-                      <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-gray-700 border border-gray-200">
-                        {item.equipment_count}
-                      </span>
-                    </td>
-                    <td className="p-4 text-gray-600 text-xs">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1">
-                          <span className="font-bold text-gray-700 uppercase tracking-wide text-[10px]">Freq:</span> 
-                          <span>{item.calibration_frequency?.trim() || "—"}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="font-bold text-gray-700 uppercase tracking-wide text-[10px]">SoC:</span> 
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${item.statement_of_conformity ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{boolToText(item.statement_of_conformity)}</span>
-                        </div>
-                        {item.statement_of_conformity && (
-                          <div className="flex items-start gap-1">
-                            <span className="font-bold text-gray-700 uppercase tracking-wide text-[10px] mt-0.5">Rules:</span> 
-                            <span className="whitespace-normal leading-tight">{getDecisionRuleLabels(item).length > 0 ? getDecisionRuleLabels(item).join(", ") : "—"}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1">
-                          <span className="font-bold text-gray-700 uppercase tracking-wide text-[10px]">TAT:</span> 
-                          <span className="font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{formatTurnaround(item.turnaround_time)}</span>
-                        </div>
-                      </div>
-                    </td>
+                    
                     <td className="p-4 text-center">
                       <button
                         type="button"
@@ -571,7 +538,7 @@ export const ExportInwardPage: React.FC = () => {
                         className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {exportingId === item.inward_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                        Single
+                        Export
                       </button>
                     </td>
                   </tr>

@@ -440,7 +440,6 @@
 // };
 
 // export default ReproducibilitySection;
-
 // src/components/ReproducibilitySection.tsx
 import React, {
   useState,
@@ -448,6 +447,7 @@ import React, {
   useRef,
   forwardRef,
   useImperativeHandle,
+  useMemo,
 } from "react";
 import { api, ENDPOINTS } from "../api/config";
 import {
@@ -575,7 +575,6 @@ const ReproducibilitySection = forwardRef<
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [tableData, setTableData] = useState<SequenceRowData[]>(
     buildDefaultRows()
   );
@@ -584,18 +583,65 @@ const ReproducibilitySection = forwardRef<
     b_rep: 0,
     unit: torqueUnit || "Nm",
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const isFormInvalid = useMemo(() => Object.keys(errors).length > 0, [errors]);
 
   const lastSavedPayload = useRef<string | null>(null);
   const hasUserEdited = useRef(false);
   const debouncedTableData = useDebounce(tableData, 1000);
 
+  // ── Validation Logic ───────────────────────────────────────────────────────
+  const MAX_INPUT_VALUE = 9999;
+  const validateInput = (value: string): string | null => {
+    if (value.trim() === "") {
+      return "Value cannot be empty.";
+    }
+    if (value.endsWith(".")) {
+      return "Invalid number.";
+    }
+    const num = Number(value);
+    if (isNaN(num) || !isFinite(num)) {
+      return "Invalid numeric value.";
+    }
+    if (num > MAX_INPUT_VALUE) {
+      return `Value cannot be greater than ${MAX_INPUT_VALUE}.`;
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    const newErrors: Record<string, string> = {};
+    if (dataLoaded) {
+      tableData.forEach((row, rowIndex) => {
+        const hasAnyInputInRow = row.readings.some((r) => r.trim() !== "");
+
+        row.readings.forEach((reading, rIndex) => {
+          const error = validateInput(reading);
+
+          // An actual data error (format, range) is always an error to display.
+          if (error && error !== "Value cannot be empty.") {
+            newErrors[`${rowIndex}-${rIndex}`] = error;
+          }
+          // An empty cell is only an error if other cells in the same row have been filled.
+          else if (hasAnyInputInRow && reading.trim() === "") {
+            newErrors[`${rowIndex}-${rIndex}`] = "Value cannot be empty.";
+          }
+        });
+      });
+    }
+    setErrors(newErrors);
+  }, [tableData, dataLoaded]);
+
+  const clearAllReadings = () => {
+    hasUserEdited.current = true;
+    setSaveStatus("idle");
+    setTableData(buildDefaultRows());
+    setMeta((m) => ({ ...m, b_rep: 0 }));
+  };
+
   // ── Bot Handle ─────────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
-    /**
-     * Expose 4 rows to the bot.
-     * Each row uses meta.set_torque_20 as reference torque
-     * and has 5 readings.
-     */
     getRows: () =>
       tableData.map((row, rowIndex) => ({
         set_torque: meta.set_torque,
@@ -603,10 +649,6 @@ const ReproducibilitySection = forwardRef<
         rowIndex,
       })),
 
-    /**
-     * Bot injects generated readings.
-     * Recalculates mean_xr per row and b_rep overall.
-     */
     applyReadings: (data) => {
       hasUserEdited.current = true;
       setSaveStatus("idle");
@@ -615,7 +657,6 @@ const ReproducibilitySection = forwardRef<
         data.forEach(({ rowIndex, readings }) => {
           if (rowIndex >= next.length) return;
           const row = { ...next[rowIndex] };
-          // Always exactly 5 slots
           row.readings = Array.from(
             { length: 5 },
             (_, i) => readings[i] ?? ""
@@ -623,19 +664,12 @@ const ReproducibilitySection = forwardRef<
           row.mean_xr = calcMean5(row.readings);
           next[rowIndex] = row;
         });
-        // Recalculate b_rep across all rows
         setMeta((m) => ({ ...m, b_rep: calcBRep(next) }));
         return next;
       });
     },
 
-    /** Clear all readings and reset b_rep */
-    clearReadings: () => {
-      hasUserEdited.current = true;
-      setSaveStatus("idle");
-      setTableData(buildDefaultRows());
-      setMeta((m) => ({ ...m, b_rep: 0 }));
-    },
+    clearReadings: clearAllReadings,
   }));
 
   // ── 1. Initial Fetch ───────────────────────────────────────────────────────
@@ -670,7 +704,7 @@ const ReproducibilitySection = forwardRef<
               return found
                 ? {
                     sequence_no: found.sequence_no,
-                    readings: found.readings.map(String),
+                    readings: found.readings.map(v => String(v) === "0" ? "" : String(v)),
                     mean_xr: found.mean_xr,
                   }
                 : def;
@@ -685,8 +719,6 @@ const ReproducibilitySection = forwardRef<
         }
 
         setTableData(currentData);
-
-        // Sync reference to prevent immediate auto-save on mount
         lastSavedPayload.current = JSON.stringify({
           job_id: jobId,
           torque_unit: backendUnit,
@@ -712,7 +744,10 @@ const ReproducibilitySection = forwardRef<
 
   // ── 2. Auto-Save ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!dataLoaded || !hasUserEdited.current) return;
+    if (!dataLoaded || !hasUserEdited.current || isFormInvalid) {
+      setSaveStatus("idle");
+      return;
+    }
 
     const performAutoSave = async () => {
       const payload = {
@@ -751,7 +786,6 @@ const ReproducibilitySection = forwardRef<
 
         lastSavedPayload.current = payloadString;
         setSaveStatus("saved");
-        setLastSaved(new Date());
       } catch (err) {
         console.error("Reproducibility auto-save failed:", err);
         setSaveStatus("error");
@@ -759,7 +793,7 @@ const ReproducibilitySection = forwardRef<
     };
 
     performAutoSave();
-  }, [debouncedTableData, jobId, dataLoaded, meta.unit]);
+  }, [debouncedTableData, jobId, dataLoaded, meta.unit, isFormInvalid]);
 
   // ── 3. Handlers ────────────────────────────────────────────────────────────
   const handleReadingChange = (
@@ -767,7 +801,7 @@ const ReproducibilitySection = forwardRef<
     readIdx: number,
     value: string
   ) => {
-    if (!/^\d*\.?\d*$/.test(value)) return;
+    if (value !== "" && !/^\d*\.?\d*$/.test(value)) return;
 
     hasUserEdited.current = true;
     setSaveStatus("idle");
@@ -780,18 +814,14 @@ const ReproducibilitySection = forwardRef<
       row.mean_xr = calcMean5(row.readings);
       next[rowIdx] = row;
 
-      // Instant b_rep update
       setMeta((m) => ({ ...m, b_rep: calcBRep(next) }));
       return next;
     });
   };
 
-  const handleClear = () => {
+  const handleClearClick = () => {
     if (!window.confirm("Clear all reproducibility readings?")) return;
-    hasUserEdited.current = true;
-    setSaveStatus("idle");
-    setTableData(buildDefaultRows());
-    setMeta((m) => ({ ...m, b_rep: 0 }));
+    clearAllReadings();
   };
 
   // ── Style helpers ──────────────────────────────────────────────────────────
@@ -816,33 +846,39 @@ const ReproducibilitySection = forwardRef<
             B. Reproducibility
           </h2>
 
-          {/* Save Status */}
-          <div className="flex items-center gap-2 text-xs font-medium">
+          <div className="flex items-center gap-2 text-xs font-medium min-w-[80px] justify-end">
             {saveStatus === "saving" && (
               <span className="text-blue-600 flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" /> Saving...
               </span>
             )}
-            {saveStatus === "saved" && (
-              <span className="text-green-600 flex items-center gap-1 transition-opacity duration-1000">
+            {saveStatus === "saved" && !isFormInvalid && (
+              <span className="text-green-600 flex items-center gap-1">
                 <CheckCircle2 className="h-3 w-3" /> Saved
-                <span className="text-gray-400 text-[10px] ml-1">
-                  {lastSaved?.toLocaleTimeString()}
-                </span>
               </span>
             )}
             {saveStatus === "error" && (
               <span className="text-red-600 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Save Failed
+                <AlertCircle className="h-3 w-3" /> Error
               </span>
             )}
-            {saveStatus === "idle" && (
+            {(saveStatus === "idle" || (saveStatus === "saved" && isFormInvalid)) && (
               <span className="text-gray-400 flex items-center gap-1">
-                <Cloud className="h-3 w-3" /> Up to date
+                <Cloud className="h-3 w-3" /> Synced
               </span>
             )}
           </div>
         </div>
+
+        {isFormInvalid && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-3 text-sm text-yellow-800">
+            <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />
+            <span>
+              Some fields are incomplete or have errors. Please review the
+              highlighted cells.
+            </span>
+          </div>
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto rounded-lg border border-gray-300">
@@ -869,7 +905,6 @@ const ReproducibilitySection = forwardRef<
                   </th>
                 ))}
               </tr>
-              {/* Unit row */}
               <tr className="border-b border-gray-300">
                 <th className={thUnit}>{meta.unit}</th>
                 <th className={thUnit}>-</th>
@@ -887,7 +922,6 @@ const ReproducibilitySection = forwardRef<
                   key={row.sequence_no}
                   className="hover:bg-gray-50 transition-colors"
                 >
-                  {/* Set Torque — merged all rows */}
                   {rowIdx === 0 && (
                     <td
                       rowSpan={tableData.length}
@@ -897,12 +931,10 @@ const ReproducibilitySection = forwardRef<
                     </td>
                   )}
 
-                  {/* Sequence label */}
                   <td className={`${tdBase} bg-gray-100 font-bold text-xs`}>
                     {SEQUENCE_LABELS[rowIdx]}
                   </td>
 
-                  {/* Reading inputs */}
                   {row.readings.map((reading, readIdx) => (
                     <td key={readIdx} className={inputCell}>
                       <input
@@ -911,20 +943,22 @@ const ReproducibilitySection = forwardRef<
                         onChange={(e) =>
                           handleReadingChange(rowIdx, readIdx, e.target.value)
                         }
-                        className="w-full h-full text-center text-xs font-medium focus:outline-none bg-white text-black hover:bg-gray-50 focus:bg-blue-50 focus:text-blue-900 placeholder-gray-200"
+                        className={`w-full h-full text-center text-xs font-medium focus:outline-none bg-white text-black hover:bg-gray-50 focus:bg-blue-50 focus:text-blue-900 placeholder-gray-400 ${
+                          errors[`${rowIdx}-${readIdx}`]
+                            ? "ring-2 ring-inset ring-red-500"
+                            : "focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                        }`}
                         placeholder="-"
                       />
                     </td>
                   ))}
 
-                  {/* Row mean */}
                   <td className={`${tdBase} font-bold bg-gray-50`}>
                     {row.mean_xr !== null ? row.mean_xr.toFixed(2) : "-"}
                   </td>
                 </tr>
               ))}
 
-              {/* b_rep Footer Row */}
               <tr className="bg-indigo-50 border-t-2 border-indigo-200">
                 <td
                   colSpan={2}
@@ -948,25 +982,20 @@ const ReproducibilitySection = forwardRef<
           </table>
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex justify-between items-center mt-3 h-8">
-          <div>
-            {tableData.some((s) => s.readings.some((r) => r !== "")) && (
-              <button
-                onClick={handleClear}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-              >
-                <Trash2 className="h-3 w-3" /> Clear
-              </button>
-            )}
-          </div>
-          <div className="text-[10px] text-gray-400 italic">
+        <div className="flex justify-between items-center mt-4">
+          <button
+            onClick={handleClearClick}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Clear All
+          </button>
+          <div className="text-[10px] text-gray-400 italic text-right">
             Changes save automatically
           </div>
         </div>
       </div>
 
-      {/* Section End Marker */}
       <div className="flex items-center justify-center gap-4 my-8 opacity-50">
         <div className="h-px bg-gray-300 flex-1" />
         <div className="text-[10px] text-gray-400 font-medium uppercase tracking-widest">

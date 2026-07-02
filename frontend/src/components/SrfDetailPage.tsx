@@ -252,6 +252,7 @@ export const SrfDetailPage: React.FC = () => {
     const tableColumns = [
       "Sl No.",
       "Instrument Nomenclature",
+      "Make",
       "Model",
       "Serial No/ID",
       "Range",
@@ -264,6 +265,7 @@ export const SrfDetailPage: React.FC = () => {
       rows.map((eq, idx) => [
         String(startIndex + idx),
         eq.material_description || "-",
+        eq.make || "-",
         eq.model || "-",
         eq.serial_no || "-",
         eq.range || "-",
@@ -329,16 +331,14 @@ export const SrfDetailPage: React.FC = () => {
           fontStyle: "bold",
           halign: "center",
         },
-        bodyStyles: { textColor: [20, 20, 20] },
-        columnStyles: {
+      bodyStyles: { textColor: [20, 20, 20] },
+                columnStyles: {
           0: { cellWidth: 10, halign: "center" },
-          1: { cellWidth: 35 },
-          2: { cellWidth: 18 },
-          3: { cellWidth: 23 },
-          4: { cellWidth: 18 },
-          5: { cellWidth: 17, halign: "center" },
-          6: { cellWidth: 26, halign: "center" },
-          7: { cellWidth: 29, halign: "center" },
+          // Let autoTable figure out columns 1 through 4 automatically
+          5: { halign: "center" },
+          6: { halign: "center" },
+          7: { halign: "center" },
+          8: { halign: "center" },
         },
       });
     };
@@ -1307,6 +1307,7 @@ export const SrfDetailPage: React.FC = () => {
                 <thead className="text-xs uppercase bg-gray-100 text-gray-600">
                   <tr>
                     <th className="px-4 py-3">Instrument Nomenclature</th>
+                    <th className="px-4 py-3">Make</th>
                     <th className="px-4 py-3">Model</th>
                     <th className="px-4 py-3">Serial No/ID</th>
                     <th className="px-4 py-3">Range</th>
@@ -1334,6 +1335,7 @@ export const SrfDetailPage: React.FC = () => {
                     return (
                         <tr key={eq.inward_eqp_id} className="bg-white border-b hover:bg-blue-50 transition">
                         <td className="px-4 py-2">{eq.material_description}</td>
+                        <td className="px-4 py-2">{eq.make}</td>
                         <td className="px-4 py-2 font-medium">{eq.model}</td>
                         <td className="px-4 py-2">{eq.serial_no}</td>
                         <td className="px-4 py-2">{eq.range}</td>

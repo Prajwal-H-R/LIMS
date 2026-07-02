@@ -385,8 +385,6 @@
 // };
 
 // export default LoadingPointSection;
-
-
 // src/components/LoadingPointSection.tsx
 import React, {
   useState,
@@ -394,6 +392,7 @@ import React, {
   useRef,
   forwardRef,
   useImperativeHandle,
+  useMemo,
 } from "react";
 import { api, ENDPOINTS } from "../api/config";
 import {
@@ -444,18 +443,11 @@ const buildDefaultRows = (): LoadingRowData[] =>
     mean_value: null,
   }));
 
-/**
- * Mean of exactly 10 readings — partial calc for UI feedback
- * Uses available readings so the mean updates as user types
- */
-const calcMean10 = (readings: string[]): number | null => {
+const calcMean = (readings: string[]): number | null => {
   const nums = readings
     .filter((r) => r !== "" && !isNaN(Number(r)))
     .map(Number);
-  // Show partial mean while filling — full mean needs all 10
-  return nums.length > 0
-    ? nums.reduce((a, b) => a + b, 0) / nums.length
-    : null;
+  return nums.length === 10 ? nums.reduce((a, b) => a + b, 0) / 10 : null;
 };
 
 /** b_l = |mean(-10mm) - mean(+10mm)| */
@@ -467,57 +459,47 @@ const calcBL = (rows: LoadingRowData[]): number => {
     : 0;
 };
 
-const toPayload = (jobId: number, data: LoadingRowData[]) => ({
-  job_id: jobId,
-  positions: data.map((r) => ({
-    loading_position_mm: r.loading_position_mm,
-    readings: r.readings.map((v) =>
-      v === "" || isNaN(Number(v)) ? 0 : Number(v)
-    ),
-  })),
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // SKELETON
 // ─────────────────────────────────────────────────────────────────────────────
 const LoadingPointSkeleton: React.FC = () => (
-  <div className="flex flex-col w-full bg-white border border-gray-200 rounded-xl shadow-sm p-4 mt-6 mb-12 animate-pulse">
-    <div className="mb-4 flex justify-between items-center">
-      <div className="h-6 w-1/3 bg-gray-200 rounded" />
-      <div className="h-4 w-20 bg-gray-200 rounded" />
+  <div className="flex flex-col w-full bg-white border border-slate-200 rounded-2xl shadow-lg p-6 mt-6 mb-12 animate-pulse">
+    <div className="mb-6 flex justify-between items-center">
+      <div className="h-7 w-2/5 bg-slate-200 rounded-md" />
+      <div className="h-5 w-24 bg-slate-200 rounded-md" />
     </div>
-    <div className="overflow-x-auto rounded-lg border border-gray-300">
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
       <div className="w-full min-w-[900px]">
-        <div className="flex bg-gray-100 border-b border-gray-300 p-2">
-          <div className="w-[100px] h-4 bg-gray-300 rounded mr-2" />
-          <div className="w-[80px] h-4 bg-gray-300 rounded mr-2" />
-          <div className="flex-1 h-4 bg-gray-200 rounded mr-2" />
-          <div className="w-[100px] h-4 bg-gray-300 rounded" />
+        <div className="flex bg-slate-100 border-b border-slate-200 p-3">
+          <div className="w-[100px] h-4 bg-slate-300 rounded mr-4" />
+          <div className="w-[80px] h-4 bg-slate-300 rounded mr-4" />
+          <div className="flex-1 h-4 bg-slate-200 rounded mr-4" />
+          <div className="w-[100px] h-4 bg-slate-300 rounded" />
         </div>
         {[1, 2].map((i) => (
           <div
             key={i}
-            className="flex border-b border-gray-100 p-2 items-center"
+            className="flex border-b border-slate-100 p-2 items-center h-[72px]"
           >
-            <div className="w-[100px] h-8 bg-gray-200 rounded mr-2" />
-            <div className="w-[80px] h-6 bg-gray-200 rounded mr-2" />
-            <div className="flex-1 flex gap-2 mr-2">
+            <div className="w-[100px] h-10 bg-slate-200 rounded mr-4" />
+            <div className="w-[80px] h-8 bg-slate-200 rounded mr-4" />
+            <div className="flex-1 flex gap-2 mr-4">
               {[...Array(10)].map((_, j) => (
-                <div key={j} className="h-8 w-full bg-gray-100 rounded" />
+                <div key={j} className="h-10 w-full bg-slate-100 rounded" />
               ))}
             </div>
-            <div className="w-[100px] h-8 bg-gray-200 rounded" />
+            <div className="w-[100px] h-8 bg-slate-200 rounded" />
           </div>
         ))}
-        <div className="bg-blue-50 border-t-2 border-blue-100 p-4 flex justify-center items-center gap-4">
-          <div className="h-4 w-48 bg-gray-300 rounded" />
-          <div className="h-8 w-24 bg-white rounded border border-gray-200" />
+        <div className="bg-sky-50 border-t-2 border-sky-100 p-4 flex justify-center items-center gap-4">
+          <div className="h-5 w-52 bg-slate-300 rounded" />
+          <div className="h-10 w-28 bg-white rounded border border-slate-200" />
         </div>
       </div>
     </div>
-    <div className="flex justify-between items-center mt-3 h-8">
-      <div className="h-8 w-20 bg-gray-200 rounded" />
-      <div className="h-3 w-32 bg-gray-200 rounded" />
+    <div className="flex justify-between items-center mt-4 h-9">
+      <div className="h-9 w-24 bg-slate-200 rounded-md" />
+      <div className="h-4 w-36 bg-slate-200 rounded-md" />
     </div>
   </div>
 );
@@ -535,7 +517,6 @@ const LoadingPointSection = forwardRef<
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [tableData, setTableData] = useState<LoadingRowData[]>(
     buildDefaultRows()
   );
@@ -544,17 +525,51 @@ const LoadingPointSection = forwardRef<
     error_value: 0,
     torque_unit: "-",
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const isFormInvalid = useMemo(() => Object.keys(errors).length > 0, [errors]);
   const lastSavedPayload = useRef<string | null>(null);
   const hasUserEdited = useRef(false);
   const debouncedTableData = useDebounce(tableData, 1000);
 
+  // ── Validation Logic ───────────────────────────────────────────────────────
+  const MAX_INPUT_VALUE = 9999;
+  const validateInput = (value: string): string | null => {
+    if (value.trim() === "") return "Value cannot be empty.";
+    if (value.endsWith(".")) return "Invalid number.";
+    const num = Number(value);
+    if (isNaN(num) || !isFinite(num)) return "Invalid numeric value.";
+    if (num > MAX_INPUT_VALUE) return `Value cannot be greater than ${MAX_INPUT_VALUE}.`;
+    return null;
+  };
+
+  useEffect(() => {
+    const newErrors: Record<string, string> = {};
+    if (dataLoaded) {
+      tableData.forEach((row, rowIndex) => {
+        const hasAnyInputInRow = row.readings.some((r) => r.trim() !== "");
+        row.readings.forEach((reading, rIndex) => {
+          const error = validateInput(reading);
+          if (error && error !== "Value cannot be empty.") {
+            newErrors[`${rowIndex}-${rIndex}`] = error;
+          } else if (hasAnyInputInRow && reading.trim() === "") {
+            newErrors[`${rowIndex}-${rIndex}`] = "Value cannot be empty.";
+          }
+        });
+      });
+    }
+    setErrors(newErrors);
+  }, [tableData, dataLoaded]);
+
+  const clearAllReadings = () => {
+    hasUserEdited.current = true;
+    setSaveStatus("idle");
+    setTableData(buildDefaultRows());
+    setMeta((m) => ({ ...m, error_value: 0 }));
+  };
+
   // ── Bot Handle ─────────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
-    /**
-     * Expose 2 rows to the bot (-10mm and +10mm positions).
-     * Uses meta.set_torque as reference, 10 readings each.
-     */
     getRows: () =>
       tableData.map((row, rowIndex) => ({
         set_torque: meta.set_torque,
@@ -562,10 +577,6 @@ const LoadingPointSection = forwardRef<
         rowIndex,
       })),
 
-    /**
-     * Bot injects generated readings.
-     * Recalculates mean_value per row and b_l (error_value) overall.
-     */
     applyReadings: (data) => {
       hasUserEdited.current = true;
       setSaveStatus("idle");
@@ -574,73 +585,43 @@ const LoadingPointSection = forwardRef<
         data.forEach(({ rowIndex, readings }) => {
           if (rowIndex >= next.length) return;
           const row = { ...next[rowIndex] };
-          // Always exactly 10 slots
-          row.readings = Array.from(
-            { length: 10 },
-            (_, i) => readings[i] ?? ""
-          );
-          // Full mean (all 10 available from bot)
-          const nums = row.readings
-            .filter((v) => v !== "" && !isNaN(Number(v)))
-            .map(Number);
-          row.mean_value =
-            nums.length === 10
-              ? nums.reduce((a, b) => a + b, 0) / 10
-              : nums.length > 0
-              ? nums.reduce((a, b) => a + b, 0) / nums.length
-              : null;
+          row.readings = Array.from({ length: 10 }, (_, i) => readings[i] ?? "");
+          row.mean_value = calcMean(row.readings);
           next[rowIndex] = row;
         });
-        // Recalculate b_l
         setMeta((m) => ({ ...m, error_value: calcBL(next) }));
         return next;
       });
     },
 
-    /** Clear all readings and reset b_l */
-    clearReadings: () => {
-      hasUserEdited.current = true;
-      setSaveStatus("idle");
-      setTableData(buildDefaultRows());
-      setMeta((m) => ({ ...m, error_value: 0 }));
-    },
+    clearReadings: clearAllReadings,
   }));
 
   // ── 1. Initial Fetch ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!jobId) return;
     setLoading(true);
-
     const fetchData = async () => {
       try {
-        const res = await api.get<LoadingPointResponse>(
-          `${ENDPOINTS.HTW_CALCULATIONS.LOADING_POINT}/${jobId}`
-        );
-
+        const res = await api.get<LoadingPointResponse>(`${ENDPOINTS.HTW_CALCULATIONS.LOADING_POINT}/${jobId}`);
         let currentData = buildDefaultRows();
-
-        if (
-          res.data.status === "success" &&
-          res.data.positions.length > 0
-        ) {
+        if (res.data.status === "success" && res.data.positions.length > 0) {
           const mapped = res.data.positions.map((p) => ({
             loading_position_mm: p.loading_position_mm,
-            readings: p.readings.map(String),
+            readings: p.readings.map(v => String(v) === "0" ? "" : String(v)),
             mean_value: p.mean_value,
           }));
-
-          currentData = LOADING_POSITIONS.map(
-            (mm) =>
-              mapped.find((d) => d.loading_position_mm === mm) || {
-                loading_position_mm: mm,
-                readings: Array(10).fill(""),
-                mean_value: null,
-              }
-          );
-
+          currentData = LOADING_POSITIONS.map((mm) => {
+            const found = mapped.find((d) => d.loading_position_mm === mm);
+            return found ? { ...found, mean_value: calcMean(found.readings) } : {
+              loading_position_mm: mm,
+              readings: Array(10).fill(""),
+              mean_value: null,
+            };
+          });
           setMeta({
             set_torque: res.data.set_torque,
-            error_value: res.data.error_due_to_loading_point,
+            error_value: calcBL(currentData),
             torque_unit: res.data.torque_unit || "-",
           });
         } else {
@@ -650,13 +631,14 @@ const LoadingPointSection = forwardRef<
             torque_unit: res.data.torque_unit || "-",
           }));
         }
-
         setTableData(currentData);
-
-        // Sync reference to prevent immediate save on mount
-        lastSavedPayload.current = JSON.stringify(
-          toPayload(jobId, currentData)
-        );
+        lastSavedPayload.current = JSON.stringify({
+          job_id: jobId,
+          positions: currentData.map((r) => ({
+            loading_position_mm: r.loading_position_mm,
+            readings: r.readings.map((v) => (v === "" || isNaN(Number(v)) ? 0 : Number(v))),
+          })),
+        });
         hasUserEdited.current = false;
         setDataLoaded(true);
       } catch (err) {
@@ -665,267 +647,172 @@ const LoadingPointSection = forwardRef<
         setLoading(false);
       }
     };
-
     fetchData();
   }, [jobId]);
 
   // ── 2. Auto-Save ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!dataLoaded || !hasUserEdited.current) return;
-
+    if (!dataLoaded || !hasUserEdited.current || isFormInvalid) {
+        setSaveStatus("idle");
+        return;
+    }
     const performAutoSave = async () => {
-      const payload = toPayload(jobId, debouncedTableData);
+      const payload = {
+        job_id: jobId,
+        positions: debouncedTableData.map((r) => ({
+          loading_position_mm: r.loading_position_mm,
+          readings: r.readings.map((v) => (v === "" || isNaN(Number(v)) ? 0 : Number(v))),
+        })),
+      };
       const payloadString = JSON.stringify(payload);
-
       if (payloadString === lastSavedPayload.current) {
         setSaveStatus("saved");
         return;
       }
-
       setSaveStatus("saving");
-
       try {
-        const res = await api.post<LoadingPointResponse>(
-          "/htw-calculations/loading-point/draft",
-          payload
-        );
-
+        const res = await api.post<LoadingPointResponse>("/htw-calculations/loading-point/draft", payload);
         setMeta({
           set_torque: res.data.set_torque,
           error_value: res.data.error_due_to_loading_point,
           torque_unit: res.data.torque_unit || "-",
         });
-
         lastSavedPayload.current = payloadString;
         setSaveStatus("saved");
-        setLastSaved(new Date());
       } catch (err) {
         console.error("LoadingPoint auto-save failed:", err);
         setSaveStatus("error");
       }
     };
-
     performAutoSave();
-  }, [debouncedTableData, jobId, dataLoaded]);
+  }, [debouncedTableData, jobId, dataLoaded, isFormInvalid]);
 
   // ── 3. Handlers ────────────────────────────────────────────────────────────
-  const handleReadingChange = (
-    rowIdx: number,
-    readIdx: number,
-    val: string
-  ) => {
-    if (!/^\d*\.?\d*$/.test(val)) return;
+  const handleReadingChange = (rowIdx: number, readIdx: number, val: string) => {
+    if (val !== "" && !/^\d*\.?\d*$/.test(val)) return;
     hasUserEdited.current = true;
     setSaveStatus("idle");
-
     setTableData((prev) => {
-      const next = prev.map((r) => ({ ...r, readings: [...r.readings] }));
-      const row = next[rowIdx];
+      const next = [...prev];
+      const row = { ...next[rowIdx] };
+      row.readings = [...row.readings];
       row.readings[readIdx] = val;
-      row.mean_value = calcMean10(row.readings);
-
-      // Instant b_l update
+      row.mean_value = calcMean(row.readings);
+      next[rowIdx] = row;
       setMeta((m) => ({ ...m, error_value: calcBL(next) }));
       return next;
     });
   };
 
-  const handleClear = () => {
+  const handleClearClick = () => {
     if (!window.confirm("Clear all readings?")) return;
-    hasUserEdited.current = true;
-    setSaveStatus("idle");
-    setTableData(buildDefaultRows());
-    setMeta((m) => ({ ...m, error_value: 0 }));
+    clearAllReadings();
   };
-
-  // ── Style helpers ──────────────────────────────────────────────────────────
-  const thBase =
-    "border border-gray-300 px-2 py-2 font-bold text-center align-middle bg-gray-100 text-gray-700 text-xs";
-  const thUnit =
-    "border border-gray-300 px-1 py-1 font-bold text-center align-middle bg-blue-50 text-blue-800 text-[10px]";
-  const tdBase =
-    "border border-gray-300 px-2 py-2 text-center align-middle text-gray-800 font-medium text-sm";
-  const inputCell =
-    "border border-gray-300 p-0 h-9 min-w-[50px] relative";
 
   // ── Render ─────────────────────────────────────────────────────────────────
   if (loading && !dataLoaded) return <LoadingPointSkeleton />;
 
   return (
     <>
-      <div className="flex flex-col w-full animate-in fade-in duration-500 bg-white border border-gray-200 rounded-xl shadow-sm p-4 mt-6 mb-12">
-        {/* Header */}
+      <div className="flex flex-col w-full animate-in fade-in duration-500 bg-white border border-slate-200 rounded-xl shadow-sm p-4 mt-6">
         <div className="mb-4 flex justify-between items-center">
-          <h2 className="text-sm font-bold text-black uppercase tracking-tight border-l-4 border-grey-500 pl-2">
+          <h2 className="text-sm font-bold text-black uppercase tracking-tight border-l-4 border-slate-500 pl-2">
             E. Variation due to Loading Point (b<sub>l</sub>)
           </h2>
-
-          {/* Save Status */}
-          <div className="flex items-center gap-2 text-xs font-medium">
-            {saveStatus === "saving" && (
-              <span className="text-blue-600 flex items-center gap-1">
-                <Loader2 className="h-3 w-3 animate-spin" /> Saving...
-              </span>
-            )}
-            {saveStatus === "saved" && (
-              <span className="text-green-600 flex items-center gap-1 transition-opacity duration-1000">
-                <CheckCircle2 className="h-3 w-3" /> Saved
-                <span className="text-gray-400 text-[10px] ml-1">
-                  {lastSaved?.toLocaleTimeString()}
-                </span>
-              </span>
-            )}
-            {saveStatus === "error" && (
-              <span className="text-red-600 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Save Failed
-              </span>
-            )}
-            {saveStatus === "idle" && (
-              <span className="text-gray-400 flex items-center gap-1">
-                <Cloud className="h-3 w-3" /> Up to date
-              </span>
-            )}
+          <div className="flex items-center gap-2 text-xs font-medium min-w-[80px] justify-end">
+            {saveStatus === "saving" && <span className="text-blue-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Saving...</span>}
+            {saveStatus === "saved" && !isFormInvalid && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Saved</span>}
+            {saveStatus === "error" && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Error</span>}
+            {(saveStatus === "idle" || (saveStatus === "saved" && isFormInvalid)) && <span className="text-gray-400 flex items-center gap-1"><Cloud className="h-3 w-3" /> Synced</span>}
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto rounded-lg border border-gray-300">
-          <table className="w-full min-w-[900px] border-collapse">
-            <thead>
-              <tr>
-                <th rowSpan={2} className={`${thBase} w-[100px]`}>
-                  Set Torque
+        {isFormInvalid && dataLoaded && (
+          <div className="mb-4 p-3 flex items-center gap-3 text-sm font-medium bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-lg">
+            <AlertCircle className="h-5 w-5 flex-shrink-0 text-yellow-500" />
+            <span>Some fields are incomplete or have errors. Please review the highlighted cells.</span>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border border-slate-300">
+          <table className="w-full min-w-[1100px] border-collapse">
+            <thead className="bg-slate-100">
+              <tr className="text-[11px] font-bold text-gray-800 uppercase">
+                <th className="p-2 text-center border-r border-slate-300 w-[120px]">
+                  Set Torque<br/>({meta.torque_unit})
                 </th>
-                <th rowSpan={2} className={`${thBase} w-[80px]`}>
-                  Position
+                <th className="p-2 text-center border-r border-slate-300 w-[100px]">Position</th>
+                <th colSpan={10} className="p-2 text-center border-r border-slate-300 bg-green-50 text-green-900">
+                  Indicated Readings 1 - 10 ({meta.torque_unit})
                 </th>
-                <th colSpan={10} className={thBase}>
-                  Indicated Readings
-                </th>
-                <th rowSpan={2} className={`${thBase} w-[100px]`}>
-                  Mean
-                </th>
-              </tr>
-              <tr>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                  <th key={n} className={thBase}>
-                    #{n}
-                  </th>
-                ))}
-              </tr>
-              {/* Unit row */}
-              <tr className="border-b border-gray-300">
-                <th className={thUnit}>{meta.torque_unit}</th>
-                <th className={thUnit}>mm</th>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                  <th key={n} className={thUnit}>
-                    {meta.torque_unit}
-                  </th>
-                ))}
-                <th className={thUnit}>{meta.torque_unit}</th>
+                <th className="p-2 text-center w-[120px] bg-yellow-50 text-yellow-900">Mean</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="bg-white">
               {tableData.map((row, index) => (
-                <tr
-                  key={row.loading_position_mm}
-                  className="hover:bg-gray-50 transition-colors"
-                >
-                  {/* Set Torque — merged 2 rows */}
+                <tr key={row.loading_position_mm} className="border-t border-slate-200 hover:bg-slate-50/70">
                   {index === 0 && (
-                    <td
-                      rowSpan={2}
-                      className={`${tdBase} bg-gray-50 font-bold text-lg text-gray-700 border-r border-gray-300`}
-                    >
-                      {meta.set_torque}
+                    <td rowSpan={2} className="p-3 align-middle text-center text-xl font-semibold text-slate-700 border-r border-slate-300 bg-slate-50">
+                      {meta.set_torque || "-"}
                     </td>
                   )}
-
-                  {/* Position */}
-                  <td
-                    className={`${tdBase} bg-gray-100 font-bold text-xs`}
-                  >
-                    {row.loading_position_mm > 0
-                      ? `+${row.loading_position_mm}`
-                      : row.loading_position_mm}{" "}
-                    mm
+                  <td className="p-3 align-middle text-center text-sm font-semibold text-slate-600 border-r border-slate-300 bg-slate-100">
+                    {row.loading_position_mm > 0 ? `+${row.loading_position_mm}` : row.loading_position_mm}{" "}
+                    <span className="text-slate-400">mm</span>
                   </td>
-
-                  {/* Readings */}
-                  {row.readings.map((val, cIndex) => (
-                    <td key={cIndex} className={inputCell}>
-                      <input
-                        type="text"
-                        value={val}
-                        onChange={(e) =>
-                          handleReadingChange(index, cIndex, e.target.value)
-                        }
-                        className="w-full h-full text-center text-xs font-medium focus:outline-none bg-white text-black hover:bg-gray-50 focus:bg-blue-50 focus:text-blue-900 placeholder-gray-200"
-                        placeholder="-"
-                      />
-                    </td>
-                  ))}
-
-                  {/* Mean */}
-                  <td className={`${tdBase} font-bold bg-gray-50`}>
-                    {row.mean_value !== null
-                      ? row.mean_value.toFixed(2)
-                      : "-"}
+                  {row.readings.map((val, cIndex) => {
+                    const errorKey = `${index}-${cIndex}`;
+                    return (
+                      <td key={cIndex} className="p-0 relative border-r border-slate-200/70">
+                        <input
+                          type="text"
+                          value={val}
+                          onChange={(e) => handleReadingChange(index, cIndex, e.target.value)}
+                          className={`w-full h-full p-2.5 text-center text-sm font-medium focus:outline-none bg-transparent text-slate-800 placeholder:text-slate-300 focus:bg-blue-50 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-blue-400 ${
+                            errors[errorKey] ? "ring-2 ring-inset ring-red-500" : ""
+                          }`}
+                          placeholder="-"
+                        />
+                      </td>
+                    );
+                  })}
+                  <td className="p-3 align-middle text-center text-sm font-bold text-slate-700 bg-yellow-50/60">
+                    {row.mean_value !== null ? row.mean_value.toFixed(2) : "-"}
                   </td>
                 </tr>
               ))}
-
-              {/* b_l Footer Row */}
-              <tr className="bg-blue-50 border-t-2 border-grey-200">
-                <td
-                  colSpan={2}
-                  className="sticky left-0 bg-blue-50 z-10"
-                />
-                <td colSpan={11} className="p-4 text-center">
-                  <div className="flex items-center justify-center gap-4 text-blue-900">
-                    <span className="text-sm font-bold uppercase tracking-wide">
+            </tbody>
+            <tfoot>
+              <tr className="bg-sky-50/80 border-t-2 border-sky-200">
+                <td colSpan={13} className="p-4 text-center">
+                  <div className="flex items-center justify-center gap-4 text-sky-900">
+                    <span className="text-base font-semibold uppercase tracking-wide">
                       Error due to loading point (b<sub>l</sub>):
                     </span>
-                    <span className="text-2xl font-mono font-bold bg-white px-4 py-1 rounded border border-blue-200 shadow-sm">
-                      {meta.error_value !== null
-                        ? meta.error_value.toFixed(2)
-                        : "0.00"}
+                    <span className="text-3xl font-mono font-bold bg-white px-5 py-1.5 rounded-lg border border-sky-200 shadow-sm">
+                      {meta.error_value !== null ? meta.error_value.toFixed(2) : "0.00"}
                     </span>
-                    <span className="text-xs font-bold opacity-70">
+                    <span className="text-sm font-semibold opacity-70">
                       {meta.torque_unit}
                     </span>
                   </div>
                 </td>
               </tr>
-            </tbody>
+            </tfoot>
           </table>
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex justify-between items-center mt-3 h-8">
-          <div className="flex gap-2">
-            {tableData.some((r) => r.readings.some((v) => v !== "")) && (
-              <button
-                onClick={handleClear}
-                className="px-3 py-1.5 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-md flex gap-2 items-center transition-colors"
-              >
-                <Trash2 className="h-3 w-3" /> Clear
-              </button>
-            )}
-          </div>
-          <div className="text-[10px] text-gray-400 italic">
+        <div className="flex justify-between items-center mt-4">
+            <button
+              onClick={handleClearClick}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
+            >
+              <Trash2 className="h-3 w-3" /> Clear All
+            </button>
+          <div className="text-xs text-slate-400 italic">
             Changes save automatically
           </div>
         </div>
-      </div>
-
-      {/* Section End Marker */}
-      <div className="flex items-center justify-center gap-4 my-8 opacity-50">
-        <div className="h-px bg-gray-300 flex-1" />
-        <div className="text-[10px] text-gray-400 font-medium uppercase tracking-widest">
-          End of Section E
-        </div>
-        <div className="h-px bg-gray-300 flex-1" />
       </div>
     </>
   );

@@ -652,8 +652,6 @@
 
 
 
-
-
 // src/components/RepeatabilitySection.tsx
 import React, {
   useState,
@@ -661,6 +659,7 @@ import React, {
   useRef,
   forwardRef,
   useImperativeHandle,
+  useMemo,
 } from "react";
 import { api, ENDPOINTS } from "../api/config";
 import {
@@ -791,7 +790,12 @@ const RepeatabilitySection = forwardRef<
     pressure: "",
     torque: "",
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [customStepErrors, setCustomStepErrors] = useState<
+    Record<string, string | null>
+  >({});
 
+  const isFormInvalid = useMemo(() => Object.keys(errors).length > 0, [errors]);
   const has40 = tableData.some((r) => Number(r.step_percent) === 40);
   const has80 = tableData.some((r) => Number(r.step_percent) === 80);
 
@@ -812,6 +816,77 @@ const RepeatabilitySection = forwardRef<
     tableData.length > 0 ? tableData[0].pressure_unit : "psi";
   const torqueUnit =
     tableData.length > 0 ? tableData[0].torque_unit : "ft-lb";
+
+  // ── Validation Logic ───────────────────────────────────────────────────────
+  const MAX_INPUT_VALUE = 9999;
+  const validateInput = (value: string): string | null => {
+    if (value.trim() === "") {
+      return "Value cannot be empty.";
+    }
+    if (value.endsWith(".")) {
+      return "Invalid number.";
+    }
+    const num = Number(value);
+    if (isNaN(num) || !isFinite(num)) {
+      return "Invalid numeric value.";
+    }
+    if (num > MAX_INPUT_VALUE) {
+      return `Value cannot be greater than ${MAX_INPUT_VALUE}.`;
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    const newErrors: Record<string, string> = {};
+    if (dataLoaded) {
+      tableData.forEach((row, rowIndex) => {
+        const hasAnyInputInRow = row.readings.some((r) => r.trim() !== "");
+
+        row.readings.forEach((reading, rIndex) => {
+          const error = validateInput(reading);
+
+          // An actual data error (format, range) is always an error to display.
+          if (error && error !== "Value cannot be empty.") {
+            newErrors[`${rowIndex}-${rIndex}`] = error;
+          }
+          // An empty cell is only an error if other cells in the same row have been filled.
+          else if (hasAnyInputInRow && reading.trim() === "") {
+            newErrors[`${rowIndex}-${rIndex}`] = "Value cannot be empty.";
+          }
+        });
+      });
+    }
+    setErrors(newErrors);
+  }, [tableData, dataLoaded]);
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      setCustomStepErrors({});
+      return;
+    }
+    const newErrors: Record<string, string | null> = {};
+    const { step, pressure, torque } = customInput;
+
+    const stepError = validateInput(step);
+    if (stepError) {
+      newErrors.step =
+        stepError === "Value cannot be empty."
+          ? "Step % is required."
+          : stepError;
+    } else if (tableData.some((r) => Number(r.step_percent) === parseFloat(step))) {
+      newErrors.step = "This Step % already exists.";
+    }
+
+    if (pressure.trim() !== "") {
+      newErrors.pressure = validateInput(pressure);
+    }
+
+    if (torque.trim() !== "") {
+      newErrors.torque = validateInput(torque);
+    }
+
+    setCustomStepErrors(newErrors);
+  }, [customInput, tableData, isModalOpen]);
 
   // ── Math helpers ───────────────────────────────────────────────────────────
   const calculateInterpolation = (val: number): number => {
@@ -839,7 +914,7 @@ const RepeatabilitySection = forwardRef<
     row: RepeatabilityRowData
   ): RepeatabilityRowData => {
     const valid = row.readings
-      .filter((r) => r !== "" && !isNaN(Number(r)))
+      .filter((r) => validateInput(r) === null)
       .map(Number);
     if (valid.length === 5) {
       const mean = valid.reduce((a, b) => a + b, 0) / 5;
@@ -866,9 +941,17 @@ const RepeatabilitySection = forwardRef<
     };
   };
 
+  const clearAllReadings = () => {
+    hasUserEdited.current = true;
+    setTableData((prev) =>
+      prev.map((row) =>
+        recalculateRow({ ...row, readings: ["", "", "", "", ""] })
+      )
+    );
+  };
+
   // ── Expose Bot Handle ──────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
-    /** Tell the bot what rows exist and how many readings each has */
     getRows: () =>
       tableData.map((row, rowIndex) => ({
         set_torque: row.set_torque,
@@ -876,7 +959,6 @@ const RepeatabilitySection = forwardRef<
         rowIndex,
       })),
 
-    /** Bot calls this to inject generated readings */
     applyReadings: (data) => {
       hasUserEdited.current = true;
       setTableData((prev) => {
@@ -884,7 +966,6 @@ const RepeatabilitySection = forwardRef<
         data.forEach(({ rowIndex, readings }) => {
           if (rowIndex >= next.length) return;
           const row = { ...next[rowIndex] };
-          // Always keep exactly 5 slots
           row.readings = [
             readings[0] ?? "",
             readings[1] ?? "",
@@ -898,15 +979,7 @@ const RepeatabilitySection = forwardRef<
       });
     },
 
-    /** Bot calls this to clear all readings */
-    clearReadings: () => {
-      hasUserEdited.current = true;
-      setTableData((prev) =>
-        prev.map((row) =>
-          recalculateRow({ ...row, readings: ["", "", "", "", ""] })
-        )
-      );
-    },
+    clearReadings: clearAllReadings,
   }));
 
   // ── 1. Initial Fetch ───────────────────────────────────────────────────────
@@ -938,7 +1011,7 @@ const RepeatabilitySection = forwardRef<
             set_torque: Number(item.set_torque) || 0,
             readings:
               item.stored_readings && item.stored_readings.length === 5
-                ? item.stored_readings.map(String)
+                ? item.stored_readings.map(v => v === "0" ? "" : String(v))
                 : ["", "", "", "", ""],
             mean_xr: item.mean_xr || null,
             corrected_standard: item.corrected_standard || null,
@@ -952,17 +1025,23 @@ const RepeatabilitySection = forwardRef<
 
         setTableData(currentData);
 
-        // Sync reference so auto-save won't fire immediately
-        lastSavedPayload.current = JSON.stringify(
-          currentData.map((r) => ({
-            step_percent: Number(r.step_percent),
-            set_pressure: Number(r.set_pressure),
-            set_torque: Number(r.set_torque),
-            readings: r.readings.map((v) =>
-              v === "" || isNaN(Number(v)) ? 0 : Number(v)
-            ),
-          }))
+        const validInitialReadings = currentData.every((row) =>
+          row.readings.every((r) => validateInput(r) === null)
         );
+
+        if (validInitialReadings) {
+          lastSavedPayload.current = JSON.stringify(
+            currentData.map((r) => ({
+              step_percent: Number(r.step_percent),
+              set_pressure: Number(r.set_pressure),
+              set_torque: Number(r.set_torque),
+              readings: r.readings.map(Number),
+            }))
+          );
+        } else {
+          lastSavedPayload.current = null;
+        }
+
         hasUserEdited.current = false;
         setDataLoaded(true);
       } catch (err) {
@@ -978,14 +1057,21 @@ const RepeatabilitySection = forwardRef<
   useEffect(() => {
     if (!dataLoaded || !hasUserEdited.current || !debouncedData) return;
 
+    const isDebouncedDataInvalid = debouncedData.some((row) =>
+      row.readings.some((r) => validateInput(r) !== null)
+    );
+
+    if (isDebouncedDataInvalid) {
+      setSaveStatus("idle");
+      return;
+    }
+
     const autoSave = async () => {
       const payload = debouncedData.map((r) => ({
         step_percent: Number(r.step_percent),
         set_pressure: Number(r.set_pressure),
         set_torque: Number(r.set_torque),
-        readings: r.readings.map((v) =>
-          v === "" || isNaN(Number(v)) ? 0 : Number(v)
-        ),
+        readings: r.readings.map(Number),
       }));
       const payloadString = JSON.stringify(payload);
       if (payloadString === lastSavedPayload.current) {
@@ -1056,18 +1142,14 @@ const RepeatabilitySection = forwardRef<
   };
 
   const handleAddCustomStep = async () => {
+    const isCustomStepInvalid = Object.values(customStepErrors).some(
+      (e) => e !== null
+    );
+    if (isCustomStepInvalid || isAddingStep) return;
+
     const stepVal = parseFloat(customInput.step);
     const pressVal = parseFloat(customInput.pressure);
     const torqVal = parseFloat(customInput.torque);
-
-    if (!stepVal || isNaN(stepVal)) {
-      alert("Please enter a valid Step %");
-      return;
-    }
-    if (tableData.some((r) => Number(r.step_percent) === stepVal)) {
-      alert("This Step % already exists.");
-      return;
-    }
 
     setIsAddingStep(true);
     hasUserEdited.current = true;
@@ -1091,29 +1173,11 @@ const RepeatabilitySection = forwardRef<
     );
     setTableData(updatedData);
 
-    try {
-      await api.post("/htw-calculations/repeatability/draft", {
-        job_id: jobId,
-        steps: updatedData.map((r) => ({
-          step_percent: Number(r.step_percent),
-          set_pressure: Number(r.set_pressure),
-          set_torque: Number(r.set_torque),
-          readings: r.readings.map((v) =>
-            v === "" || isNaN(Number(v)) ? 0 : Number(v)
-          ),
-        })),
-      });
-      setSaveStatus("saved");
-      if (onStepAdded) await onStepAdded();
-    } catch (e) {
-      console.error("Failed to save custom step", e);
-      setSaveStatus("error");
-      alert("Failed to save step. Please try again.");
-    } finally {
-      setIsAddingStep(false);
-      setCustomInput({ step: "", pressure: "", torque: "" });
-      setIsModalOpen(false);
-    }
+    // Draft save will be triggered by the debounced effect
+    setIsAddingStep(false);
+    setCustomInput({ step: "", pressure: "", torque: "" });
+    setIsModalOpen(false);
+    if (onStepAdded) await onStepAdded();
   };
 
   // ── 4. Input Handler ───────────────────────────────────────────────────────
@@ -1122,7 +1186,7 @@ const RepeatabilitySection = forwardRef<
     readingIndex: number,
     value: string
   ) => {
-    if (!/^\d*\.?\d*$/.test(value)) return;
+    if (value !== "" && !/^\d*\.?\d*$/.test(value)) return;
     hasUserEdited.current = true;
     setTableData((prev) => {
       const next = [...prev];
@@ -1134,7 +1198,10 @@ const RepeatabilitySection = forwardRef<
       return next;
     });
   };
-
+ const handleClearClick = () => {
+    if (!window.confirm("Clear all reproducibility readings?")) return;
+    clearAllReadings();
+  };
   // ── Render ─────────────────────────────────────────────────────────────────
   if (loading) return <RepeatabilitySkeleton />;
 
@@ -1147,7 +1214,6 @@ const RepeatabilitySection = forwardRef<
         </h2>
 
         <div className="flex items-center gap-4">
-          {/* Step toggles */}
           <div className="flex items-center gap-3 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200">
             <div className="flex items-center gap-1.5 text-xs text-gray-600 font-medium">
               <Settings2 className="w-3.5 h-3.5 text-gray-400" />
@@ -1181,14 +1247,13 @@ const RepeatabilitySection = forwardRef<
 
           <div className="h-4 w-px bg-gray-200 hidden sm:block" />
 
-          {/* Save status */}
           <div className="flex items-center gap-2 text-xs font-medium min-w-[80px] justify-end">
             {saveStatus === "saving" && (
               <span className="text-blue-600 flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" /> Saving...
               </span>
             )}
-            {saveStatus === "saved" && (
+            {saveStatus === "saved" && !isFormInvalid && (
               <span className="text-green-600 flex items-center gap-1">
                 <CheckCircle2 className="h-3 w-3" /> Saved
               </span>
@@ -1198,7 +1263,7 @@ const RepeatabilitySection = forwardRef<
                 <AlertCircle className="h-3 w-3" /> Error
               </span>
             )}
-            {saveStatus === "idle" && (
+            {(saveStatus === "idle" || (saveStatus === "saved" && isFormInvalid)) && (
               <span className="text-gray-400 flex items-center gap-1">
                 <Cloud className="h-3 w-3" /> Synced
               </span>
@@ -1206,6 +1271,16 @@ const RepeatabilitySection = forwardRef<
           </div>
         </div>
       </div>
+      
+      {isFormInvalid && (
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-3 text-sm text-yellow-800">
+          <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0" />
+          <span>
+            Some fields are incomplete or have errors. Please review the
+            highlighted cells.
+          </span>
+        </div>
+      )}
 
       {/* TABLE */}
       <div className="overflow-x-auto rounded-lg border border-gray-300">
@@ -1351,7 +1426,11 @@ const RepeatabilitySection = forwardRef<
                         onChange={(e) =>
                           handleReadingChange(rowIndex, rIndex, e.target.value)
                         }
-                        className="w-full h-full p-2 text-center text-sm font-medium focus:outline-none bg-transparent text-gray-700 focus:bg-blue-50 focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                        className={`w-full h-full p-2 text-center text-sm font-medium focus:outline-none bg-transparent text-gray-700 focus:bg-blue-50 focus:ring-2 focus:ring-inset focus:ring-blue-400 ${
+                          errors[`${rowIndex}-${rIndex}`]
+                            ? "ring-2 ring-inset ring-red-500"
+                            : ""
+                        }`}
                         placeholder="-"
                       />
                     </td>
@@ -1400,14 +1479,23 @@ const RepeatabilitySection = forwardRef<
         </table>
       </div>
 
-      <div className="mt-2 text-[10px] text-gray-400 italic text-right">
-        Changes save automatically
+      <div className="mt-4 flex justify-between items-center">
+        <button
+          onClick={handleClearClick}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Clear All
+        </button>
+        <div className="text-[10px] text-gray-400 italic text-right">
+          Changes save automatically
+        </div>
       </div>
 
       {/* Custom Step Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-xs p-6 border border-gray-200 relative animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-6 border border-gray-200 relative animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-gray-800">
                 Add Custom Step
@@ -1420,21 +1508,31 @@ const RepeatabilitySection = forwardRef<
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
                   Step Percentage (%)
                 </label>
                 <input
                   type="number"
+                  step="any"
                   value={customInput.step}
                   onChange={(e) =>
                     setCustomInput({ ...customInput, step: e.target.value })
                   }
-                  className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className={`w-full p-2 text-sm border rounded focus:ring-2 focus:outline-none ${
+                    customStepErrors.step
+                      ? "border-red-500 ring-red-200"
+                      : "border-gray-300 focus:ring-blue-500"
+                  }`}
                   placeholder="e.g. 60"
                   autoFocus
                 />
+                {customStepErrors.step && (
+                  <p className="text-xs text-red-600 mt-1">
+                    {customStepErrors.step}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -1442,6 +1540,7 @@ const RepeatabilitySection = forwardRef<
                 </label>
                 <input
                   type="number"
+                  step="any"
                   value={customInput.pressure}
                   onChange={(e) =>
                     setCustomInput({
@@ -1449,9 +1548,18 @@ const RepeatabilitySection = forwardRef<
                       pressure: e.target.value,
                     })
                   }
-                  className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  placeholder="0"
+                  className={`w-full p-2 text-sm border rounded focus:ring-2 focus:outline-none ${
+                    customStepErrors.pressure
+                      ? "border-red-500 ring-red-200"
+                      : "border-gray-300 focus:ring-blue-500"
+                  }`}
+                  placeholder="Optional"
                 />
+                {customStepErrors.pressure && (
+                  <p className="text-xs text-red-600 mt-1">
+                    {customStepErrors.pressure}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -1459,6 +1567,7 @@ const RepeatabilitySection = forwardRef<
                 </label>
                 <input
                   type="number"
+                  step="any"
                   value={customInput.torque}
                   onChange={(e) =>
                     setCustomInput({
@@ -1466,9 +1575,18 @@ const RepeatabilitySection = forwardRef<
                       torque: e.target.value,
                     })
                   }
-                  className="w-full p-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  placeholder="0"
+                  className={`w-full p-2 text-sm border rounded focus:ring-2 focus:outline-none ${
+                    customStepErrors.torque
+                      ? "border-red-500 ring-red-200"
+                      : "border-gray-300 focus:ring-blue-500"
+                  }`}
+                  placeholder="Optional"
                 />
+                {customStepErrors.torque && (
+                  <p className="text-xs text-red-600 mt-1">
+                    {customStepErrors.torque}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1482,8 +1600,11 @@ const RepeatabilitySection = forwardRef<
               </button>
               <button
                 onClick={handleAddCustomStep}
-                disabled={isAddingStep}
-                className="px-3 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 font-medium flex items-center gap-2"
+                disabled={
+                  isAddingStep ||
+                  Object.values(customStepErrors).some((e) => e !== null)
+                }
+                className="px-3 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 font-medium flex items-center gap-2 disabled:bg-blue-300 disabled:cursor-not-allowed"
               >
                 {isAddingStep && (
                   <Loader2 className="h-3 w-3 animate-spin" />

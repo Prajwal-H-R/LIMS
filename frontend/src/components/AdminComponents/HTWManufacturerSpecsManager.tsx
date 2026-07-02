@@ -836,10 +836,6 @@ function ManufacturerSpecForm({ onBack, initialData }: ManufacturerSpecFormProps
     const checked = (e.target as HTMLInputElement).checked;
     let finalValue: any = type === 'checkbox' ? checked : value;
 
-    // normalize units capitalization
-    if ((name === 'torque_unit' || name === 'pressure_unit') && typeof finalValue === 'string') {
-      finalValue = finalValue ? finalValue.charAt(0).toUpperCase() + finalValue.slice(1) : '';
-    }
 
     setFormData(prev => {
       const next = { ...prev, [name]: finalValue };
