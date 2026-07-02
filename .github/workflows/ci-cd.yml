@@ -1,41 +1,43 @@
 name: CI/CD Pipeline
- 
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
- 
+
 permissions:
   contents: read
   packages: write
- 
+
 env:
   GHCR_REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
   OWNER_LC: ""
+
 jobs:
   build-test:
+    if: github.event_name != 'pull_request'
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 45
- 
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
- 
+
       - name: Set lowercase owner for GHCR
         shell: bash
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
- 
+
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
- 
+
       - name: Create .env.docker from GitHub Secrets
         shell: bash
         env:
@@ -50,20 +52,20 @@ jobs:
           PGADMIN_DEFAULT_PASSWORD: ${{ secrets.PGADMIN_DEFAULT_PASSWORD }}
         run: |
           set -euo pipefail
- 
+
           POSTGRES_PASSWORD_ENCODED=$(python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['POSTGRES_PASSWORD'], safe=''))")
- 
+
           cat > .env.docker <<EOF
           COMPOSE_PROJECT_NAME=yatharthatalims
           APP_ENV=production
           APP_NAME=Yatharthata LIMS Phase 2
           APP_PORT=8000
- 
+
           POSTGRES_DB=plims
           POSTGRES_USER=postgres
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
           DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD_ENCODED}@postgres:5432/plims
- 
+
           JWT_SECRET=${JWT_SECRET}
           REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET}
           CRON_API_KEY=${CRON_API_KEY}
@@ -71,39 +73,74 @@ jobs:
           ACCESS_TOKEN_EXPIRE_MINUTES=30
           REFRESH_TOKEN_EXPIRE_MINUTES=45
           TIMEZONE=UTC
- 
+
           SMTP_SERVER=smtp.gmail.com
           SMTP_PORT=587
           SMTP_USER=${SMTP_USER}
           SMTP_PASSWORD=${SMTP_PASSWORD}
           FROM_EMAIL=${FROM_EMAIL}
- 
+
           REPORT_EMAIL_TO=tejasvi@aimlsn.com
- 
+
           VITE_API_BASE_URL=/api
           FRONTEND_URL=http://localhost:3000
- 
+
           PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
           PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
- 
+
           DELAYED_EMAIL_DELAY_MINUTES=3
           PYTHONPATH=/app
           EOF
- 
+
       - name: Prepare backend uploads folder
         run: |
           mkdir -p backend/uploads/inward_photos
           chmod -R 777 backend/uploads
- 
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: detect --source . --redact --verbose --no-banner --exit-code 1
+
       - name: Validate docker compose file
         run: docker compose --env-file .env.docker config
- 
+
       - name: Build all images
         run: docker compose --env-file .env.docker build
- 
+
+      - name: Trivy backend image scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: image
+          image-ref: yatharthatalims-backend:latest
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      - name: Trivy frontend image scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: image
+          image-ref: yatharthatalims-frontend:latest
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
       - name: Start stack
         run: docker compose --env-file .env.docker up -d
- 
+
       - name: Wait for backend health
         shell: bash
         run: |
@@ -117,30 +154,26 @@ jobs:
           echo "Backend did not become ready"
           docker compose --env-file .env.docker logs --no-color
           exit 1
- 
+
       - name: Smoke test frontend
         run: curl -fsS http://localhost:3000/ >/dev/null
- 
+
       - name: Stop stack
         if: always()
         run: docker compose --env-file .env.docker down -v
- 
+
       - name: Tag backend image for GHCR
-        if: github.event_name != 'pull_request'
         run: |
           docker tag yatharthatalims-backend:latest ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
- 
+
       - name: Tag frontend image for GHCR
-        if: github.event_name != 'pull_request'
         run: |
           docker tag yatharthatalims-frontend:latest ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
- 
+
       - name: Push backend image to GHCR
-        if: github.event_name != 'pull_request'
         run: |
           docker push ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
- 
+
       - name: Push frontend image to GHCR
-        if: github.event_name != 'pull_request'
         run: |
           docker push ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
