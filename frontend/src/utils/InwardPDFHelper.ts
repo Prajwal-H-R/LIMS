@@ -88,20 +88,55 @@ export const generateStandardInwardPDF = (formData: any, equipmentList: any[]) =
     printRow("DC Date:", formData.customer_dc_date);
   });
 
-  const rightX = margin + boxWidth + gap;
-  drawSectionCard(rightX, "Customer Information", () => {
+const rightX = margin + boxWidth + gap;
+drawSectionCard(rightX, "Customer Information", () => {
     let y = cursorY + 14;
-    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(0);
-    const name = doc.splitTextToSize(formData.customer_details || 'Unknown Customer', boxWidth - 10);
+
+    // Customer Name
+    doc.setFont("helvetica", "bold")
+        .setFontSize(10)
+        .setTextColor(0);
+
+    const name = doc.splitTextToSize(
+        formData.customer_details || "Unknown Customer",
+        boxWidth - 10
+    );
+
     doc.text(name, rightX + 5, y);
     y += (name.length * 4) + 3;
+
+    // Address
     const addr = formData.ship_to_address || formData.bill_to_address;
     if (addr) {
-        doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(THEME.textDark[0]);
+        doc.setFont("helvetica", "normal")
+            .setFontSize(8)
+            .setTextColor(THEME.textDark[0]);
+
         const addrLines = doc.splitTextToSize(addr, boxWidth - 10);
         doc.text(addrLines.slice(0, 3), rightX + 5, y);
+        y += (Math.min(addrLines.length, 3) * 4) + 4;
     }
-  });
+
+// Contact Person
+if (formData.contact_person) {
+    doc.setFont("helvetica", "bold");
+    doc.text("Contact Person:", rightX + 5, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(formData.contact_person, rightX + 25, y);
+    y += 5;
+}
+
+// Phone
+if (formData.phone) {
+    doc.setFont("helvetica", "bold");
+    doc.text("Phone:", rightX + 5, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(formData.phone, rightX + 25, y);
+    y += 5;
+}
+});
 
   cursorY += boxHeight + 10;
 
@@ -112,7 +147,7 @@ export const generateStandardInwardPDF = (formData: any, equipmentList: any[]) =
   // 1. Define all possible columns
   const allColumns = [
     { header: "S.No", width: 8, key: 'index' },
-    { header: "ID", width: 14, key: 'id' },
+    { header: "NEPL ID", width: 14, key: 'id' },
     { header: "Description", width: 30, key: 'desc' },
     { header: "Make", width: 16, key: 'make' },
     { header: "Model", width: 16, key: 'model' },
@@ -124,11 +159,10 @@ export const generateStandardInwardPDF = (formData: any, equipmentList: any[]) =
     { header: "In DC", width: 12, key: 'in_dc', outsource: true },
     { header: "Out DC", width: 12, key: 'out_dc', outsource: true },
     // Back to normal columns
-    { header: "Calib By", width: 14, key: 'calib' },
-    { header: "Acc.", width: 18, key: 'acc' },
-    { header: "Visual", width: 18, key: 'visual' },
-    { header: "Eng Rem", width: 22, key: 'eng_rem' },
-    { header: "Cust Rem", width: 'auto', key: 'cust_rem' }
+    { header: "Accessories included.", width: 18, key: 'acc' },
+    { header: "Visual Inspection Notes", width: 18, key: 'visual' },
+    { header: "Nextage Remarks", width: 22, key: 'eng_rem' },
+    { header: "Customer Remarks(If any)", width: 'auto', key: 'cust_rem' }
   ];
 
   // 2. Filter columns based on user choice
@@ -165,7 +199,6 @@ export const generateStandardInwardPDF = (formData: any, equipmentList: any[]) =
     }
 
     row.push(
-      eq.calibration_by || '-',
       eq.accessories_included || '-',
       eq.inspe_status || eq.visual_inspection_notes || '-',
       eq.engineer_remarks || '-',
