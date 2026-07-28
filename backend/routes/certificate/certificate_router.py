@@ -112,6 +112,7 @@ async def render_certificate_preview_html(
     context = {"request": request, **payload}
     
     return templates.TemplateResponse(
+        request,
         "certificate/certificate_combined.html", 
         context
     )
