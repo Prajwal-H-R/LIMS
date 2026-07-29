@@ -1,24 +1,28 @@
-FROM node:20-bullseye-slim AS build
+FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
-# Install dependencies first
 COPY frontend/package.json frontend/package-lock.json ./
+
 RUN npm ci
 
-# Copy source
 COPY frontend /app
 
-# Build-time API base for Vite
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 RUN npm run build
 
+# --- Final Stage ---
 
-FROM nginx:1.27-alpine
+FROM nginx:1.27-bookworm
 
-# Clean default site config and add SPA + API proxy config
+# FIX: Update OS packages to patch the CVEs found by Trivy
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN rm -f /etc/nginx/conf.d/default.conf && \
     cat > /etc/nginx/conf.d/default.conf <<'EOF'
 server {
@@ -28,7 +32,6 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Proxy API requests to backend service
     location /api/ {
         proxy_pass http://backend:8000;
         proxy_http_version 1.1;
@@ -40,7 +43,6 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
-    # SPA fallback
     location / {
         try_files $uri $uri/ /index.html;
     }
