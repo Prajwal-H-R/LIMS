@@ -4,8 +4,7 @@ WORKDIR /app
 
 COPY frontend/package.json frontend/package-lock.json ./
 
-RUN npm ci
-
+RUN npm ci --legacy-peer-deps
 COPY frontend /app
 
 ARG VITE_API_BASE_URL=/api
