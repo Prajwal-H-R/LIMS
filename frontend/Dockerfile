@@ -3,7 +3,6 @@ FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
 COPY frontend/package.json frontend/package-lock.json ./
-
 RUN npm ci --legacy-peer-deps
 COPY frontend /app
 
