@@ -12,6 +12,8 @@ import {
   Search,
   ArrowRight,
   Bell,
+  Calendar, // Added for Book Calibration icon
+  Loader2   // Added for Suspense fallback
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -27,6 +29,10 @@ import ProfilePage from "../components/ProfilePage";
 import { CustomerFirListView } from "../components/CustomerFirListView";
 import { CustomerFinalReportView } from "../components/CustomerFinalReportView";
 import CustomerCalibrationReminderWidget from "../components/CustomerCalibrationReminder";
+
+// Lazy loaded component
+const BookCalibration = React.lazy(() => import("../components/BookCalibration"));
+
 // --- LOCAL TYPE DEFINITIONS ---
 interface FirForReview {
   inward_id: number;
@@ -125,89 +131,38 @@ const NotificationCenter: React.FC<{ stats: DashboardStats }> = ({ stats }) => {
                         ) : (
                             <div className="divide-y divide-gray-100">
                                 {stats.firsForReview > 0 && (
-                                <div
-                                    onClick={() => { 
-                                        setIsOpen(false); 
-                                        navigate('/customer/view-firs'); 
-                                    }}
-                                    className="p-4 hover:bg-orange-50 cursor-pointer group flex items-start gap-3"
-                                >
+                                <div onClick={() => { setIsOpen(false); navigate('/customer/view-firs'); }} className="p-4 hover:bg-orange-50 cursor-pointer group flex items-start gap-3">
                                     <AlertTriangle className="h-5 w-5 text-orange-600" />
-
                                     <div className="flex-1">
-                                        <p className="text-sm font-semibold">
-                                            Action Required
-                                        </p>
-
-                                        <p className="text-xs text-gray-600">
-                                            You have {stats.firsForReview} FIRs awaiting review.
-                                        </p>
+                                        <p className="text-sm font-semibold">Action Required</p>
+                                        <p className="text-xs text-gray-600">You have {stats.firsForReview} FIRs awaiting review.</p>
                                     </div>
                                 </div>
                             )}
-
                             {stats.draftSrfs > 0 && (
-                                <div
-                                    onClick={() => { 
-                                        setIsOpen(false); 
-                                        navigate('/customer/view-srf'); 
-                                    }}
-                                    className="p-4 hover:bg-blue-50 cursor-pointer group flex items-start gap-3"
-                                >
+                                <div onClick={() => { setIsOpen(false); navigate('/customer/view-srf'); }} className="p-4 hover:bg-blue-50 cursor-pointer group flex items-start gap-3">
                                     <AlertTriangle className="h-5 w-5 text-blue-600" />
-
                                     <div className="flex-1">
-                                        <p className="text-sm font-semibold">
-                                            Pending SRFs
-                                        </p>
-
-                                        <p className="text-xs text-gray-600">
-                                            You have {stats.draftSrfs} pending SRFs.
-                                        </p>
+                                        <p className="text-sm font-semibold">Pending SRFs</p>
+                                        <p className="text-xs text-gray-600">You have {stats.draftSrfs} pending SRFs.</p>
                                     </div>
                                 </div>
                             )}
-
                             {stats.activeDeviations > 0 && (
-                                <div
-                                    onClick={() => { 
-                                        setIsOpen(false); 
-                                        navigate('/customer/deviations'); 
-                                    }}
-                                    className="p-4 hover:bg-red-50 cursor-pointer group flex items-start gap-3"
-                                >
+                                <div onClick={() => { setIsOpen(false); navigate('/customer/deviations'); }} className="p-4 hover:bg-red-50 cursor-pointer group flex items-start gap-3">
                                     <AlertTriangle className="h-5 w-5 text-red-600" />
-
                                     <div className="flex-1">
-                                        <p className="text-sm font-semibold">
-                                            Active Deviations
-                                        </p>
-
-                                        <p className="text-xs text-gray-600">
-                                            You have {stats.activeDeviations} active deviations.
-                                        </p>
+                                        <p className="text-sm font-semibold">Active Deviations</p>
+                                        <p className="text-xs text-gray-600">You have {stats.activeDeviations} active deviations.</p>
                                     </div>
                                 </div>
                             )}
-
                             {stats.readyCertificates > 0 && (
-                                <div
-                                    onClick={() => { 
-                                        setIsOpen(false); 
-                                        navigate('/customer/certificates'); 
-                                    }}
-                                    className="p-4 hover:bg-green-50 cursor-pointer group flex items-start gap-3"
-                                >
+                                <div onClick={() => { setIsOpen(false); navigate('/customer/certificates'); }} className="p-4 hover:bg-green-50 cursor-pointer group flex items-start gap-3">
                                     <AlertTriangle className="h-5 w-5 text-green-600" />
-
                                     <div className="flex-1">
-                                        <p className="text-sm font-semibold">
-                                            Ready Certificates
-                                        </p>
-
-                                        <p className="text-xs text-gray-600">
-                                            {stats.readyCertificates} certificates are ready.
-                                        </p>
+                                        <p className="text-sm font-semibold">Ready Certificates</p>
+                                        <p className="text-xs text-gray-600">{stats.readyCertificates} certificates are ready.</p>
                                     </div>
                                 </div>
                             )}
@@ -278,6 +233,14 @@ const CustomerDashboardHome: React.FC<{ stats: DashboardStats }> = ({ stats }) =
             <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
                 <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b pb-3">Quick Actions</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Added Book Calibration Action */}
+                    <ActionButton 
+                        label="Book Calibration" 
+                        description="Schedule a new calibration request" 
+                        icon={<Calendar className="h-8 w-8" />} 
+                        onClick={() => navigate("/customer/book-calibration")} 
+                        colorClasses="bg-gradient-to-r from-indigo-500 to-purple-600"
+                    />
                     <ActionButton label="Track Status" description="Check status of equipment" icon={<Activity className="h-8 w-8" />} onClick={() => navigate("/customer/track-status")} colorClasses="bg-gradient-to-r from-blue-500 to-indigo-600" />
                     <ActionButton label="Review Reports" description="Approve FIRs & Final Reports" icon={<Search className="h-8 w-8" />} onClick={() => navigate("/customer/view-firs")} colorClasses="bg-gradient-to-r from-cyan-500 to-blue-600" badge={stats.firsForReview} />
                     <ActionButton label="View SRFs" description="Manage Request Forms" icon={<FileText className="h-8 w-8" />} onClick={() => navigate("/customer/view-srf")} colorClasses="bg-gradient-to-r from-green-500 to-emerald-600" badge={stats.draftSrfs} />
@@ -297,13 +260,12 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
     const [finals, setFinals] = useState<FinalReport[]>([]);
     const [certificateCount, setCertificateCount] = useState(0);
     const [deviationCount, setDeviationCount] = useState(0);
-     const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
     const hasFetched = useRef<number | null>(null); 
 
     const fetchData = useCallback(async () => {
         if (!user?.user_id) return;
         try {
-            // 1. FETCH ONLY THE CRITICAL DATA (This is very fast)
             const [firsRes, reportsRes, srfsRes] = await Promise.all([
                 api.get('/portal/firs-for-review'),
                 api.get('/final-inspections/customer/dashboard-reports'),
@@ -318,12 +280,9 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
                 ...(srfsRes.data?.rejected || [])
             ]);
 
-            // 2. TURN OFF SKELETON IMMEDIATELY!
-            // The user will see the UI immediately after the fast APIs finish.
             setLoading(false);
 
-            // 3. FETCH THE HEAVY COUNTS IN THE BACKGROUND
-            // These will not block the UI. The numbers will just update when ready.
+            // Background fetching for heavy counts
             api.get(ENDPOINTS.PORTAL.CERTIFICATES).then(res => {
                 setCertificateCount(Array.isArray(res.data) ? res.data.length : 0);
             }).catch(console.error);
@@ -334,7 +293,7 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
 
         } catch (err) { 
             console.error("Portal Fetch Error:", err); 
-            setLoading(false); // Ensure skeleton turns off even on error
+            setLoading(false); 
         }
     }, [user?.user_id]);
 
@@ -379,7 +338,13 @@ const CustomerPortal: React.FC<DashboardProps> = ({ onLogout }) => {
                         <Route path="deviations/:deviationId" element={<CustomerDeviationDetailPage />} />
                         <Route path="certificates" element={<CustomerCertificatesPage />} />
                         <Route path="final-report/:inwardId" element={<CustomerFinalReportView />} />
-
+                        
+                        {/* Added Book Calibration Route */}
+                        <Route path="book-calibration" element={
+                            <React.Suspense fallback={<div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>}>
+                                <BookCalibration />
+                            </React.Suspense>
+                        } />
                     </Routes>
                 )}
             </main>
