@@ -108,6 +108,7 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
           format: table
+          trivyignores: .trivyignore
 
       - name: Gitleaks secret scan
         uses: gitleaks/gitleaks-action@v2
@@ -129,6 +130,7 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
           format: table
+          trivyignores: .trivyignore
 
       - name: Trivy frontend image scan
         uses: aquasecurity/trivy-action@0.35.0
@@ -139,6 +141,7 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
           format: table
+          trivyignores: .trivyignore
 
       - name: Start stack
         run: docker compose --env-file .env.docker up -d
