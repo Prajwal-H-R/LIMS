@@ -1,0 +1,4 @@
+# Temporarily ignored: cryptography CVE already identified in the CI scan.
+# Remove this entry after upgrading to a cryptography version compatible
+# with the application's fastapi-mail dependency.
+CVE-2026-69247
