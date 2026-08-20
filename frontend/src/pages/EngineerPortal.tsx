@@ -33,6 +33,7 @@ import {
   ArrowRight,
   Filter,
   X,
+  Calendar,
   Building2,
 } from "lucide-react";
 import Header from "../components/Header";
@@ -60,6 +61,7 @@ import ManualCalibrationPage from "../components/ManualCalibrationPage";
 import { FinalInspectionView } from "../components/FinalInspectionView";
 import CalibrationReminderWidget from "../components/CalibrationReminder";
 import CalibrationReminderDetailsPage from "../components/CalibrationReminderDetailsPage";
+import CalibrationBookingsPage from "../components/CalibrationBookingsPage";
 
 // --- Split Components ---
 import EngineerDashboard from "../components/EngineerDashboard";
@@ -251,6 +253,12 @@ const quickActionItems: QuickActionItem[] = [
     icon: <Award size={18} />,
     route: "/engineer/certificates",
   },
+   {
+    id: "calibration-bookings",
+    label: "Calibration Bookings",
+    icon: <Calendar size={18} />,
+    route: "/engineer/calibration-bookings",
+  },
 ];
 
 // ── Inside View: Inward Management Hub ────────────────────────────
@@ -407,7 +415,16 @@ const Sidebar: React.FC<SidebarProps> = ({
     const isActive = activeSection === item.id;
     const showBadge = item.id === "notifications" && notificationCount > 0;
     const badgeLabel = notificationCount > 99 ? "99+" : notificationCount;
-
+// Around line 140: Update getActiveSectionFromPath
+const getActiveSectionFromPath = (pathname: string): string => {
+  // ... existing checks
+  if (pathname.includes("/engineer/certificates")) return "certificates";
+  
+  // --- ADD THIS ---
+  if (pathname.includes("/engineer/calibration-bookings")) return "calibration-bookings";
+  
+  return "dashboard";
+};
     return (
       <button
         key={item.id}
@@ -903,6 +920,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
                 <Route path="calibration-reminders/:customerId" element={<CalibrationReminderDetailsPage />} />
                 <Route path="scan" element={<BarcodeScanner />} />
                 <Route path="deviations" element={<DeviationPage />} />
+  <Route path="calibration-bookings" element={<CalibrationBookingsPage />} />
 
                 {/* ✅ ADD THIS ROUTE */}
                 <Route

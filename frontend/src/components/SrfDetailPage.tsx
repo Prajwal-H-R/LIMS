@@ -218,13 +218,12 @@ export const SrfDetailPage: React.FC = () => {
     navigate("/engineer/srfs", { state: { activeTab: previousTab } });
   };
  
-  const generatePDF = useCallback(async () => {
+const generatePDF = useCallback(async () => {
     if (!srfData) return;
 
     const doc = new jsPDF("p", "mm", "a4");
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    // Keep print-safe A4 margins for office printers.
     const marginX = 16;
     const marginTop = 12;
     const usableWidth = pageWidth - marginX * 2;
@@ -256,14 +255,14 @@ export const SrfDetailPage: React.FC = () => {
       "Model",
       "Serial No/ID",
       "Range",
-      "Unit of Measurement",
-      "No. of calibration points",
-      "Mode of calibration",
+      "Unit",
+      "Points",
+      "Mode",
     ];
 
-    const getTableRows = (rows: EquipmentDetail[], startIndex = 1) =>
+    const getTableRows = (rows: any[]) =>
       rows.map((eq, idx) => [
-        String(startIndex + idx),
+        String(idx + 1),
         eq.material_description || "-",
         eq.make || "-",
         eq.model || "-",
@@ -280,11 +279,11 @@ export const SrfDetailPage: React.FC = () => {
       doc.line(marginX, pageHeight - 9.5, pageWidth - marginX, pageHeight - 9.5);
     };
 
-    const drawHeader = (firstPageMeta: boolean) => {
-      let y = marginTop;
+    const drawHeader = (firstPageMeta: boolean, customY?: number) => {
+      let y = customY || marginTop;
       if (firstPageMeta) {
         doc.setFontSize(8.5);
-        doc.text("PAGE 01 OF 01", pageWidth / 2, y, { align: "center" });
+        doc.setFont("helvetica", "normal");
         doc.text(`Dated : ${srfData.date || "-"}`, pageWidth - marginX, y, { align: "right" });
         y += 3;
       }
@@ -311,40 +310,6 @@ export const SrfDetailPage: React.FC = () => {
       return y + 24;
     };
 
-    const drawEquipmentTable = (rows: EquipmentDetail[], startY: number, startIndex = 1) => {
-      autoTable(doc, {
-        startY,
-        head: [tableColumns],
-        body: getTableRows(rows, startIndex),
-        theme: "grid",
-        margin: { left: marginX, right: marginX },
-        styles: {
-          fontSize: 7.6,
-          lineColor: [120, 120, 120],
-          lineWidth: 0.2,
-          valign: "middle",
-          cellPadding: 1.2,
-        },
-        headStyles: {
-          fillColor: [235, 239, 245],
-          textColor: [20, 20, 20],
-          fontStyle: "bold",
-          halign: "center",
-        },
-      bodyStyles: { textColor: [20, 20, 20] },
-                columnStyles: {
-          0: { cellWidth: 10, halign: "center" },
-          // Let autoTable figure out columns 1 through 4 automatically
-          5: { halign: "center" },
-          6: { halign: "center" },
-          7: { halign: "center" },
-          8: { halign: "center" },
-        },
-      });
-    };
-
-    doc.setCharSpace(0);
-
     const font = {
       section: 10.2,
       body: 9,
@@ -353,9 +318,13 @@ export const SrfDetailPage: React.FC = () => {
       title: 9.8,
       line: 4.2,
     };
+
+    // --- Start Drawing ---
+    doc.setCharSpace(0);
     const bottomSafeY = pageHeight - 14;
     const sectionGap = 5;
     let y = drawHeader(true);
+
     const ensureSpace = (requiredHeight: number) => {
       if (y + requiredHeight <= bottomSafeY) return;
       drawFooter();
@@ -363,6 +332,7 @@ export const SrfDetailPage: React.FC = () => {
       y = drawHeader(false);
     };
 
+    // Company Section
     doc.setDrawColor(160);
     doc.setLineWidth(0.2);
     doc.rect(marginX, y, usableWidth, 32);
@@ -374,7 +344,6 @@ export const SrfDetailPage: React.FC = () => {
     const companyLines = doc.splitTextToSize(`${srfData.company_name || "-"}\n${srfData.bill_to_address || "-"}`, usableWidth - 86);
     doc.text(companyLines, marginX + 2, y + 10);
 
-    doc.setFontSize(font.body);
     const contactX = marginX + (usableWidth * 0.58);
     doc.text(`Telephone : ${srfData.phone || "-"}`, contactX, y + 6);
     doc.text(`E-mail : ${srfData.email || "-"}`, contactX, y + 11);
@@ -383,6 +352,7 @@ export const SrfDetailPage: React.FC = () => {
     doc.text(`Customer DC Date : ${srfData.inward?.customer_dc_date || "-"}`, contactX, y + 26);
     y += 38;
 
+    // Certificate Note
     const certName = srfData.certificate_issue_name || srfData.company_name || "-";
     const certAddr = srfData.certificate_issue_adress || srfData.ship_to_address || srfData.bill_to_address || "-";
     doc.setFontSize(font.small);
@@ -392,183 +362,133 @@ export const SrfDetailPage: React.FC = () => {
     doc.text(certLines, marginX, y);
     y += certLines.length * 3.9 + sectionGap;
 
+    // Instructions Logic
     const frequencyValue = srfData.calibration_frequency || "As per Standard";
     const soc = !!srfData.statement_of_conformity;
     const asPerStandard = frequencyValue.toLowerCase() === "as per standard";
-    const checkboxText = (checked: boolean) => (checked ? "[✓]" : "[ ]");
+    const checkboxText = (checked: boolean) => (checked ? "[X]" : "[ ]");
+    
     const officeLinesRaw = [
       "FOR OUR OFFICE USE ONLY",
       `1. Calibration by ${checkboxText(true)} NEPL (In-Lab) / ${checkboxText(false)} NEPL (on-site) / ${checkboxText(true)} outsource`,
-      `2. Date received: ${srfData.date || "-"}`,
-      `3. Nextage Unique ID: ${srfData.srf_no || "-"}`,
-      `4. Resources and capability reviewed: ${checkboxText(true)} Meets requirement / ${checkboxText(false)} Does not meet`,
-      `5. Nextage Contract Reference: ${srfData.inward?.customer_dc_no || "-"}`,
+      `2. Date received: ${srfData.date || "-"} | 3. Nextage Unique ID: ${srfData.srf_no || "-"}`,
+      `4. Resources reviewed: ${checkboxText(true)} Meets requirement | 5. Contract Ref: ${srfData.inward?.customer_dc_no || "-"}`,
     ];
     const instructionLinesRaw = [
       "Customer Instructions for Calibration",
-      `1. Calibration Frequency: ${checkboxText(asPerStandard)} As per Standard / ${checkboxText(!asPerStandard)} ${!asPerStandard ? frequencyValue : "Specify"}`,
-      `2. Statement of Conformity required in certificate: ${soc ? "YES" : "NO"}`,
-      "2.1 Decision Rule:",
-      `2.1 ${checkboxText(!!srfData.ref_iso_is_doc)} Reference to ISO/IS Doc. Standard`,
-      `2.2 ${checkboxText(!!srfData.ref_manufacturer_manual)} Reference to manufacturer manual/specifications`,
-      `2.3 ${checkboxText(!!srfData.ref_customer_requirement)} Reference to customer's specific requirement`,
-      `3. Turnround time: ${srfData.turnaround_time || "-"}`,
+      `1. Frequency: ${checkboxText(asPerStandard)} As per Standard / ${checkboxText(!asPerStandard)} ${!asPerStandard ? frequencyValue : "Specify"}`,
+      `2. Conformity required: ${soc ? "YES" : "NO"} | 3. Turnround time: ${srfData.turnaround_time || "-"}`,
+      `4. Decision Rule: ${checkboxText(!!srfData.ref_iso_is_doc)} ISO/IS Doc | ${checkboxText(!!srfData.ref_manufacturer_manual)} Manufacturer | ${checkboxText(!!srfData.ref_customer_requirement)} Cust. Req`,
     ];
 
     const innerPadX = 3;
     const innerPadY = 3;
     const contentWidth = usableWidth - innerPadX * 2;
-    const officeLines = officeLinesRaw.map((line) => doc.splitTextToSize(line, contentWidth));
-    const instructionLines = instructionLinesRaw.map((line) => doc.splitTextToSize(line, contentWidth));
-    const remarkLines = doc.splitTextToSize(`Remark or Special Instruction: ${srfData.remarks || "None"}`, contentWidth);
+    const officeLines = officeLinesRaw.map(l => doc.splitTextToSize(l, contentWidth));
+    const instructionLines = instructionLinesRaw.map(l => doc.splitTextToSize(l, contentWidth));
+    const remarkLines = doc.splitTextToSize(`Remark: ${srfData.remarks || "None"}`, contentWidth);
 
-    const officeBlockHeight =
-      innerPadY * 2 +
-      officeLines.reduce((acc, lines) => acc + lines.length * 3.8, 0) +
-      (officeLines.length - 1) * 0.8 +
-      1.2;
-    const instructionBlockHeight =
-      innerPadY * 2 +
-      instructionLines.reduce((acc, lines) => acc + lines.length * 3.8, 0) +
-      (instructionLines.length - 1) * 0.8 +
-      1.2;
-    const remarkBlockHeight =
-      innerPadY * 2 +
-      remarkLines.length * 3.8 +
-      1.2;
-    const betweenBlocksGap = 2;
-    const totalBlocksHeight =
-      instructionBlockHeight +
-      betweenBlocksGap +
-      remarkBlockHeight +
-      betweenBlocksGap +
-      officeBlockHeight;
+    const instructionBlockHeight = instructionLines.reduce((acc, l) => acc + l.length * 3.8, 0) + 8;
+    const remarkBlockHeight = remarkLines.length * 3.8 + 6;
+    const officeBlockHeight = officeLines.reduce((acc, l) => acc + l.length * 3.8, 0) + 8;
+    const totalBlocksHeight = instructionBlockHeight + remarkBlockHeight + officeBlockHeight + 4;
 
-    ensureSpace(totalBlocksHeight + 3);
+    ensureSpace(totalBlocksHeight + 10);
+    
+    // Draw Boxes
     doc.setDrawColor(120);
-    doc.setLineWidth(0.25);
     doc.rect(marginX, y, usableWidth, instructionBlockHeight);
-    doc.rect(marginX, y + instructionBlockHeight + betweenBlocksGap, usableWidth, remarkBlockHeight);
-    doc.rect(
-      marginX,
-      y + instructionBlockHeight + betweenBlocksGap + remarkBlockHeight + betweenBlocksGap,
-      usableWidth,
-      officeBlockHeight
-    );
-
-    let blockY = y + innerPadY + 2;
-    const blockX = marginX + innerPadX;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(font.small);
-    instructionLines.forEach((lineParts, idx) => {
-      if (idx === 0) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(font.title);
-      } else {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(font.small);
-      }
-      doc.text(lineParts, blockX, blockY);
-      blockY += lineParts.length * 3.8 + 0.8;
+    let blockY = y + 5;
+    instructionLines.forEach((line, i) => {
+      doc.setFont("helvetica", i === 0 ? "bold" : "normal");
+      doc.text(line, marginX + innerPadX, blockY);
+      blockY += line.length * 3.8 + 0.5;
     });
 
-    // Separate remark box
-    blockY = y + instructionBlockHeight + betweenBlocksGap + innerPadY + 2;
+    y += instructionBlockHeight + 2;
+    doc.rect(marginX, y, usableWidth, remarkBlockHeight);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(font.small);
-    doc.text(remarkLines, blockX, blockY);
+    doc.text(remarkLines, marginX + innerPadX, y + 5);
 
-    blockY = y + instructionBlockHeight + betweenBlocksGap + remarkBlockHeight + betweenBlocksGap + innerPadY + 2;
-    officeLines.forEach((lineParts, idx) => {
-      if (idx === 0) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(font.title);
-      } else {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(font.small);
-      }
-      doc.text(lineParts, blockX, blockY);
-      blockY += lineParts.length * 3.8 + 0.8;
+    y += remarkBlockHeight + 2;
+    doc.rect(marginX, y, usableWidth, officeBlockHeight);
+    blockY = y + 5;
+    officeLines.forEach((line, i) => {
+      doc.setFont("helvetica", i === 0 ? "bold" : "normal");
+      doc.text(line, marginX + innerPadX, blockY);
+      blockY += line.length * 3.8 + 0.5;
     });
+    
+    y += officeBlockHeight + sectionGap;
 
-    y += totalBlocksHeight + sectionGap;
-
-    ensureSpace(36);
-    doc.setFontSize(font.body);
+    // Signatures
+    ensureSpace(30);
+    const sigWidth = (usableWidth - 6) / 2;
     doc.setFont("helvetica", "normal");
-    const signatureTopY = y;
-    const signatureGap = 6;
-    const signatureWidth = (usableWidth - signatureGap) / 2;
-    const signatureHeight = 18;
-    const rightSignatureX = marginX + signatureWidth + signatureGap;
+    doc.text("Name & Signature of the Customer", marginX, y);
+    doc.text("Name & Signature of Nextage", marginX + sigWidth + 6, y);
+    doc.rect(marginX, y + 2, sigWidth, 15);
+    doc.rect(marginX + sigWidth + 6, y + 2, sigWidth, 15);
+    y += 25;
 
-    doc.text("Name & Signature of the Customer", marginX, signatureTopY);
-    doc.text("Name & Signature of Nextage", rightSignatureX, signatureTopY);
-    doc.setDrawColor(130);
-    doc.setLineWidth(0.2);
-    doc.rect(marginX, signatureTopY + 2, signatureWidth, signatureHeight);
-    doc.rect(rightSignatureX, signatureTopY + 2, signatureWidth, signatureHeight);
-    doc.setFontSize(font.tiny);
-    doc.text("Sign here", marginX + 2, signatureTopY + signatureHeight + 0.2);
-    doc.text("Sign here", rightSignatureX + 2, signatureTopY + signatureHeight + 0.2);
-    doc.setFontSize(font.body);
-    y += signatureHeight + 8;
-
-    ensureSpace(24);
+    // Notes
+    ensureSpace(25);
     doc.setFont("helvetica", "bold");
     doc.text("Note:", marginX, y);
     doc.setFont("helvetica", "normal");
-    y += 4;
-    const note1 = "1. Calibration Method: Calibration will be done by standard methods, unless otherwise specified by customer. Our Calibration method is based on ISO 6789-1 & 2 (2018) for Torque generating tools and DKD-R-6-1 for Pressure Instrument.";
-    const note2 = "2. Laboratory activities falling under accredited scope in no way imply that equipment calibrated is approved by NABL.";
-    const note1Lines = doc.splitTextToSize(note1, usableWidth);
-    doc.text(note1Lines, marginX, y);
-    y += note1Lines.length * 3.8;
-    const note2Lines = doc.splitTextToSize(note2, usableWidth);
-    doc.text(note2Lines, marginX, y);
-    y += note2Lines.length * 3.8 + sectionGap;
+    const noteTxt = "1. Calibration will be done by standard methods unless specified. 2. Accredited scope does not imply NABL approval of equipment.";
+    const noteLines = doc.splitTextToSize(noteTxt, usableWidth);
+    doc.text(noteLines, marginX, y + 4);
+    y += 12;
 
-    ensureSpace(34);
+    // --- THE EQUIPMENT TABLE (CORRECTED) ---
+    ensureSpace(20);
     doc.setFontSize(font.section);
     doc.setFont("helvetica", "bold");
     doc.text("Details of the Equipment", marginX, y);
-    y += 2.5;
-    drawEquipmentTable(equipmentRows.slice(0, 6), y, 1);
-    y = (doc as any).lastAutoTable.finalY + sectionGap;
+    y += 4;
 
-    drawFooter();
-
-    if (equipmentRows.length > 6) {
-      const annexRows = equipmentRows.slice(6);
-      let startIndex = 7;
-      let remainingRows = annexRows;
-
-      while (remainingRows.length > 0) {
-        doc.addPage();
-        let annexY = drawHeader(false);
-        doc.setFontSize(font.section);
-        doc.setFont("helvetica", "bold");
-        doc.text("SERVICE REQUEST FORM ANNEXURE-1", pageWidth / 2, annexY, { align: "center" });
-        annexY += 5.2;
-        doc.setFontSize(font.body);
-        doc.setFont("helvetica", "normal");
-        doc.text(`REF: ${refNo}`, pageWidth / 2, annexY, { align: "center" });
-        annexY += 4;
-
-        // Conservative chunk for readable table per page.
-        const chunk = remainingRows.slice(0, 22);
-        drawEquipmentTable(chunk, annexY, startIndex);
+    autoTable(doc, {
+      startY: y,
+      head: [tableColumns],
+      body: getTableRows(equipmentRows),
+      theme: "grid",
+      margin: { left: marginX, right: marginX, top: 40 }, // Top margin for subsequent pages
+      styles: {
+        fontSize: 7.6,
+        lineColor: [120, 120, 120],
+        lineWidth: 0.2,
+        valign: "middle",
+        cellPadding: 1.2,
+      },
+      headStyles: {
+        fillColor: [235, 239, 245],
+        textColor: [20, 20, 20],
+        fontStyle: "bold",
+        halign: "center",
+      },
+      columnStyles: {
+        0: { cellWidth: 10, halign: "center" },
+        6: { halign: "center" },
+        7: { halign: "center" },
+        8: { halign: "center" },
+      },
+      didDrawPage: (data) => {
+        // Draw footer on every page
         drawFooter();
+        
+        // If the table spills to a new page, draw the header and Annexure title
+        if (data.pageNumber > 1) {
+          drawHeader(false, marginTop);
+          doc.setFontSize(font.section);
+          doc.setFont("helvetica", "bold");
+          doc.text("SERVICE REQUEST FORM (ANNEXURE)", pageWidth / 2, marginTop + 28, { align: "center" });
+        }
+      },
+    });
 
-        startIndex += chunk.length;
-        remainingRows = remainingRows.slice(chunk.length);
-      }
-    }
-
-    doc.save(`SRF_${(srfData.nepl_srf_no || srfData.srf_no || "Download").replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
+    doc.save(`SRF_${refNo.replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
   }, [srfData]);
- 
   const loadSrfData = useCallback(
     async (id: number, signal: AbortSignal) => {
       setLoading(true);
