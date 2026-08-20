@@ -14,7 +14,7 @@ cffi==2.0.0
 charset-normalizer==3.4.3
 click==8.2.1
 colorama==0.4.6
-cryptography==50.0.0
+cryptography==49.0.0
 dnspython==2.8.0
 dotenv==0.9.9
 ecdsa==0.19.1
