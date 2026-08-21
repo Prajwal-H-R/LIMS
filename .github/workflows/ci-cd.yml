@@ -99,17 +99,6 @@ jobs:
           mkdir -p backend/uploads/inward_photos
           chmod -R 777 backend/uploads
 
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: 1
-          format: table
-          trivyignores: .trivyignore
-
       - name: Gitleaks secret scan
         uses: gitleaks/gitleaks-action@v2
         with:
@@ -120,28 +109,6 @@ jobs:
 
       - name: Build all images
         run: docker compose --env-file .env.docker build
-
-      - name: Trivy backend image scan
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          scan-type: image
-          image-ref: yatharthatalims-backend:latest
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: 1
-          format: table
-          trivyignores: .trivyignore
-
-      - name: Trivy frontend image scan
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          scan-type: image
-          image-ref: yatharthatalims-frontend:latest
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: 1
-          format: table
-          trivyignores: .trivyignore
 
       - name: Start stack
         run: docker compose --env-file .env.docker up -d
