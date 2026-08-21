@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -40,6 +40,43 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ------------------------------------------------------------
+      # Gitleaks secret scan
+      # Uses the Gitleaks CLI directly instead of gitleaks-action.
+      # This avoids the organization-license requirement of the Action.
+      # ------------------------------------------------------------
+      - name: Install Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GITLEAKS_VERSION="8.28.0"
+
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+
+          gitleaks version
+
+      - name: Gitleaks secret scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gitleaks detect \
+            --source . \
+            --redact \
+            --verbose \
+            --no-banner \
+            --exit-code 1
+
+      # ------------------------------------------------------------
+      # Create runtime Docker environment
+      # ------------------------------------------------------------
       - name: Create .env.docker from GitHub Secrets
         shell: bash
         env:
@@ -95,14 +132,12 @@ jobs:
           EOF
 
       - name: Prepare backend uploads folder
+        shell: bash
         run: |
+          set -euo pipefail
+
           mkdir -p backend/uploads/inward_photos
           chmod -R 777 backend/uploads
-
-      - name: Gitleaks secret scan
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: detect --source . --redact --verbose --no-banner --exit-code 1
 
       - name: Validate docker compose file
         run: docker compose --env-file .env.docker config
@@ -121,8 +156,10 @@ jobs:
               echo "Backend is up"
               exit 0
             fi
+
             sleep 5
           done
+
           echo "Backend did not become ready"
           docker compose --env-file .env.docker logs --no-color
           exit 1
@@ -136,16 +173,22 @@ jobs:
 
       - name: Tag backend image for GHCR
         run: |
-          docker tag yatharthatalims-backend:latest ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
+          docker tag \
+            yatharthatalims-backend:latest \
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
 
       - name: Tag frontend image for GHCR
         run: |
-          docker tag yatharthatalims-frontend:latest ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
+          docker tag \
+            yatharthatalims-frontend:latest \
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
 
       - name: Push backend image to GHCR
         run: |
-          docker push ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
+          docker push \
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
 
       - name: Push frontend image to GHCR
         run: |
-          docker push ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
+          docker push \
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
