@@ -98,3 +98,5 @@ urllib3==2.7.0
 uvicorn==0.37.0
 watchdog==6.0.0
 playwright>=1.40.0
+msgpack==1.2.1
+setuptools==78.1.1
