@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { 
-  Eye, 
-  Edit, 
-  Printer, 
-  Search, 
-  Calendar, 
-  Building, 
+import {
+  Eye,
+  Edit,
+  Printer,
+  Search,
+  Calendar,
+  Building,
   FileText,
   Loader2,
   ArrowLeft,
@@ -14,7 +14,7 @@ import {
   SortAsc,
   SortDesc,
   Download,
-  FileDown, 
+  FileDown,
   CheckSquare,
   Square,
   ChevronLeft,
@@ -31,18 +31,18 @@ interface PaginatedResponse {
 
 export const ViewUpdateInward: React.FC = () => {
   const navigate = useNavigate();
-  
+
   // --- Data & Pagination State ---
   const [inwards, setInwards] = useState<InwardDetail[]>([]);
   const [filteredInwards, setFilteredInwards] = useState<InwardDetail[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
-  
+
   // Refined Loading States
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isFetchingData, setIsFetchingData] = useState(false);
   const [showLoaderOverlay, setShowLoaderOverlay] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [page, setPage] = useState<number>(0);
   const [limit, setLimit] = useState<number>(100);
 
@@ -52,13 +52,13 @@ export const ViewUpdateInward: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortField, setSortField] = useState<keyof InwardDetail>("material_inward_date");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  
+
   // Date filters sent to backend
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [debouncedStartDate, setDebouncedStartDate] = useState("");
   const [debouncedEndDate, setDebouncedEndDate] = useState("");
-  
+
   // --- Action States ---
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -90,13 +90,13 @@ export const ViewUpdateInward: React.FC = () => {
   // --- Handle Limit Change ---
   const handleLimitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setLimit(Number(e.target.value));
-    setPage(0); 
+    setPage(0);
   };
 
   // --- Handle Status Change ---
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setStatusFilter(e.target.value);
-    setPage(0); 
+    setPage(0);
   };
 
   // --- Server-Side Fetch ---
@@ -121,7 +121,7 @@ export const ViewUpdateInward: React.FC = () => {
       setError("Failed to load inward records. Please try again.");
     } finally {
       setIsFetchingData(false);
-      setIsInitialLoad(false); 
+      setIsInitialLoad(false);
     }
   }, [page, limit, debouncedSearch, debouncedStartDate, debouncedEndDate, statusFilter]);
 
@@ -132,7 +132,7 @@ export const ViewUpdateInward: React.FC = () => {
   // --- Frontend Sort (Applies to current fetched chunk) ---
   useEffect(() => {
     let filtered = [...inwards];
-    
+
     // Local Sort Logic
     filtered.sort((a, b) => {
       const aValue = a[sortField];
@@ -181,7 +181,7 @@ export const ViewUpdateInward: React.FC = () => {
     }
 
     setIsDownloadingPdf(true);
-    
+
     try {
       for (const id of selectedIds) {
         try {
@@ -211,14 +211,14 @@ export const ViewUpdateInward: React.FC = () => {
               model: eq.model,
               serial_no: eq.serial_no,
               range: eq.range,
-              qty: eq.quantity, 
+              qty: eq.quantity,
               supplier: eq.supplier,
               in_dc: eq.in_dc,
               out_dc: eq.out_dc,
               calibration_by: eq.calibration_by,
               nextage_ref: eq.nextage_contract_reference,
               accessories_included: eq.accessories_included,
-              inspe_status: eq.visual_inspection_notes, 
+              inspe_status: eq.visual_inspection_notes,
               engineer_remarks: eq.engineer_remarks,
               remarks_and_decision: eq.customer_remarks
             }));
@@ -253,8 +253,8 @@ export const ViewUpdateInward: React.FC = () => {
       );
 
       const blob = new Blob([response.data], {
-        type: response.headers["content-type"] || 
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type: response.headers["content-type"] ||
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -301,8 +301,8 @@ export const ViewUpdateInward: React.FC = () => {
 
   const SortIcon = ({ field }: { field: keyof InwardDetail }) => {
     if (sortField !== field) return <SortAsc className="w-4 h-4 text-gray-400" />;
-    return sortOrder === "asc" ? 
-      <SortAsc className="w-4 h-4 text-blue-600" /> : 
+    return sortOrder === "asc" ?
+      <SortAsc className="w-4 h-4 text-blue-600" /> :
       <SortDesc className="w-4 h-4 text-blue-600" />;
   };
 
@@ -352,7 +352,7 @@ export const ViewUpdateInward: React.FC = () => {
               <Loader2 className="absolute right-3 top-2.5 text-blue-500 animate-spin" size={18} />
             )}
           </div>
-          
+
           {/* Global Status Filter */}
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -376,7 +376,7 @@ export const ViewUpdateInward: React.FC = () => {
                 {selectedIds.length} Selected
               </span>
             )}
-            
+
             <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm">
               <button
                 disabled={!hasPrevPage || isFetchingData}
@@ -385,11 +385,11 @@ export const ViewUpdateInward: React.FC = () => {
               >
                 <ChevronLeft size={16} /> Prev
               </button>
-              
+
               <div className="px-4 py-1.5 text-sm font-bold text-gray-700 min-w-[100px] text-center">
                 Page {page + 1} <span className="text-gray-400 font-medium">of {totalPages || 1}</span>
               </div>
-              
+
               <button
                 disabled={!hasNextPage || isFetchingData}
                 onClick={() => setPage((p) => p + 1)}
@@ -412,7 +412,7 @@ export const ViewUpdateInward: React.FC = () => {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
-          
+
           <div className="relative">
             <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
             <input
@@ -482,7 +482,7 @@ export const ViewUpdateInward: React.FC = () => {
 
       {/* Table Area (Contains Overlay and Table) */}
       <div className="overflow-x-auto border rounded-lg bg-white shadow-sm relative min-h-[400px]">
-        
+
         {/* OVERLAY SPINNER (Shows during search/pagination, hides original data) */}
         {showLoaderOverlay && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/50 backdrop-blur-[2px] transition-all duration-300 rounded-lg">
@@ -497,17 +497,17 @@ export const ViewUpdateInward: React.FC = () => {
           <thead className="bg-gray-50">
             <tr>
               <th className="p-4 w-10 text-center">
-                 <button 
+                <button
                   onClick={handleSelectAll}
                   className="text-gray-600 hover:text-blue-600 focus:outline-none"
                   disabled={isFetchingData}
-                 >
-                   {filteredInwards.length > 0 && selectedIds.length === filteredInwards.length && !isFetchingData ? (
-                     <CheckSquare size={20} className="text-blue-600" />
-                   ) : (
-                     <Square size={20} />
-                   )}
-                 </button>
+                >
+                  {filteredInwards.length > 0 && selectedIds.length === filteredInwards.length && !isFetchingData ? (
+                    <CheckSquare size={20} className="text-blue-600" />
+                  ) : (
+                    <Square size={20} />
+                  )}
+                </button>
               </th>
               <th className="p-4 text-left text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort("srf_no")}>
                 <div className="flex items-center gap-2">SRF No <SortIcon field="srf_no" /></div>
@@ -575,7 +575,10 @@ export const ViewUpdateInward: React.FC = () => {
                     <td className="p-4">
                       <div className="flex items-start gap-2">
                         <Building className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                        <span className="text-gray-800 line-clamp-2" title={inward.customer_details}>{inward.customer_details.split('\n')[0]}</span>
+                        <span className="text-gray-800 line-clamp-2" title={inward.customer_details || "No details provided"}>
+                          {/* Added ?. and a fallback string */}
+                          {inward.customer_details?.split('\n')[0] || "No Details"}
+                        </span>
                       </div>
                     </td>
                     <td className="p-4"><span className="text-gray-600 font-medium">{(inward as any).customer_dc_no || "-"}</span></td>
@@ -586,9 +589,11 @@ export const ViewUpdateInward: React.FC = () => {
                     </td>
                     <td className="p-4">
                       <span className={`inline-flex px-3 py-1 rounded-full text-xs font-bold capitalize ${getStatusColor(inward.status)}`}>
-                        {inward.status.replace('_', ' ')}
+                        {/* Added ?. and a fallback string */}
+                        {inward.status?.replace('_', ' ') || "Unknown"}
                       </span>
                     </td>
+
                     <td className="p-4">
                       <div className="flex items-center justify-center gap-2">
                         <button onClick={() => handleViewInward(inward.inward_id)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="View Inward">
@@ -620,11 +625,11 @@ export const ViewUpdateInward: React.FC = () => {
           >
             <ChevronLeft size={16} /> Prev
           </button>
-          
+
           <div className="px-4 py-1.5 text-sm font-bold text-gray-700 min-w-[100px] text-center">
             Page {page + 1} <span className="text-gray-400 font-medium">of {totalPages || 1}</span>
           </div>
-          
+
           <button
             disabled={!hasNextPage || isFetchingData}
             onClick={() => setPage((p) => p + 1)}

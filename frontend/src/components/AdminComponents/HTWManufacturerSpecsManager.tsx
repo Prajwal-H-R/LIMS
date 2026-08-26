@@ -245,10 +245,13 @@ function ManufacturerSpecList({ onBack, onAddNew, onEdit }: ManufacturerSpecList
     }
   };
 
-  const downloadTemplate = async (format: 'xlsx' | 'csv' = 'xlsx') => {
+ const downloadTemplate = async (format: 'xlsx' | 'csv' = 'xlsx') => {
     try {
+      // Remove trailing slash if it exists
+      const baseUrl = ENDPOINTS.HTW_MANUFACTURER_SPECS.LIST.replace(/\/$/, '');
+      
       const response = await api.get(
-        `${ENDPOINTS.HTW_MANUFACTURER_SPECS.LIST}/template?file_format=${format}`,
+        `${baseUrl}/template?file_format=${format}`,
         { responseType: 'blob' }
       );
 
@@ -275,7 +278,7 @@ function ManufacturerSpecList({ onBack, onAddNew, onEdit }: ManufacturerSpecList
     }
   };
 
-  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+ const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -286,7 +289,10 @@ function ManufacturerSpecList({ onBack, onAddNew, onEdit }: ManufacturerSpecList
       const formData = new FormData();
       formData.append('file', file);
 
-      await api.post(`${ENDPOINTS.HTW_MANUFACTURER_SPECS.LIST}/import`, formData, {
+      // Remove trailing slash if it exists
+      const baseUrl = ENDPOINTS.HTW_MANUFACTURER_SPECS.LIST.replace(/\/$/, '');
+
+      await api.post(`${baseUrl}/import`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
