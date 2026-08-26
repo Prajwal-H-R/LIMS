@@ -1,5 +1,5 @@
 # backend/routes/inward_router.py
-
+ 
 import json
 from datetime import date, datetime
 from typing import Dict, List, Optional
@@ -12,7 +12,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, func, or_ # <-- Added for queries
-
+ 
 # Local imports
 from backend.db import get_db
 # ------------------------------------------------------------------
@@ -20,7 +20,7 @@ from backend.db import get_db
 from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 # ✅ IMPORT HTWJob
-from backend.models.htw.htw_job import HTWJob 
+from backend.models.htw.htw_job import HTWJob
 from backend.license.license_models import LicenseMaster
 # ------------------------------------------------------------------
 from backend.services.inward_services import InwardService
@@ -29,7 +29,7 @@ from backend.services.notification_services import NotificationService
 from backend.services.srf_services import SrfService
 from backend.auth import get_current_user, check_staff_role
 from backend.schemas.user_schemas import User as UserSchema
-
+ 
 # --- IMPORTING from your central schema file ---
 from backend.schemas.inward_schemas import (
     InwardCreate,
@@ -47,49 +47,49 @@ from backend.schemas.inward_schemas import (
     CustomerRemarkRequest,
     InwardStatusUpdate,
     InwardListPaginatedResponse,
-    ExportablePaginatedResponse # <-- NEW Schema imported
+    ExportablePaginatedResponse
 )
-
+ 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 ALLOWED_ROLES = ["staff", "admin", "engineer"]
 router = APIRouter(prefix="/staff/inwards", tags=["Inwards"])
-
+ 
 # =========================================================
 # LOCAL SCHEMA DEFINITION
 # =========================================================
 class InwardFlagUpdate(BaseModel):
     inward_srf_flag: bool
-
+ 
 # =========================================================
 # 1. STATIC ROUTES
 # =========================================================
-
+ 
 @router.get("/next-no", response_model=dict)
 def get_next_srf_no(db: Session = Depends(get_db)):
     return {"next_srf_no": SrfService(db).generate_next_srf_no()}
-
+ 
 @router.get("/materials-history", response_model=List[str])
 async def get_materials_history(
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
     current_user: UserSchema = Depends(check_staff_role)
 ):
     return await InwardService(db).get_material_history()
-
+ 
 @router.get("/drafts", response_model=List[DraftResponse])
 async def get_drafts(db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     inward_service = InwardService(db)
     return await inward_service.get_user_drafts(current_user.user_id)
-
+ 
 # =========================================================
 # 2. DYNAMIC ROUTES
 # =========================================================
-
+ 
 @router.get("/drafts/{draft_id}", response_model=DraftResponse)
 async def get_draft(draft_id: int, db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     inward_service = InwardService(db)
     return await inward_service.get_draft_by_id(draft_id, current_user.user_id)
-
+ 
 @router.patch("/draft", response_model=DraftResponse)
 async def update_draft(
     req: Request,
@@ -98,19 +98,19 @@ async def update_draft(
 ):
     inward_service = InwardService(db)
     content_type = req.headers.get("content-type", "")
-
+ 
     if content_type.startswith("multipart/form-data"):
         form = await req.form()
         inward_id_raw = form.get("inward_id")
         draft_data_raw = form.get("draft_data")
         if draft_data_raw is None:
             raise HTTPException(status_code=422, detail="draft_data is required.")
-
+ 
         try:
             draft_data = json.loads(draft_data_raw)
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=422, detail="draft_data must be valid JSON.") from exc
-
+ 
         files_by_index: Dict[int, List[UploadFile]] = {}
         for key in form.keys():
             if not key.startswith("photos_"):
@@ -122,7 +122,7 @@ async def update_draft(
             upload_files = [file for file in form.getlist(key) if getattr(file, "filename", None)]
             if upload_files:
                 files_by_index.setdefault(index, []).extend(upload_files)
-
+ 
         if files_by_index:
             saved_paths = await inward_service.save_draft_files(files_by_index)
             equipment_list = draft_data.get("equipment_list")
@@ -137,14 +137,14 @@ async def update_draft(
                 existing_urls = [url for url in existing_urls if isinstance(url, str)]
                 equipment_list[index]["existing_photo_urls"] = existing_urls + paths
             draft_data["equipment_list"] = equipment_list
-
+ 
         inward_id = int(inward_id_raw) if inward_id_raw else None
         return await inward_service.update_draft(user_id=current_user.user_id, inward_id=inward_id, draft_data=draft_data)
-
+ 
     payload = await req.json()
     update_request = DraftUpdateRequest(**payload)
     return await inward_service.update_draft(user_id=current_user.user_id, inward_id=update_request.inward_id, draft_data=update_request.draft_data)
-
+ 
 @router.post("/submit", response_model=InwardResponse, status_code=status.HTTP_201_CREATED)
 async def submit_inward(
     req: Request,
@@ -161,8 +161,7 @@ async def submit_inward(
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(check_staff_role),
 ):
-     # Enforce license restriction:
-    # - Engineer is blocked from Create Inward only when license is EXPIRED.
+     # Enforce license restriction
     lic = db.query(LicenseMaster).first()
     if not lic:
         raise HTTPException(status_code=500, detail="License not initialized")
@@ -188,7 +187,7 @@ async def submit_inward(
     except (ValidationError, ValueError, json.JSONDecodeError) as e:
         logger.error(f"Validation error on submit: {e}")
         raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
-
+ 
     form_data = await req.form()
     photos_by_index: Dict[int, List[UploadFile]] = {}
     for key in form_data.keys():
@@ -203,7 +202,7 @@ async def submit_inward(
         if upload_files:
             photos_by_index[index] = upload_files
     inward_service = InwardService(db)
-
+ 
     return await inward_service.submit_inward(
         inward_data=inward_data,
         files_by_index=photos_by_index,
@@ -211,18 +210,18 @@ async def submit_inward(
         draft_inward_id=inward_id,
         customer_details_value=customer_details
     )
-
+ 
 @router.delete("/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_draft(draft_id: int, db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     if not await InwardService(db).delete_draft(draft_id, current_user.user_id):
         raise HTTPException(status_code=404, detail="Draft not found")
-
+ 
 # --- CUSTOMER PORTAL ENDPOINTS ---
-
+ 
 @router.get("/portal/firs/{inward_id}", tags=["Portal"], response_model=InwardResponse)
 async def get_fir_details(inward_id: int, db: Session = Depends(get_db)):
     return await InwardService(db).get_inward_by_id(inward_id)
-
+ 
 @router.post("/portal/firs/{inward_id}/remarks", tags=["Portal"])
 async def save_customer_remarks(
     inward_id: int,
@@ -232,7 +231,7 @@ async def save_customer_remarks(
     inward_service = InwardService(db)
     count = await inward_service.save_customer_remarks(inward_id, request.remarks)
     return {"message": f"Updated {count} remarks successfully."}
-
+ 
 @router.put("/portal/firs/{inward_id}/status", tags=["Portal"])
 async def update_fir_status(
     inward_id: int,
@@ -242,25 +241,25 @@ async def update_fir_status(
     inward_service = InwardService(db)
     updated_inward = await inward_service.update_inward_status(inward_id, status_update.status)
     return {"message": "Status updated successfully", "status": updated_inward.status}
-
+ 
 @router.get("/portal/direct-fir/{inward_id}", tags=["Portal"], response_model=InwardResponse)
 async def get_direct_fir(inward_id: int, token: str, db: Session = Depends(get_db)):
     return await InwardService(db).get_inward_by_id(inward_id)
-
+ 
 @router.post("/portal/direct-fir/{inward_id}/remarks", tags=["Portal"])
 async def save_direct_remarks(inward_id: int, request: CustomerRemarkRequest, token: str, db: Session = Depends(get_db)):
      inward_service = InwardService(db)
      count = await inward_service.save_customer_remarks(inward_id, request.remarks)
      return {"message": f"Updated {count} remarks successfully."}
-
+ 
 @router.put("/portal/direct-fir/{inward_id}/status", tags=["Portal"])
 async def update_direct_status(inward_id: int, status_update: InwardStatusUpdate, token: str, db: Session = Depends(get_db)):
     inward_service = InwardService(db)
     updated_inward = await inward_service.update_inward_status(inward_id, status_update.status)
     return {"message": "Status updated successfully", "status": updated_inward.status}
-
+ 
 # --- GENERAL LISTING ENDPOINTS (PAGINATED NOW) ---
-
+ 
 @router.get("", response_model=InwardListPaginatedResponse, include_in_schema=True)
 async def get_all_inward_records(
     skip: int = 0,
@@ -273,17 +272,21 @@ async def get_all_inward_records(
 ):
     if limit > 1000:
         limit = 1000
-
-    conditions = []
-    
+ 
+    # ✅ FILTER ADDED: Exclude Drafts by default.
+    # (Checking for None ensures records missing a status won't disappear unexpectedly)
+    conditions = [
+        or_(Inward.status != "draft", Inward.status.is_(None))
+    ]
+   
     if start_date:
         conditions.append(Inward.material_inward_date >= start_date)
     if end_date:
         conditions.append(Inward.material_inward_date <= end_date)
-
+ 
     if status and status.lower() != 'all':
         conditions.append(Inward.status.ilike(f"%{status}%"))
-        
+       
     if search:
         search_term = f"%{search}%"
         conditions.append(
@@ -293,13 +296,13 @@ async def get_all_inward_records(
                 Inward.customer_dc_no.ilike(search_term)
             )
         )
-
+ 
     # 1. Total Count (Fast)
     count_stmt = select(func.count(Inward.inward_id))
     if conditions:
         count_stmt = count_stmt.where(*conditions)
     total_count = db.scalar(count_stmt) or 0
-
+ 
     # 2. Paginated Chunk
     stmt = select(Inward).options(
         selectinload(Inward.customer),
@@ -307,21 +310,21 @@ async def get_all_inward_records(
     )
     if conditions:
         stmt = stmt.where(*conditions)
-        
+       
     stmt = stmt.order_by(Inward.inward_id.desc()).offset(skip).limit(limit)
     inwards = db.scalars(stmt).all()
-    
+   
     return {
         "total_count": total_count,
         "inwards": inwards
     }
-
-
+ 
+ 
 @router.get("/reviewed-firs", response_model=List[ReviewedFirResponse])
 async def get_reviewed_firs(db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     inward_service = InwardService(db)
     return await inward_service.get_reviewed_inwards_filtered()
-
+ 
 @router.get("/exportable-list", response_model=ExportablePaginatedResponse)
 async def list_exportable_inwards(
     skip: int = 0,
@@ -335,15 +338,18 @@ async def list_exportable_inwards(
     # Cap limit to prevent massive payload overloads
     if limit > 1000:
         limit = 1000
-
-    conditions = []
-    
+ 
+    # ✅ FILTER ADDED: Exclude Drafts by default.
+    conditions = [
+        or_(Inward.status != "draft", Inward.status.is_(None))
+    ]
+   
     # 1. Date Filters
     if start_date:
         conditions.append(Inward.material_inward_date >= start_date)
     if end_date:
         conditions.append(Inward.material_inward_date <= end_date)
-
+ 
     # 2. Search Filters
     if search:
         search_term = f"%{search}%"
@@ -354,37 +360,32 @@ async def list_exportable_inwards(
                 Inward.customer_dc_no.ilike(search_term)
             )
         )
-
-    # Note: If your old `get_inwards_for_export` strictly filtered by a certain status
-    # (like ONLY allowing "reviewed" or "completed" records to be exported), 
-    # you can uncomment and adjust this line below:
-    # conditions.append(Inward.status.ilike("%reviewed%"))
-
+ 
     # 3. Total Count (Fast Query)
     count_stmt = select(func.count(Inward.inward_id))
     if conditions:
         count_stmt = count_stmt.where(*conditions)
     total_count = db.scalar(count_stmt) or 0
-
+ 
     # 4. Paginated Chunk (Fast Query)
     # Using selectinload for equipments so Pydantic can calculate `equipment_count` instantly
     stmt = select(Inward).options(
         selectinload(Inward.customer),
         selectinload(Inward.equipments)
     )
-    
+   
     if conditions:
         stmt = stmt.where(*conditions)
-        
+       
     stmt = stmt.order_by(Inward.inward_id.desc()).offset(skip).limit(limit)
     inwards = db.scalars(stmt).all()
-    
+   
     # Return structured paginated payload
     return {
         "total_count": total_count,
         "inwards": inwards
     }
-
+ 
 @router.get("/updated", response_model=List[UpdatedInwardSummary])
 async def list_updated_inwards(
     start_date: Optional[date] = None,
@@ -394,7 +395,7 @@ async def list_updated_inwards(
 ):
     inward_service = InwardService(db)
     return await inward_service.get_updated_inwards(start_date=start_date, end_date=end_date)
-
+ 
 @router.post("/export-batch")
 async def export_inwards_batch(
     request_data: BatchExportRequest,
@@ -410,7 +411,7 @@ async def export_inwards_batch(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
-
+ 
 @router.post("/export-batch-inward-only")
 async def export_inwards_batch_inward_only(
     request_data: BatchExportRequest,
@@ -426,79 +427,79 @@ async def export_inwards_batch_inward_only(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
-
+ 
 # --- EMAIL AND NOTIFICATION ENDPOINTS ---
-
+ 
 @router.post("/{inward_id}/send-report", status_code=status.HTTP_200_OK)
 async def send_customer_feedback_request(inward_id: int, request_data: SendReportRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     if not request_data.send_later and not request_data.emails:
         raise HTTPException(status_code=422, detail="At least one email is required when sending immediately.")
     inward_service = InwardService(db)
     return await inward_service.process_customer_notification(inward_id=inward_id, customer_emails=request_data.emails, send_later=request_data.send_later, creator_id=current_user.user_id, background_tasks=background_tasks)
-
+ 
 @router.get("/delayed-emails/pending", response_model=List[PendingEmailTask])
 async def get_pending_delayed_emails(db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     delayed_email_service = DelayedEmailService(db)
     return await delayed_email_service.get_all_pending_tasks()
-
+ 
 @router.post("/delayed-emails/{task_id}/send", status_code=status.HTTP_200_OK)
 async def send_delayed_email_now(task_id: int, request_data: dict = Body(...), background_tasks: BackgroundTasks = BackgroundTasks(), db: Session = Depends(get_db)):
     emails = request_data.get("emails", [])
-    if not emails: 
+    if not emails:
         raise HTTPException(status_code=422, detail="At least one email is required.")
     if not await InwardService(db).send_scheduled_report_now(task_id=task_id, customer_emails=emails, background_tasks=background_tasks):
         raise HTTPException(status_code=500, detail="Failed to send email.")
     return {"message": "Email sent successfully."}
-
+ 
 @router.delete("/delayed-emails/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_delayed_email(task_id: int, db: Session = Depends(get_db)):
     if not await DelayedEmailService(db).cancel_task(task_id=task_id):
         raise HTTPException(status_code=404, detail="Task not found.")
-
+ 
 @router.get("/notifications/failed", response_model=FailedNotificationsResponse)
 async def get_failed_notifications(limit: int = 50, db: Session = Depends(get_db), current_user: UserSchema = Depends(check_staff_role)):
     notification_service = NotificationService(db)
     failed_notifications = await notification_service.get_failed_notifications(limit=limit)
     stats = await notification_service.get_notification_stats()
     return {"failed_notifications": failed_notifications, "stats": stats}
-
+ 
 @router.post("/notifications/{notification_id}/retry", status_code=status.HTTP_200_OK)
 async def retry_failed_notification(notification_id: int, request_data: RetryNotificationRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if not await NotificationService(db).retry_failed_notification(notification_id=notification_id, background_tasks=background_tasks, new_email=request_data.email):
         raise HTTPException(status_code=500, detail="Failed to queue notification retry.")
     return {"message": "Notification retry queued successfully."}
-
+ 
 @router.delete("/notifications/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_notification(notification_id: int, db: Session = Depends(get_db)):
     if not await NotificationService(db).delete_notification(notification_id):
         raise HTTPException(status_code=404, detail="Notification not found.")
-
+ 
 # --- MANUFACTURER SPEC ENDPOINTS ---
-
+ 
 @router.get("/manufacturer/makes", response_model=List[str])
 def get_makes(db: Session = Depends(get_db)):
     return InwardService(db).get_all_makes()
-
-
+ 
+ 
 @router.get("/manufacturer/models", response_model=List[str])
 def get_models(make: str, db: Session = Depends(get_db)):
     models = InwardService(db).get_models_by_make(make)
     if not models:
         raise HTTPException(status_code=404, detail="No models found for selected make")
     return models
-
-
+ 
+ 
 @router.get("/manufacturer/range")
 def get_range(make: str, model: str, db: Session = Depends(get_db)):
     data = InwardService(db).get_range_by_make_model(make, model)
     if not data:
         raise HTTPException(status_code=404, detail="No range found for selected make & model")
     return data
-
+ 
 # =========================================================
 # 3. CATCH-ALL DYNAMIC ROUTES
 # =========================================================
-
+ 
 @router.get("/{inward_id}/export")
 async def export_updated_inward(
     inward_id: int,
@@ -513,14 +514,14 @@ async def export_updated_inward(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
-
+ 
 @router.get("/{inward_id}", response_model=InwardResponse)
 async def get_inward_by_id(inward_id: int, db: Session = Depends(get_db)):
     db_inward = await InwardService(db).get_inward_by_id(inward_id)
     if not db_inward:
         raise HTTPException(status_code=404, detail="Inward not found")
     return db_inward
-
+ 
 # ==========================================================
 # 4. UPDATED: Partial Update Route (Flag + Job Termination Only)
 # ==========================================================
@@ -540,18 +541,18 @@ async def partial_update_inward(
     inward = db.query(Inward).filter(Inward.inward_id == inward_id).first()
     if not inward:
         raise HTTPException(status_code=404, detail="Inward record not found")
-
+ 
     # 1. Update Inward Flag
     if payload.inward_srf_flag is not None:
         inward.inward_srf_flag = payload.inward_srf_flag
-        
+       
         # 2. If flag is True (Rejected), Terminate ALL associated HTWJobs
         if payload.inward_srf_flag is True:
             db.query(HTWJob).filter(HTWJob.inward_id == inward_id).update(
-                {"job_status": "terminated"}, 
+                {"job_status": "terminated"},
                 synchronize_session=False
             )
-
+ 
     try:
         db.commit()
         db.refresh(inward)
@@ -559,8 +560,8 @@ async def partial_update_inward(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database commit failed: {str(e)}")
-
-
+ 
+ 
 # ==========================================================
 # 5. EXISTING PUT ROUTE (For Form Data + File Uploads)
 # ==========================================================
@@ -582,7 +583,7 @@ async def update_inward(
 ):
     try:
         raw_list = json.loads(equipment_list)
-        
+       
         inward_data = InwardUpdate(
             srf_no=srf_no,
             material_inward_date=material_inward_date,
@@ -597,7 +598,7 @@ async def update_inward(
     except (ValidationError, ValueError, json.JSONDecodeError) as e:
         logger.error(f"Validation error on update: {e}")
         raise HTTPException(status_code=422, detail=f"Validation Error: {e}")
-
+ 
     form_data = await req.form()
     photos_by_index: Dict[int, List[UploadFile]] = {}
     for key in form_data.keys():
@@ -611,32 +612,32 @@ async def update_inward(
         upload_files = [file for file in files if getattr(file, "filename", None)]
         if upload_files:
             photos_by_index[index] = upload_files
-            
+           
     inward_service = InwardService(db)
-
+ 
     updated_inward = await inward_service.update_inward_with_files(
         inward_id=inward_id,
         inward_data=inward_data,
         files_by_index=photos_by_index,
         updater_id=current_user.user_id
     )
-    
+   
     return updated_inward
-
+ 
 @router.get("/equipment-metadata/{inward_eqp_id}")
 async def get_equipment_metadata(
-    inward_eqp_id: int, 
+    inward_eqp_id: int,
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(get_current_user)
 ):
     """
-    Fetches Make, Model, Serial No, and Range for a specific equipment 
+    Fetches Make, Model, Serial No, and Range for a specific equipment
     from the inward_equipments table.
     """
     eqp = InwardService(db).get_equipment_metadata(inward_eqp_id)
     if not eqp:
         raise HTTPException(status_code=404, detail="Equipment not found")
-    
+   
     return {
         "inward_eqp_id": eqp.inward_eqp_id,
         "material_description": eqp.material_description,
@@ -647,3 +648,4 @@ async def get_equipment_metadata(
         "nepl_id": eqp.nepl_id,
         "material_description": eqp.material_description
     }
+ 
