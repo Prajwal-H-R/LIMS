@@ -94,28 +94,34 @@ const ActionButton: React.FC<{
 }) => (
   <button
     onClick={onClick}
-    className="group relative p-6 rounded-2xl text-left transition-all duration-300 transform hover:scale-[1.02] border border-gray-100 bg-white hover:border-blue-500 hover:shadow-xl shadow-md"
+    className="group relative w-full min-w-0 p-4 sm:p-6 rounded-2xl text-left transition-all duration-300 transform hover:scale-[1.02] border border-gray-100 bg-white hover:border-blue-500 hover:shadow-xl shadow-md"
   >
-    <div className="flex items-start">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-0">
       <div
-        className={`p-3 rounded-xl text-white mr-4 shadow-lg ${colorClasses} group-hover:shadow-2xl transition-shadow duration-300 relative`}
-      >
+  className={`self-start w-16 h-16 p-0 rounded-xl text-white shadow-lg ${colorClasses} group-hover:shadow-2xl transition-shadow duration-300 relative flex-shrink-0 flex items-center justify-center`}
+>
         {icon}
+
         {badge != null && badge > 0 && (
           <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center font-bold border-2 border-white animate-pulse">
             {badge > 99 ? "99+" : badge}
           </span>
         )}
       </div>
-      <div className="flex-1">
-        <h3 className="text-xl font-bold text-gray-900 mb-1">
+
+      <div className="w-full min-w-0 flex-1 sm:pl-4">
+        <h3 className="text-xl font-bold text-gray-900 mb-1 break-words">
           {label}
         </h3>
-        <p className="text-gray-600 text-sm">
+
+        <p className="text-gray-600 text-sm leading-relaxed break-words">
           {description}
         </p>
       </div>
-      <ArrowRight className="ml-4 h-6 w-6 text-gray-400 group-hover:text-blue-600 transition-colors duration-300" />
+
+      <ArrowRight
+        className="h-6 w-6 text-gray-400 group-hover:text-blue-600 transition-colors duration-300 self-end sm:self-start sm:ml-4 flex-shrink-0"
+      />
     </div>
   </button>
 );
@@ -355,8 +361,7 @@ const EngineerDashboard: React.FC = () => {
       </div>
  
       {/* Quick Actions Grid */}
-      <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b pb-3">
+<div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-4 sm:p-6 md:p-8">        <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b pb-3">
           Quick Actions
         </h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
