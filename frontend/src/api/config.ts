@@ -92,7 +92,7 @@ export const ENDPOINTS = {
     RESET_PASSWORD: `/auth/reset-password`,
     VERIFY_TOKEN:   (token: string) => `/auth/verify-reset-token/${token}`,
   },
-
+  
   // ── User management ─────────────────────────────────────────────── //
   USERS: {
     ALL_USERS:     `/users`,
@@ -123,7 +123,14 @@ export const ENDPOINTS = {
     DRAFT_DELETE:                (id: number) => `/staff/inwards/drafts/${id}`,
     INWARD_DETAILS:              (id: number) => `/staff/inwards/${id}`,
   },
+  // ── Final Inspection ───────────────────────────────────────────── //
+FINAL_INSPECTIONS: {
+  GET_DETAILS: (id: number) =>
+    `/final-inspections/inward/${id}/details`,
 
+  SEND_REPORT: (id: number) =>
+    `/final-inspections/inward/${id}/send-report`,
+},
   // ── Customer Portal ─────────────────────────────────────────────── //
   PORTAL: {
     // Account

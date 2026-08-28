@@ -818,7 +818,7 @@ const RepeatabilitySection = forwardRef<
     tableData.length > 0 ? tableData[0].torque_unit : "ft-lb";
 
   // ── Validation Logic ───────────────────────────────────────────────────────
-  const MAX_INPUT_VALUE = 9999;
+  const MAX_INPUT_VALUE = 99999;
   const validateInput = (value: string): string | null => {
     if (value.trim() === "") {
       return "Value cannot be empty.";
