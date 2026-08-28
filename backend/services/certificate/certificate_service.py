@@ -120,7 +120,16 @@ def _map_equipment_to_template(equipment: Dict[str, Any], customer: Any, inward:
         if hasattr(ref_date, "strftime"):
             ref_date = ref_date.strftime("%d-%m-%Y")
         else:
-            ref_date = str(ref_date)
+            # Normalize ISO date strings such as "2026-08-12"
+            # to the certificate format "12-08-2026".
+            ref_date_str = str(ref_date).strip()
+            try:
+                ref_date = datetime.fromisoformat(ref_date_str).strftime("%d-%m-%Y")
+            except ValueError:
+                try:
+                    ref_date = date.fromisoformat(ref_date_str[:10]).strftime("%d-%m-%Y")
+                except ValueError:
+                    ref_date = ref_date_str
  
     # Manufacturer-specified primary unit for the tool (e.g. Nm, lbf·ft, kgf·m).
     units = equipment.get("unit", "") or "Nm"
@@ -541,7 +550,7 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
  
     cert_no = _derive_certificate_no(equipment.nepl_id or "")
     cal_date = job.date or date.today()
-    default_due = cal_date + timedelta(days=365)
+    default_due = cal_date + timedelta(days=364)
  
     cert = HTWCertificate(
         job_id=job_id,

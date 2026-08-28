@@ -119,21 +119,50 @@ drawSectionCard(rightX, "Customer Information", () => {
 
 // Contact Person
 if (formData.contact_person) {
+    const labelX = rightX + 5;
+    const valueGap = 3;
+
     doc.setFont("helvetica", "bold");
-    doc.text("Contact Person:", rightX + 5, y);
+    doc.setFontSize(8);
+    doc.setTextColor(THEME.textDark[0], THEME.textDark[1], THEME.textDark[2]);
+
+    const label = "Contact Person:";
+    doc.text(label, labelX, y);
+
+    const labelWidth = doc.getTextWidth(label);
 
     doc.setFont("helvetica", "normal");
-    doc.text(formData.contact_person, rightX + 25, y);
-    y += 5;
+    const valueX = labelX + labelWidth + valueGap;
+
+    const availableWidth = rightX + boxWidth - 5 - valueX;
+    const valueLines = doc.splitTextToSize(
+        String(formData.contact_person),
+        Math.max(10, availableWidth)
+    );
+
+    doc.text(valueLines, valueX, y);
+
+    y += Math.max(5, valueLines.length * 4.5);
 }
 
 // Phone
 if (formData.phone) {
+    const labelX = rightX + 5;
+    const valueGap = 3;
+
     doc.setFont("helvetica", "bold");
-    doc.text("Phone:", rightX + 5, y);
+    doc.setFontSize(8);
+
+    const label = "Phone:";
+    doc.text(label, labelX, y);
+
+    const labelWidth = doc.getTextWidth(label);
 
     doc.setFont("helvetica", "normal");
-    doc.text(formData.phone, rightX + 25, y);
+    const valueX = labelX + labelWidth + valueGap;
+
+    doc.text(String(formData.phone), valueX, y);
+
     y += 5;
 }
 });

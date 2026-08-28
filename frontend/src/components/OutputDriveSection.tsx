@@ -445,7 +445,7 @@ const OutputDriveSection = forwardRef<
   );
 
   // ── Validation Logic ───────────────────────────────────────────────────────
-  const MAX_INPUT_VALUE = 9999;
+  const MAX_INPUT_VALUE = 99999;
   const validateInput = (value: string): string | null => {
     if (value.trim() === "") return "Value cannot be empty.";
     if (value.endsWith(".")) return "Invalid number.";
