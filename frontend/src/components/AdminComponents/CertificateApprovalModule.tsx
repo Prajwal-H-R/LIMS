@@ -391,44 +391,131 @@ export const CertificateApprovalModule: React.FC = () => {
 
   const handleBackToDashboard = () => { setSearchParams({ section: 'dashboard' }); };
 
-  const renderCertificateCard = (cert: Certificate, type: 'approve' | 'issue' | 'issued', bulk?: { selected: boolean; onToggle: () => void }) => (
-    <div key={cert.certificate_id} className="flex items-center justify-between p-5 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm">
-      {bulk && (
-        <div className="flex-shrink-0 pr-3">
-          <label className="flex items-center cursor-pointer">
-            <input type="checkbox" checked={bulk.selected} onChange={bulk.onToggle} className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
-          </label>
-        </div>
-      )}
-      <div className="flex items-start gap-4 flex-1 min-w-0">
-        <div className="mt-1 flex-shrink-0">
-          <div className="p-2 rounded-full bg-blue-100 text-blue-600"><FileText size={20} /></div>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <p className="font-semibold text-lg text-gray-800">{cert.certificate_no || `CERT-${cert.certificate_id}`}</p>
-            {cert.srf_no && <span className="text-sm text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded border border-gray-200">SRF: {cert.srf_no}</span>}
+  const renderCertificateCard = (
+    cert: Certificate,
+    type: 'approve' | 'issue' | 'issued',
+    bulk?: { selected: boolean; onToggle: () => void }
+  ) => (
+    <div
+      key={cert.certificate_id}
+      className="w-full min-w-0 p-4 sm:p-5 bg-white hover:bg-blue-50 border border-gray-200 rounded-xl transition-all duration-200 group shadow-sm"
+    >
+      <div className="flex items-start gap-3 min-w-0">
+        {bulk && (
+          <div className="flex-shrink-0 pt-1" onClick={(e) => e.stopPropagation()}>
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={bulk.selected}
+                onChange={bulk.onToggle}
+                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+              />
+            </label>
           </div>
-          <p className="text-sm text-gray-600 mt-1">
-            {cert.material_description && <span className="block text-gray-700 font-medium">{cert.nepl_id} - {cert.material_description}</span>}
-            Job #{cert.job_id} • Cal: {formatDate(cert.date_of_calibration)}
-            {cert.ulr_no && <> • ULR: <span className="font-mono text-indigo-700">{cert.ulr_no}</span></>}
-          </p>
+        )}
+
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="mt-1 flex-shrink-0">
+            <div className="p-2 rounded-full bg-blue-100 text-blue-600">
+              <FileText size={20} />
+            </div>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-2 flex-wrap">
+              <p className="font-semibold text-base sm:text-lg text-gray-800 break-words">
+                {cert.certificate_no || `CERT-${cert.certificate_id}`}
+              </p>
+
+              {cert.srf_no && (
+                <span className="max-w-full text-xs sm:text-sm text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded border border-gray-200 break-all">
+                  SRF: {cert.srf_no}
+                </span>
+              )}
+            </div>
+
+            <p className="text-sm text-gray-600 mt-1 break-words leading-relaxed">
+              {cert.material_description && (
+                <span className="block text-gray-700 font-medium break-words">
+                  {cert.nepl_id} - {cert.material_description}
+                </span>
+              )}
+              <span className="break-words">Job #{cert.job_id} • Cal: {formatDate(cert.date_of_calibration)}</span>
+              {cert.ulr_no && (
+                <>
+                  {' • '}
+                  ULR:{' '}
+                  <span className="font-mono text-indigo-700 break-all">
+                    {cert.ulr_no}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
         </div>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-        <button onClick={() => handleOpenPreview(cert)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Preview"><Eye className="h-4 w-4" /></button>
-        <button onClick={() => handleInitiateDownload(cert)} className="p-2 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Download PDF"><Download className="h-4 w-4" /></button>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 sm:justify-end">
+        <button
+          onClick={() => handleOpenPreview(cert)}
+          className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+          title="Preview"
+        >
+          <Eye className="h-4 w-4" />
+        </button>
+
+        <button
+          onClick={() => handleInitiateDownload(cert)}
+          className="p-2 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+          title="Download PDF"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+
         {type === 'approve' && (
           <>
-            <button onClick={() => handleOpenRework(cert)} disabled={isSubmitting} className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-800 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-200 disabled:opacity-50"><RotateCcw className="h-4 w-4" /> Rework</button>
-            <button onClick={() => handleOpenApprove(cert)} disabled={isSubmitting} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />} Approve</button>
+            <button
+              onClick={() => handleOpenRework(cert)}
+              disabled={isSubmitting}
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 bg-amber-100 text-amber-800 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-200 disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Rework
+            </button>
+
+            <button
+              onClick={() => handleOpenApprove(cert)}
+              disabled={isSubmitting}
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm"
+            >
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4" />
+              )}
+              Approve
+            </button>
           </>
         )}
+
         {type === 'issue' && (
-          <button onClick={() => handleIssue(cert)} disabled={isSubmitting} className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 shadow-sm">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Issue</button>
+          <button
+            onClick={() => handleIssue(cert)}
+            disabled={isSubmitting}
+            className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            Issue
+          </button>
         )}
-        {type === 'issued' && <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-colors" />}
+
+        {type === 'issued' && (
+          <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-600 transition-colors" />
+        )}
       </div>
     </div>
   );
@@ -436,84 +523,130 @@ export const CertificateApprovalModule: React.FC = () => {
   // Pagination Controls
   const PaginationControls = () => (
     <div className="flex justify-center w-full sm:w-auto">
-        <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm">
-          <button disabled={currentPage === 1 || isFetchingData} onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={16} /> Prev</button>
-          <div className="px-4 py-1.5 text-sm font-bold text-gray-700 min-w-[100px] text-center">Page {currentPage} <span className="text-gray-400 font-medium">of {totalPages}</span></div>
-          <button disabled={currentPage >= totalPages || isFetchingData || totalCount === 0} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next <ChevronRight size={16} /></button>
+      <div className="flex items-center justify-center gap-1.5 sm:gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-sm">
+        <button
+          disabled={currentPage === 1 || isFetchingData}
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          <ChevronLeft size={16} /> Prev
+        </button>
+
+        <div className="px-2.5 sm:px-4 py-1.5 text-xs sm:text-sm font-bold text-gray-700 min-w-[88px] sm:min-w-[100px] text-center">
+          Page {currentPage} <span className="text-gray-400 font-medium">of {totalPages}</span>
         </div>
+
+        <button
+          disabled={currentPage >= totalPages || isFetchingData || totalCount === 0}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          Next <ChevronRight size={16} />
+        </button>
+      </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200">
+<div className="min-h-screen w-full min-w-0 bg-gray-50 py-4 px-3 sm:py-6 sm:px-6 lg:px-8">      <div className="w-full max-w-6xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 min-w-0 overflow-hidden">
         
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 p-8 border-b border-gray-200">
-          <div className="flex items-center gap-4">
-            <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 shadow-sm"><Award className="h-8 w-8 text-blue-600" /></div>
+<div className="flex flex-col gap-4 p-4 border-b border-gray-200 sm:flex-row sm:items-center sm:justify-between sm:p-6 md:p-8">          <div className="flex items-start gap-3 sm:items-center sm:gap-4 min-w-0">
+            <div className="flex-shrink-0 bg-blue-50 p-3 rounded-xl border border-blue-100 shadow-sm"><Award className="h-8 w-8 text-blue-600" /></div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Certificate Approval</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight break-words">Certificate Approval</h1>
               <p className="text-sm text-gray-500 mt-1">Approve, rework, or issue calibration certificates.</p>
             </div>
           </div>
-          <button type="button" onClick={handleBackToDashboard} className="flex-shrink-0 flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm">
+          <button type="button" onClick={handleBackToDashboard} className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center space-x-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-all shadow-sm">
             <ArrowLeft size={16} /><span>Back to Dashboard</span>
           </button>
         </div>
 
         {/* Tabs & Bulk Action */}
-        <div className="px-8 pt-6 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200">
-          <div className="flex flex-wrap gap-2">
+<div className="px-3 pt-3 flex flex-col items-stretch gap-3 border-b border-gray-200 sm:px-6 sm:pt-6 md:flex-row md:items-center md:justify-between">          <div className="flex flex-wrap gap-1 w-full md:w-auto">
             {([SECTION_KEYS.PENDING, SECTION_KEYS.READY, SECTION_KEYS.ISSUED] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => { setSelectedForBulkDownload(new Set()); setSelectedForApproval(new Set()); setActiveTab(tab); }}
-                className={`px-5 py-3 font-semibold text-sm rounded-t-lg border-b-2 transition-all duration-200 ${activeTab === tab ? `${SECTION_COLORS[tab]} bg-gray-50` : 'text-gray-500 border-transparent hover:text-blue-600 hover:bg-gray-50'}`}
+                className={`px-3 sm:px-5 py-3 font-semibold text-xs sm:text-sm rounded-t-lg border-b-2 transition-all duration-200 ${activeTab === tab ? `${SECTION_COLORS[tab]} bg-gray-50` : 'text-gray-500 border-transparent hover:text-blue-600 hover:bg-gray-50'}`}
               >
                 {SECTION_LABELS[tab]}
               </button>
             ))}
           </div>
           {isBulkDownloadTab && (
-            <button onClick={handleBulkDownloadClick} disabled={bulkDownloading || selectedForBulkDownload.size === 0} className="mb-2 flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap">
+            <button onClick={handleBulkDownloadClick} disabled={bulkDownloading || selectedForBulkDownload.size === 0} className="w-full md:w-auto mb-2 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm whitespace-nowrap">
               {bulkDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download selected ({selectedForBulkDownload.size}) as ZIP
             </button>
           )}
         </div>
 
         {/* Filters & Pagination Top */}
-        <div className="p-6 bg-gray-50/50 border-b border-gray-100 flex flex-col gap-4">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-bold text-gray-700 mb-1">Search</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search by certificate no, ULR, SRF, job ID..." className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm" />
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Start Date</label>
-                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-4 py-2.5 bg-white border border-gray-300 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">End Date</label>
-                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-4 py-2.5 bg-white border border-gray-300 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm" />
-              </div>
-            </div>
-            <div className="flex gap-2 items-center pb-1">
+<div className="p-4 sm:p-6 bg-gray-50/50 border-b border-gray-100 flex flex-col gap-4 min-w-0">
+  <div className="flex flex-col items-stretch gap-4 md:flex-row md:items-end">
+
+    {/* Search */}
+    <div className="w-full min-w-0 md:flex-1">
+      <label className="block text-sm font-bold text-gray-700 mb-1">
+        Search
+      </label>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search by certificate no, ULR, SRF, job ID..."
+          className="w-full min-w-0 pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm"
+        />
+      </div>
+    </div>
+
+    {/* Dates */}
+    <div className="w-full md:w-auto grid grid-cols-1 gap-3 sm:grid-cols-2 md:flex md:gap-3">
+
+      <div className="w-full min-w-0 md:w-auto">
+        <label className="block text-sm font-bold text-gray-700 mb-1">
+          Start Date
+        </label>
+
+        <input
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          className="w-full min-w-0 px-4 py-2.5 bg-white border border-gray-300 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm"
+        />
+      </div>
+
+      <div className="w-full min-w-0 md:w-auto">
+        <label className="block text-sm font-bold text-gray-700 mb-1">
+          End Date
+        </label>
+
+        <input
+          type="date"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="w-full min-w-0 px-4 py-2.5 bg-white border border-gray-300 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm"
+        />
+      </div>
+
+    </div>
+
+            <div className="flex w-full flex-wrap items-center gap-2 pb-1 md:w-auto min-w-0">
               {isBulkDownloadTab && totalCount > 0 && (
-                <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-3 py-2 rounded-lg shadow-sm">
-                  <input type="checkbox" checked={bulkCertIds.length > 0 && bulkCertIds.every((id) => selectedForBulkDownload.has(id))} onChange={toggleBulkSelectAll} className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
-                  <span className="text-sm font-bold text-gray-700">Select all visible</span>
+<label className="flex w-full items-center gap-2 cursor-pointer bg-white border border-gray-300 px-3 py-2 rounded-lg shadow-sm sm:w-auto min-w-0">                  <input type="checkbox" checked={bulkCertIds.length > 0 && bulkCertIds.every((id) => selectedForBulkDownload.has(id))} onChange={toggleBulkSelectAll} className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
+                  <span className="text-sm font-bold text-gray-700 break-words">Select all visible</span>
                 </label>
               )}
               {hasActiveFilters && <button onClick={resetFilters} className="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2 shadow-sm"><X className="h-4 w-4" /> Clear</button>}
             </div>
           </div>
           
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-2 border-t border-gray-200 mt-2">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 pt-2 border-t border-gray-200 mt-2">
             <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
               <span className="text-xs text-gray-500 font-bold uppercase tracking-wider hidden sm:inline">Records / Page:</span>
               <select value={limit} onChange={(e) => { setLimit(Number(e.target.value)); }} className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white cursor-pointer font-bold text-gray-700 shadow-sm outline-none">
@@ -528,8 +661,7 @@ export const CertificateApprovalModule: React.FC = () => {
         </div>
 
         {/* List Section */}
-        <div className="p-6 bg-white min-h-[400px]">
-          {error && <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">{error}</div>}
+<div className="p-3 sm:p-6 bg-white min-h-[400px] min-w-0">          {error && <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">{error}</div>}
 
           {isLoading || isFetchingData ? (
             <CertificateListSkeleton />
@@ -543,9 +675,9 @@ export const CertificateApprovalModule: React.FC = () => {
                 
                 return (
                   <div key={srfKey} className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="w-full flex items-center gap-3 p-4 bg-gray-50 border-b border-gray-200 hover:bg-gray-100 transition-colors">
+                    <div className="w-full min-w-0 flex flex-col gap-3 p-4 bg-gray-50 border-b border-gray-200 hover:bg-gray-100 transition-colors sm:flex-row sm:items-center">
                       {(isBulkDownloadTab || activeTab === SECTION_KEYS.PENDING) && (
-                        <div className="flex-shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex-shrink-0 ml-0 sm:ml-1" onClick={(e) => e.stopPropagation()}>
                           <label className="flex items-center cursor-pointer">
                             <input
                               type="checkbox"
@@ -556,11 +688,11 @@ export const CertificateApprovalModule: React.FC = () => {
                           </label>
                         </div>
                       )}
-                      <button type="button" onClick={() => toggleSrf(srfKey)} className="flex-1 flex items-center justify-between text-left min-w-0">
-                        <div className="flex items-center gap-3">
+                      <button type="button" onClick={() => toggleSrf(srfKey)} className="w-full sm:flex-1 flex items-center justify-between text-left min-w-0">
+                        <div className="flex items-center gap-3 min-w-0">
                           <div className="p-2 rounded-lg bg-indigo-100 text-indigo-600"><Package className="h-5 w-5" /></div>
-                          <div>
-                            <p className="font-bold text-lg text-gray-900">SRF No: {srfKey}</p>
+                          <div className="min-w-0">
+                            <p className="font-bold text-base sm:text-lg text-gray-900 break-words">SRF No: {srfKey}</p>
                             <p className="text-sm text-gray-500 font-medium">{certs.length} certificate{certs.length !== 1 ? 's' : ''}</p>
                           </div>
                         </div>
@@ -571,20 +703,20 @@ export const CertificateApprovalModule: React.FC = () => {
                           type="button"
                           onClick={(e) => { e.stopPropagation(); const sel = certs.filter((c) => selectedForApproval.has(c.certificate_id)); if (sel.length > 0) handleApproveSelectedForSrf(certs); else handleApproveAllForSrf(certs); }}
                           disabled={isSubmitting}
-                          className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm"
+                          className="w-full sm:w-auto flex-shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm"
                         >
                           {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                           {certs.some((c) => selectedForApproval.has(c.certificate_id)) ? `Approve selected (${certs.filter((c) => selectedForApproval.has(c.certificate_id)).length})` : 'Approve all'}
                         </button>
                       )}
                       {activeTab === SECTION_KEYS.READY && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); handleIssueAllForSrf(certs); }} disabled={isSubmitting} className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50 shadow-sm">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); handleIssueAllForSrf(certs); }} disabled={isSubmitting} className="w-full sm:w-auto flex-shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50 shadow-sm">
                           {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Issue all
                         </button>
                       )}
                     </div>
                     {isExpanded && (
-                      <div className="p-4 bg-gray-50/30 space-y-3">
+                      <div className="p-3 sm:p-4 bg-gray-50/30 space-y-3 min-w-0">
                         {certs.map((cert) => renderCertificateCard(cert, actionType, activeTab === SECTION_KEYS.PENDING ? { selected: selectedForApproval.has(cert.certificate_id), onToggle: () => toggleApprovalSelection(cert.certificate_id) } : isBulkDownloadTab ? { selected: selectedForBulkDownload.has(cert.certificate_id), onToggle: () => toggleBulkSelection(cert.certificate_id) } : undefined))}
                       </div>
                     )}
@@ -603,8 +735,8 @@ export const CertificateApprovalModule: React.FC = () => {
         
         {/* Pagination Bottom */}
         {totalCount > 0 && (
-          <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-b-2xl">
-             <span className="text-sm text-gray-600 font-medium">
+          <div className="px-4 sm:px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-b-2xl">
+             <span className="text-sm text-gray-600 font-medium text-center sm:text-left">
                Showing <span className="font-bold">{startRecord}</span> to <span className="font-bold">{endRecord}</span> of <span className="font-bold">{totalCount}</span> SRFs
              </span>
              <PaginationControls />
@@ -705,8 +837,7 @@ export const CertificateApprovalModule: React.FC = () => {
               </div>
               <Printer className="h-5 w-5 text-gray-400" />
             </label>
-            <div className="flex gap-3">
-              <button onClick={() => { setShowDownloadModal(false); setDownloadCertData(null); }} className="flex-1 py-2.5 text-gray-700 font-bold bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+<div className="flex w-full flex-col gap-3 sm:flex-row">              <button onClick={() => { setShowDownloadModal(false); setDownloadCertData(null); }} className="flex-1 py-2.5 text-gray-700 font-bold bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
               <button onClick={handleConfirmDownload} className="flex-1 py-2.5 text-white font-bold bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center justify-center gap-2">
                 <Download className="h-4 w-4" /> Download
               </button>

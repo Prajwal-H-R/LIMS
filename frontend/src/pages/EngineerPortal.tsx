@@ -879,15 +879,13 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
         <Header username={username} role="Engineer" onLogout={onLogout} profilePath="/engineer/profile" notificationsPath="/engineer/notifications" />
       </div>
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 min-w-0 overflow-hidden relative">
         <div className="flex-none h-full bg-white border-r border-gray-200 z-40">
           <Sidebar isOpen={isSidebarOpen} setIsOpen={setSidebarOpen} activeSection={activeSection} onNavigate={handleNavigateWithLicense} notificationCount={unreadCount} onLogout={onLogout} />
         </div>
-
-        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 via-white to-blue-50 relative z-0">
+<main className="flex-1 min-w-0 overflow-y-auto bg-gradient-to-br from-gray-50 via-white to-blue-50 relative z-0">
           <div className="flex flex-col min-h-full">
-            <div className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
-              <Routes>
+            <div className="flex-1 min-w-0 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full">              <Routes>
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="notifications" element={<EngineerNotificationsPage notifications={profileUpdateNotifications} loading={profileUpdateLoading} error={profileUpdateError} />} />
                 <Route path="settings" element={<SettingsPage />} />
