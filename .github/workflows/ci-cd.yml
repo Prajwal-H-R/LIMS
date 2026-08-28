@@ -175,20 +175,20 @@ jobs:
         run: |
           docker tag \
             yatharthatalims-backend:latest \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:v1.0.1
 
       - name: Tag frontend image for GHCR
         run: |
           docker tag \
             yatharthatalims-frontend:latest \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:v1.0.1
 
       - name: Push backend image to GHCR
         run: |
           docker push \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:latest
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:v1.0.1
 
       - name: Push frontend image to GHCR
         run: |
           docker push \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:latest
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:v1.0.1
