@@ -124,12 +124,19 @@ export const ENDPOINTS = {
     INWARD_DETAILS:              (id: number) => `/staff/inwards/${id}`,
   },
   // ── Final Inspection ───────────────────────────────────────────── //
+// ── Final Inspection ───────────────────────────────────────────── //
 FINAL_INSPECTIONS: {
   GET_DETAILS: (id: number) =>
     `/final-inspections/inward/${id}/details`,
 
   SEND_REPORT: (id: number) =>
     `/final-inspections/inward/${id}/send-report`,
+
+  CUSTOMER_VIEW: (id: number) =>
+    `/final-inspections/inward/${id}/customer-view`,
+
+  SUBMIT_DECISION: (id: number) =>
+    `/final-inspections/inward/${id}/submit-decision`,
 },
   // ── Customer Portal ─────────────────────────────────────────────── //
   PORTAL: {

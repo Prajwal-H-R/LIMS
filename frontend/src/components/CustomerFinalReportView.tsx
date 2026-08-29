@@ -44,10 +44,16 @@ export const CustomerFinalReportView: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      await api.post(`/final-inspections/inward/${inwardId}/submit-decision`, {
-        decision: decision,
-        remarks: decision === "REJECTED" ? rejectionRemarks : "Approved by customer"
-      });
+      await api.post(
+  ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(Number(inwardId)),
+  {
+    decision,
+    remarks:
+      decision === "REJECTED"
+        ? rejectionRemarks
+        : "Approved by customer",
+  }
+);
 
       toast.success(`Report ${decision.toLowerCase()} successfully!`);
       setShowRejectModal(false);
