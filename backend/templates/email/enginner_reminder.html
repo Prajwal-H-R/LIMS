@@ -1,83 +1,813 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+
+    <title>{{ title }}</title>
+
     <style>
+        html,
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            background-color: #f3f5ff !important;
         }
-        .container {
-            max-width: 600px;
-            margin: 20px auto;
-            padding: 20px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            background-color: #fef9f3; /* Lighter background */
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            color: #334155;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
         }
-        .header {
-            font-size: 24px;
-            font-weight: 600;
-            color: #d9534f; /* A more urgent red */
-            margin-bottom: 20px;
-            border-bottom: 2px solid #d9534f;
-            padding-bottom: 10px;
+
+        table {
+            border-collapse: collapse;
+            border-spacing: 0;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
         }
-        .warning {
-            background-color: #f2dede;
-            border-left: 4px solid #d9534f;
-            padding: 12px;
-            margin: 20px 0;
+
+        td {
+            font-family: Arial, Helvetica, sans-serif;
         }
-        .button {
-            display: inline-block;
-            padding: 12px 25px;
-            margin: 20px 0;
-            font-size: 16px;
-            font-weight: 500;
-            color: #ffffff;
-            background-color: #d9534f;
+
+        a {
             text-decoration: none;
-            border-radius: 5px;
         }
-        .footer {
-            font-size: 12px;
-            color: #777;
-            margin-top: 20px;
+
+        .email-wrapper {
+            width: 100%;
+            background-color: #f3f5ff;
+        }
+
+        .email-container {
+            width: 100%;
+            max-width: 640px;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 28px rgba(76, 81, 150, 0.10);
+        }
+
+        .content-bg {
+            background-color: #ffffff !important;
+        }
+
+        .light-card {
+            background-color: #f8faff !important;
+        }
+
+        .danger-card {
+            background-color: #fff7f7 !important;
+        }
+
+        .feature-card {
+            background-color: #ffffff !important;
+        }
+
+        .support-card {
+            background-color: #f4f0ff !important;
+        }
+
+        .footer-bg {
+            background-color: #fafaff !important;
+        }
+
+        .primary-text {
+            color: #0f172a !important;
+        }
+
+        .body-text {
+            color: #475569 !important;
+        }
+
+        .purple-text {
+            color: #5b21b6 !important;
+        }
+
+        .feature-text {
+            color: #4338ca !important;
+        }
+
+        .danger-text {
+            color: #7f1d1d !important;
+        }
+
+        .danger-heading {
+            color: #991b1b !important;
+        }
+
+        .support-text {
+            color: #5b4b83 !important;
+        }
+
+        .footer-text {
+            color: #64748b !important;
+        }
+
+        .footer-muted {
+            color: #94a3b8 !important;
+        }
+
+        .primary-button {
+            display: inline-block;
+            background-color: #7c3aed;
+            color: #ffffff !important;
+            font-size: 15px;
+            line-height: 20px;
+            font-weight: 700;
+            padding: 14px 28px;
+            border-radius: 9px;
+        }
+
+        @media screen and (max-width: 600px) {
+            .email-container {
+                width: 100% !important;
+                border-radius: 0 !important;
+            }
+
+            .mobile-padding {
+                padding-left: 20px !important;
+                padding-right: 20px !important;
+            }
+
+            .header-title {
+                font-size: 26px !important;
+            }
+
+            .primary-button {
+                display: block !important;
+                text-align: center !important;
+            }
+        }
+
+        /* Dark-mode protection */
+        @media (prefers-color-scheme: dark) {
+            html,
+            body,
+            .email-wrapper {
+                background-color: #f3f5ff !important;
+                color: #334155 !important;
+            }
+
+            .email-container,
+            .content-bg,
+            .feature-card {
+                background-color: #ffffff !important;
+            }
+
+            .light-card {
+                background-color: #f8faff !important;
+            }
+
+            .danger-card {
+                background-color: #fff7f7 !important;
+            }
+
+            .support-card {
+                background-color: #f4f0ff !important;
+            }
+
+            .footer-bg {
+                background-color: #fafaff !important;
+            }
+
+            .primary-text {
+                color: #0f172a !important;
+            }
+
+            .body-text {
+                color: #475569 !important;
+            }
+
+            .purple-text {
+                color: #5b21b6 !important;
+            }
+
+            .feature-text {
+                color: #4338ca !important;
+            }
+
+            .danger-text {
+                color: #7f1d1d !important;
+            }
+
+            .danger-heading {
+                color: #991b1b !important;
+            }
+
+            .support-text {
+                color: #5b4b83 !important;
+            }
+
+            .footer-text {
+                color: #64748b !important;
+            }
+
+            .footer-muted {
+                color: #94a3b8 !important;
+            }
+        }
+
+        /* Outlook.com dark-mode protection */
+        [data-ogsc] .email-container,
+        [data-ogsc] .content-bg,
+        [data-ogsc] .feature-card {
+            background-color: #ffffff !important;
+        }
+
+        [data-ogsc] .light-card {
+            background-color: #f8faff !important;
+        }
+
+        [data-ogsc] .danger-card {
+            background-color: #fff7f7 !important;
+        }
+
+        [data-ogsc] .support-card {
+            background-color: #f4f0ff !important;
+        }
+
+        [data-ogsc] .footer-bg {
+            background-color: #fafaff !important;
+        }
+
+        [data-ogsc] .primary-text {
+            color: #0f172a !important;
+        }
+
+        [data-ogsc] .body-text {
+            color: #475569 !important;
+        }
+
+        [data-ogsc] .purple-text {
+            color: #5b21b6 !important;
+        }
+
+        [data-ogsc] .feature-text {
+            color: #4338ca !important;
+        }
+
+        [data-ogsc] .danger-text {
+            color: #7f1d1d !important;
+        }
+
+        [data-ogsc] .danger-heading {
+            color: #991b1b !important;
+        }
+
+        [data-ogsc] .support-text {
+            color: #5b4b83 !important;
+        }
+
+        [data-ogsc] .footer-text {
+            color: #64748b !important;
+        }
+
+        [data-ogsc] .footer-muted {
+            color: #94a3b8 !important;
         }
     </style>
 </head>
+
 <body>
-    <div class="container">
-        <h1 class="header">{{ title }}</h1>
-        <p>Dear {{ engineer_name }},</p>
-        
-        <div class="warning">
-            <strong>⚠️ URGENT ATTENTION REQUIRED</strong>
-            <p>You have <strong>{{ pending_count }}</strong> unsent first inspection report(s) that are now overdue.</p>
-        </div>
-        
-        <!-- This message is now supplied by the Python code -->
-        <p>{{ message }}</p>
-        
-        <p>Please log in to your engineer portal immediately to send these reports to the customers:</p>
-        <a href="{{ portal_link }}" class="button">Access Engineer Portal</a>
-        
-        <p><strong>Why this is important:</strong></p>
-        <ul>
-            <li>Customers are waiting for their inspection reports.</li>
-            <li>Delays affect our service quality and customer satisfaction.</li>
-            <li>Timely communication is essential for maintaining trust.</li>
-        </ul>
-        
-        <p>If you need assistance, please contact your supervisor immediately.</p>
-        
-        <p>Best regards,</p>
-        <p><strong>LIMS System</strong></p>
-        
-        <div class="footer">
-            <p>This is an automated reminder. Please do not reply to this email.</p>
-        </div>
-    </div>
+
+<table
+    role="presentation"
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    class="email-wrapper"
+>
+    <tr>
+        <td align="center" style="padding: 28px 12px;">
+
+            <!-- MAIN EMAIL CONTAINER -->
+            <table
+                role="presentation"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                class="email-container"
+            >
+
+                <!-- HEADER -->
+                <tr>
+                    <td align="center">
+
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                        >
+                            <tr>
+                                <td
+                                    align="center"
+                                    style="
+                                        padding:32px 24px 28px;
+                                        background-color:#6d3df5;
+                                        background-image:linear-gradient(
+                                            100deg,
+                                            #4f46e5 0%,
+                                            #7c3aed 50%,
+                                            #c084fc 100%
+                                        );
+                                    "
+                                >
+                                    <div
+                                        class="header-title"
+                                        style="
+                                            font-size:30px;
+                                            line-height:38px;
+                                            font-weight:800;
+                                            color:#ffffff;
+                                            letter-spacing:-0.5px;
+                                        "
+                                    >
+                                        Yatharthata <span>LIMS</span>
+                                    </div>
+
+                                    <div
+                                        style="
+                                            margin-top:6px;
+                                            font-size:13px;
+                                            line-height:20px;
+                                            color:#f3e8ff;
+                                        "
+                                    >
+                                        Laboratory Information Management System
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+
+                    </td>
+                </tr>
+
+                <!-- CONTENT -->
+                <tr>
+                    <td
+                        class="mobile-padding content-bg"
+                        style="
+                            padding-top:38px;
+                            padding-bottom:38px;
+                            background-color:#ffffff;
+                        "
+                    >
+
+                        <!-- TITLE -->
+                        <div
+                            class="purple-text"
+                            style="
+                                font-size:22px;
+                                line-height:30px;
+                                font-weight:700;
+                                color:#5b21b6;
+                            "
+                        >
+                            {{ title }}
+                        </div>
+
+                        <!-- GREETING -->
+                        <p
+                            class="body-text"
+                            style="
+                                margin:20px 0 0;
+                                font-size:14px;
+                                line-height:22px;
+                                color:#475569;
+                            "
+                        >
+                            Dear {{ engineer_name }},
+                        </p>
+
+                        <!-- URGENT NOTICE -->
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="margin-top:20px;"
+                        >
+                            <tr>
+                                <td
+                                    class="danger-card"
+                                    style="
+                                        padding:18px 20px;
+                                        background-color:#fff7f7;
+                                        border:1px solid #fecaca;
+                                        border-left:4px solid #dc2626;
+                                        border-radius:9px;
+                                    "
+                                >
+
+                                    <div
+                                        class="danger-heading"
+                                        style="
+                                            font-size:15px;
+                                            line-height:22px;
+                                            font-weight:700;
+                                            color:#991b1b;
+                                            letter-spacing:0.1px;
+                                        "
+                                    >
+                                        URGENT ATTENTION REQUIRED
+                                    </div>
+
+                                    <div
+                                        class="danger-text"
+                                        style="
+                                            margin-top:7px;
+                                            font-size:14px;
+                                            line-height:22px;
+                                            color:#7f1d1d;
+                                        "
+                                    >
+                                        You have
+                                        <strong>{{ pending_count }}</strong>
+                                        unsent first inspection report(s) that are now overdue.
+                                    </div>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        <!-- MESSAGE SUPPLIED BY PYTHON -->
+                        <p
+                            class="body-text"
+                            style="
+                                margin:20px 0 0;
+                                font-size:14px;
+                                line-height:22px;
+                                color:#475569;
+                            "
+                        >
+                            {{ message }}
+                        </p>
+
+                        <!-- PORTAL INSTRUCTION -->
+                        <p
+                            class="body-text"
+                            style="
+                                margin:18px 0 0;
+                                font-size:14px;
+                                line-height:22px;
+                                color:#475569;
+                            "
+                        >
+                            Please log in to your engineer portal immediately
+                            to send these reports to the customers:
+                        </p>
+
+                        <!-- PRIMARY CTA -->
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="margin-top:24px;"
+                        >
+                            <tr>
+                                <td align="center">
+
+                                    <table
+                                        role="presentation"
+                                        cellpadding="0"
+                                        cellspacing="0"
+                                        border="0"
+                                    >
+                                        <tr>
+                                            <td
+                                                align="center"
+                                                bgcolor="#7c3aed"
+                                                style="
+                                                    background-color:#7c3aed;
+                                                    border-radius:9px;
+                                                "
+                                            >
+                                                <a
+                                                    href="{{ portal_link }}"
+                                                    target="_blank"
+                                                    class="primary-button"
+                                                    style="
+                                                        display:inline-block;
+                                                        background-color:#7c3aed;
+                                                        color:#ffffff !important;
+                                                        font-size:15px;
+                                                        line-height:20px;
+                                                        font-weight:700;
+                                                        padding:14px 28px;
+                                                        border-radius:9px;
+                                                    "
+                                                >
+                                                    Access Engineer Portal
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </table>
+
+                                </td>
+                            </tr>
+                        </table>
+
+                        <!-- WHY THIS IS IMPORTANT -->
+                        <div
+                            class="primary-text"
+                            style="
+                                margin-top:34px;
+                                font-size:18px;
+                                line-height:24px;
+                                font-weight:700;
+                                color:#0f172a;
+                            "
+                        >
+                            Why this is important:
+                        </div>
+
+                        <!-- IMPORTANT REASONS -->
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="
+                                margin-top:15px;
+                                border:1px solid #e2e8f0;
+                                border-radius:11px;
+                                overflow:hidden;
+                            "
+                        >
+
+                            <tr>
+                                <td
+                                    class="feature-card"
+                                    style="
+                                        padding:17px 18px;
+                                        background-color:#ffffff;
+                                        border-left:4px solid #6366f1;
+                                        border-bottom:1px solid #e2e8f0;
+                                    "
+                                >
+                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                        <tr>
+                                            <td width="30" valign="top">
+                                                <span
+                                                    style="
+                                                        display:inline-block;
+                                                        width:20px;
+                                                        height:20px;
+                                                        line-height:20px;
+                                                        text-align:center;
+                                                        border-radius:6px;
+                                                        background-color:#eef2ff;
+                                                        color:#6366f1;
+                                                        font-size:10px;
+                                                        font-weight:700;
+                                                    "
+                                                >
+                                                    01
+                                                </span>
+                                            </td>
+                                            <td valign="top">
+                                                <div
+                                                    class="body-text"
+                                                    style="
+                                                        font-size:14px;
+                                                        line-height:22px;
+                                                        color:#475569;
+                                                    "
+                                                >
+                                                    Customers are waiting for their inspection reports.
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td
+                                    class="feature-card"
+                                    style="
+                                        padding:17px 18px;
+                                        background-color:#ffffff;
+                                        border-left:4px solid #6366f1;
+                                        border-bottom:1px solid #e2e8f0;
+                                    "
+                                >
+                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                        <tr>
+                                            <td width="30" valign="top">
+                                                <span
+                                                    style="
+                                                        display:inline-block;
+                                                        width:20px;
+                                                        height:20px;
+                                                        line-height:20px;
+                                                        text-align:center;
+                                                        border-radius:6px;
+                                                        background-color:#eef2ff;
+                                                        color:#6366f1;
+                                                        font-size:10px;
+                                                        font-weight:700;
+                                                    "
+                                                >
+                                                    02
+                                                </span>
+                                            </td>
+                                            <td valign="top">
+                                                <div
+                                                    class="body-text"
+                                                    style="
+                                                        font-size:14px;
+                                                        line-height:22px;
+                                                        color:#475569;
+                                                    "
+                                                >
+                                                    Delays affect our service quality and customer satisfaction.
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+
+                            <tr>
+                                <td
+                                    class="feature-card"
+                                    style="
+                                        padding:17px 18px;
+                                        background-color:#ffffff;
+                                        border-left:4px solid #6366f1;
+                                    "
+                                >
+                                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                        <tr>
+                                            <td width="30" valign="top">
+                                                <span
+                                                    style="
+                                                        display:inline-block;
+                                                        width:20px;
+                                                        height:20px;
+                                                        line-height:20px;
+                                                        text-align:center;
+                                                        border-radius:6px;
+                                                        background-color:#eef2ff;
+                                                        color:#6366f1;
+                                                        font-size:10px;
+                                                        font-weight:700;
+                                                    "
+                                                >
+                                                    03
+                                                </span>
+                                            </td>
+                                            <td valign="top">
+                                                <div
+                                                    class="body-text"
+                                                    style="
+                                                        font-size:14px;
+                                                        line-height:22px;
+                                                        color:#475569;
+                                                    "
+                                                >
+                                                    Timely communication is essential for maintaining trust.
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+
+                        </table>
+
+                        <!-- ASSISTANCE -->
+                        <table
+                            role="presentation"
+                            width="100%"
+                            cellpadding="0"
+                            cellspacing="0"
+                            border="0"
+                            style="margin-top:24px;"
+                        >
+                            <tr>
+                                <td
+                                    class="support-card"
+                                    style="
+                                        padding:18px 20px;
+                                        background-color:#f4f0ff;
+                                        border:1px solid #ddd6fe;
+                                        border-left:4px solid #7c3aed;
+                                        border-radius:9px;
+                                    "
+                                >
+                                    <div
+                                        class="support-text"
+                                        style="
+                                            font-size:14px;
+                                            line-height:22px;
+                                            color:#5b4b83;
+                                        "
+                                    >
+                                        If you need assistance, please contact your supervisor immediately.
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <!-- SIGN-OFF -->
+                        <p
+                            class="body-text"
+                            style="
+                                margin:26px 0 0;
+                                font-size:14px;
+                                line-height:22px;
+                                color:#475569;
+                            "
+                        >
+                            Best regards,
+                        </p>
+
+                        <p
+                            class="primary-text"
+                            style="
+                                margin:4px 0 0;
+                                font-size:14px;
+                                line-height:22px;
+                                color:#0f172a;
+                                font-weight:700;
+                            "
+                        >
+                            LIMS System
+                        </p>
+
+                    </td>
+                </tr>
+
+                <!-- FOOTER -->
+                <tr>
+                    <td
+                        align="center"
+                        class="footer-bg"
+                        style="
+                            padding:24px 25px;
+                            background-color:#fafaff;
+                            border-top:1px solid #e9e7f5;
+                        "
+                    >
+                        <div
+                            class="footer-text"
+                            style="
+                                font-size:12px;
+                                line-height:20px;
+                                color:#64748b;
+                            "
+                        >
+                            This is an automated reminder. Please do not reply to this email.
+                        </div>
+
+                        <div
+                            class="footer-muted"
+                            style="
+                                margin-top:8px;
+                                font-size:12px;
+                                line-height:20px;
+                                color:#94a3b8;
+                            "
+                        >
+                            © 2026
+                            <a
+                                href="https://nextelengg.com/"
+                                target="_blank"
+                                style="
+                                    color:#7c3aed;
+                                    text-decoration:none;
+                                    font-weight:600;
+                                "
+                            >
+                                NEXTAGE ENGINEERING Pvt. Ltd.
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+
+            </table>
+
+        </td>
+    </tr>
+</table>
+
 </body>
 </html>

@@ -51,6 +51,7 @@ from backend.routes.htw.htw_max_val_measure_err_router import router as htw_max_
 
 from backend.routes.htw.htw_uncertanity_budget_router import router as htw_uncertanity_budget_router
 from backend.routes.certificate.certificate_router import router as htw_certificate_router
+from backend.routes.certificate.certificate_config import router as certificate_config
 from backend.license.license_routes import router as license_router
 from backend.routes.htw.htw_environment_config import router as config_router
 from backend.routes.htw.expiry_routes import router as expiry_router
@@ -225,6 +226,8 @@ app.include_router(scan_router, prefix="/api")
 
 app.include_router(calibration_booking_router, prefix="/api")
 app.include_router(change_password_router, prefix="/api")
+
+app.include_router(certificate_config, prefix="/api")
 # --- ROOT ENDPOINT ---
 @app.get("/")
 def root():

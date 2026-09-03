@@ -50,4 +50,5 @@ from .external_deviation import ExternalDeviation
 from .external_deviation_attachments import ExternalDeviationAttachment
 from .final_inspection import FinalInspection
 from .calibration_booking import CalibrationBooking
+from .certificate.certificate_config import CertificateDetails
 from backend.db import Base

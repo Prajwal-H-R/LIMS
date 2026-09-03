@@ -15,7 +15,7 @@ import { MasterStandardModule }    from '../components/AdminComponents/MasterSta
 import { CertificateApprovalModule } from '../components/AdminComponents/CertificateApprovalModule';
 import { LabScopeModule }          from '../components/AdminComponents/LabScopeModule';
 import { HTWEnvironmentManager }   from '../components/AdminComponents/HTWEnvironmentManager';
- 
+import { CertificateDetailsManager } from '../components/AdminComponents/CertificateDetailsManager';
  
 import {
   AdminNotificationsPanel,
@@ -800,16 +800,12 @@ const latestPopupCompany =
                 </div>
               )}
               {activeSection === 'settings' && (
-                <div className="flex flex-col items-center justify-center h-[50vh] text-gray-400 animate-fadeIn">
-                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
-                    <Settings size={40} className="text-gray-400" />
-                  </div>
-                  <h2 className="text-2xl font-semibold text-gray-300">
-                    Settings Configuration
-                  </h2>
-                  <p className="text-gray-500 mt-2">Coming soon.</p>
-                </div>
-              )}
+  <div className="animate-slideUp">
+    <CertificateDetailsManager
+      onBack={() => handleNavigate('dashboard')}
+    />
+  </div>
+)}
             </div>
  
             <footer className="w-full bg-white border-t border-gray-200 mt-auto">

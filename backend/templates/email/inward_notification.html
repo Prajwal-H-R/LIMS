@@ -3,78 +3,480 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
     <title>{{ title }}</title>
     <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4; }
-        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: rgb(53, 3, 160);; padding: 30px; text-align: center; }
-        .content { padding: 30px; }
-        .highlight { background-color: #f8f9fa; border-left: 4px solid #007bff; padding: 15px; margin: 20px 0; border-radius: 4px; }
-        .button { display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 10px 5px; transition: background-color 0.3s; }
-        .button:hover { background-color: #0056b3; }
-        .button.secondary { background-color: #6c757d; }
-        .button.secondary:hover { background-color: #545b62; }
-        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; color: #6c757d; font-size: 14px; border-top: 1px solid #dee2e6; }
-        .alert { background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px; margin: 20px 0; color: #856404; }
-        .alert-icon { font-size: 20px; margin-right: 8px; }
-        .steps { background-color: #e7f3ff; border-radius: 8px; padding: 20px; margin: 20px 0; }
-        .steps h3 { margin-top: 0; color: #0066cc; }
-        .steps ol { margin: 0; padding-left: 20px; }
-        .steps li { margin: 8px 0; }
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            min-width: 100%;
+            background-color: #f3f5ff;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #475569;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+
+        table {
+            border-collapse: collapse;
+            border-spacing: 0;
+        }
+
+        img {
+            border: 0;
+            outline: none;
+            text-decoration: none;
+            -ms-interpolation-mode: bicubic;
+        }
+
+        a {
+            text-decoration: none;
+        }
+
+        .email-wrapper {
+            width: 100%;
+            background-color: #f3f5ff;
+            padding: 32px 16px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(79, 70, 229, 0.10);
+        }
+
+        .header {
+            background-color: #6d3df5;
+            background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #c084fc 100%);
+            color: #ffffff;
+            padding: 34px 28px 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 26px;
+            line-height: 1.25;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+            color: #ffffff;
+        }
+
+        .header p {
+            margin: 10px 0 0;
+            color: #f5f3ff;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .content {
+            padding: 32px;
+            background-color: #ffffff;
+        }
+
+        .content p {
+            margin: 0 0 16px;
+            font-size: 15px;
+            color: #475569;
+        }
+
+        .content strong {
+            color: #0f172a;
+        }
+
+        .alert,
+        .highlight,
+        .steps {
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin: 20px 0;
+        }
+
+        .alert {
+            background-color: #fff9ed;
+            border: 1px solid #fde7b1;
+            color: #78350f;
+        }
+
+        .alert strong {
+            color: #92400e;
+        }
+
+        .highlight {
+            background-color: #f8faff;
+            border: 1px solid #e7eafe;
+            border-left: 4px solid #7c3aed;
+        }
+
+        .highlight p:last-child,
+        .alert p:last-child {
+            margin-bottom: 0;
+        }
+
+        .steps {
+            background-color: #f4f0ff;
+            border: 1px solid #e9ddff;
+        }
+
+        .steps h3 {
+            margin: 0 0 12px;
+            color: #5b21b6;
+            font-size: 16px;
+            line-height: 1.4;
+        }
+
+        .steps ol {
+            margin: 0;
+            padding-left: 22px;
+            color: #475569;
+        }
+
+        .steps li {
+            margin: 8px 0;
+            padding-left: 4px;
+            font-size: 14px;
+        }
+
+        .button-row {
+            text-align: center;
+            margin: 28px 0;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 13px 22px;
+            margin: 6px 4px;
+            background-color: #7c3aed;
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 9px;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1.3;
+            border: 1px solid #7c3aed;
+        }
+
+        .button.secondary {
+            background-color: #eef2ff;
+            color: #4338ca !important;
+            border-color: #e0e7ff;
+        }
+
+        .help-title {
+            color: #0f172a !important;
+            font-size: 15px;
+        }
+
+        .footer {
+            background-color: #fafaff;
+            padding: 24px 28px;
+            text-align: center;
+            color: #64748b;
+            font-size: 13px;
+            border-top: 1px solid #eef0f8;
+        }
+
+        .footer p {
+            margin: 0 0 8px;
+            color: #64748b;
+            line-height: 1.5;
+        }
+
+        .footer p:last-child {
+            margin-bottom: 0;
+            color: #94a3b8;
+        }
+
+        .footer a {
+            color: #5b21b6 !important;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        @media only screen and (max-width: 640px) {
+            .email-wrapper {
+                padding: 16px 10px;
+            }
+
+            .container {
+                border-radius: 12px;
+            }
+
+            .header {
+                padding: 28px 20px 24px;
+            }
+
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .content {
+                padding: 24px 20px;
+            }
+
+            .footer {
+                padding: 20px;
+            }
+
+            .button {
+                display: block;
+                margin: 8px 0;
+                text-align: center;
+            }
+        }
+
+        /* Dark-mode protection: keep the email in the intended light theme. */
+        @media (prefers-color-scheme: dark) {
+            html,
+            body,
+            .email-wrapper {
+                background-color: #f3f5ff !important;
+            }
+
+            .container,
+            .content {
+                background-color: #ffffff !important;
+            }
+
+            .header {
+                background-color: #6d3df5 !important;
+                background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #c084fc 100%) !important;
+                color: #ffffff !important;
+            }
+
+            .header h1,
+            .header p {
+                color: #ffffff !important;
+            }
+
+            .content,
+            .content p,
+            .steps ol,
+            .steps li {
+                color: #475569 !important;
+            }
+
+            .content strong,
+            .help-title {
+                color: #0f172a !important;
+            }
+
+            .alert {
+                background-color: #fff9ed !important;
+                border-color: #fde7b1 !important;
+                color: #78350f !important;
+            }
+
+            .alert strong {
+                color: #92400e !important;
+            }
+
+            .highlight {
+                background-color: #f8faff !important;
+                border-color: #e7eafe !important;
+                border-left-color: #7c3aed !important;
+            }
+
+            .steps {
+                background-color: #f4f0ff !important;
+                border-color: #e9ddff !important;
+            }
+
+            .steps h3 {
+                color: #5b21b6 !important;
+            }
+
+            .button {
+                background-color: #7c3aed !important;
+                color: #ffffff !important;
+                border-color: #7c3aed !important;
+            }
+
+            .button.secondary {
+                background-color: #eef2ff !important;
+                color: #4338ca !important;
+                border-color: #e0e7ff !important;
+            }
+
+            .footer {
+                background-color: #fafaff !important;
+                border-top-color: #eef0f8 !important;
+                color: #64748b !important;
+            }
+
+            .footer p {
+                color: #64748b !important;
+            }
+
+            .footer p:last-child {
+                color: #94a3b8 !important;
+            }
+
+            .footer a {
+                color: #5b21b6 !important;
+            }
+        }
+
+        /* Outlook.com dark-mode protection. */
+        [data-ogsc] html,
+        [data-ogsc] body,
+        [data-ogsc] .email-wrapper {
+            background-color: #f3f5ff !important;
+        }
+
+        [data-ogsc] .container,
+        [data-ogsc] .content {
+            background-color: #ffffff !important;
+        }
+
+        [data-ogsc] .header {
+            background-color: #6d3df5 !important;
+            color: #ffffff !important;
+        }
+
+        [data-ogsc] .header h1,
+        [data-ogsc] .header p {
+            color: #ffffff !important;
+        }
+
+        [data-ogsc] .content,
+        [data-ogsc] .content p,
+        [data-ogsc] .steps ol,
+        [data-ogsc] .steps li {
+            color: #475569 !important;
+        }
+
+        [data-ogsc] .content strong,
+        [data-ogsc] .help-title {
+            color: #0f172a !important;
+        }
+
+        [data-ogsc] .alert {
+            background-color: #fff9ed !important;
+            border-color: #fde7b1 !important;
+            color: #78350f !important;
+        }
+
+        [data-ogsc] .alert strong {
+            color: #92400e !important;
+        }
+
+        [data-ogsc] .highlight {
+            background-color: #f8faff !important;
+            border-color: #e7eafe !important;
+            border-left-color: #7c3aed !important;
+        }
+
+        [data-ogsc] .steps {
+            background-color: #f4f0ff !important;
+            border-color: #e9ddff !important;
+        }
+
+        [data-ogsc] .steps h3 {
+            color: #5b21b6 !important;
+        }
+
+        [data-ogsc] .button {
+            background-color: #7c3aed !important;
+            color: #ffffff !important;
+            border-color: #7c3aed !important;
+        }
+
+        [data-ogsc] .button.secondary {
+            background-color: #eef2ff !important;
+            color: #4338ca !important;
+            border-color: #e0e7ff !important;
+        }
+
+        [data-ogsc] .footer {
+            background-color: #fafaff !important;
+            border-top-color: #eef0f8 !important;
+            color: #64748b !important;
+        }
+
+        [data-ogsc] .footer p {
+            color: #64748b !important;
+        }
+
+        [data-ogsc] .footer p:last-child {
+            color: #94a3b8 !important;
+        }
+
+        [data-ogsc] .footer a {
+            color: #5b21b6 !important;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔬 {{ title }}</h1>
-            <p>First Inspection Report Ready</p>
-        </div>
-        
-        <div class="content">
-            <p>Dear Valued Customer,</p>
-            
-            <p>Your equipment has completed the first inspection process for <strong>SRF No: {{ srf_no }}</strong>.</p>
-            
-            <div class="alert">
-                <span class="alert-icon">⚠️</span>
-                <strong>Action Required:</strong> Some equipment items require your attention and feedback.
-            </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="email-wrapper">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="container">
+                    <tr>
+                        <td class="header">
+                            <h1>{{ title }}</h1>
+                            <p>First Inspection Report Ready</p>
+                        </td>
+                    </tr>
 
-            <div class="highlight">
-                <p><strong>Equipment Status Summary:</strong></p>
-                <p>Our engineers have identified certain deviations during the first inspection that require your review and decision.</p>
-            </div>
+                    <tr>
+                        <td class="content">
+                            <p>Dear Valued Customer,</p>
 
-            <div class="steps">
-                <h3>📋 What you need to do:</h3>
-                <ol>
-                    <li>Click the button below to access your First Inspection Report (FIR)</li>
-                    <li>Review each equipment item and its inspection notes</li>
-                    <li>Provide your remarks and decisions for items with deviations</li>
-                    <li>Submit your feedback to proceed with calibration</li>
-                </ol>
-            </div>
+                            <p>Your equipment has completed the first inspection process for <strong>SRF No: {{ srf_no }}</strong>.</p>
 
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{{ direct_link }}" class="button">
-                    🔗 View First Inspection Report
-                </a>
-                <a href="{{ login_link }}" class="button secondary">
-                    🏠 Go to Customer Portal
-                </a>
-            </div>
+                            <div class="alert">
+                                <strong>Action Required:</strong> Some equipment items require your attention and feedback.
+                            </div>
 
-            <div class="highlight">
-                <p><strong>📞 Need Help?</strong></p>
-                <p>If you have any questions or need assistance, please contact our engineering team.</p>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p>This is an automated notification from our Laboratory Information Management System.</p>
-            <p>Please do not reply to this email. If you need assistance, contact our support team.</p>
-            <p><small>© 2026 NEXTAGE ENGINEERING Pvt. Ltd.</small></p>
-        </div>
-    </div>
+                            <div class="highlight">
+                                <p><strong>Equipment Status Summary:</strong></p>
+                                <p>Our engineers have identified certain deviations during the first inspection that require your review and decision.</p>
+                            </div>
+
+                            <div class="steps">
+                                <h3>What you need to do:</h3>
+                                <ol>
+                                    <li>Click the button below to access your First Inspection Report (FIR)</li>
+                                    <li>Review each equipment item and its inspection notes</li>
+                                    <li>Provide your remarks and decisions for items with deviations</li>
+                                    <li>Submit your feedback to proceed with calibration</li>
+                                </ol>
+                            </div>
+
+                            <div class="button-row">
+                                <a href="{{ direct_link }}" class="button">View First Inspection Report</a>
+                                <a href="{{ login_link }}" class="button secondary">Go to Customer Portal</a>
+                            </div>
+
+                            <div class="highlight">
+                                <p><strong class="help-title">Need Help?</strong></p>
+                                <p>If you have any questions or need assistance, please contact our engineering team.</p>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="footer">
+                            <p>This is an automated notification from our Laboratory Information Management System.</p>
+                            <p>Please do not reply to this email. If you need assistance, contact our support team.</p>
+                            <p><small>© 2026 <a href="https://nextelengg.com/" target="_blank" rel="noopener noreferrer">NEXTAGE ENGINEERING Pvt. Ltd.</a></small></p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
 </body>
 </html>

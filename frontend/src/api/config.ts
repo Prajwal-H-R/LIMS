@@ -106,7 +106,13 @@ export const ENDPOINTS = {
     ACCEPT:   `/invitations/accept`,
     VALIDATE: `/invitations/validate`,
   },
-
+  CERTIFICATE_DETAILS: {
+    LIST:   `/certificate-details`,
+    CREATE: `/certificate-details`,
+    GET:    (id: number) => `/certificate-details/${id}`,
+    UPDATE: (id: number) => `/certificate-details/${id}`,
+    DELETE: (id: number) => `/certificate-details/${id}`,
+  },
   // ── Staff ───────────────────────────────────────────────────────── //
   STAFF: {
     SRFS:                        `/staff/srfs`,

@@ -1,6 +1,27 @@
 {% extends "certificate/base_template.html" %}
 
 {% block content %}
+{%- macro fmt(val) -%}
+    {%- if val is number -%}
+        {{ "%.2f" | format(val) }}
+    {%- else -%}
+        {{ val }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro fmt_by_target(val, target) -%}
+    {%- if val is number -%}
+        {%- set t_val = target | float(default=0) -%}
+        {%- if t_val >= 1000 -%}
+            {{ "%.0f" | format(val) }}
+        {%- else -%}
+            {{ "%.1f" | format(val) }}
+        {%- endif -%}
+    {%- else -%}
+        {{ val }}
+    {%- endif -%}
+{%- endmacro -%}
+
 <!-- PAGE 1 -->
 <div class="page">
     <div class="header">
@@ -195,8 +216,7 @@
         </table>
 
         <div style="margin: 5px 0 10px 0; white-space: nowrap; font-size: 7pt; border: 1px solid #000; padding: 5px;">
-            <strong>Calibration Procedure :</strong> Done as per NEPL Ref: CP .No 02 in accordance with ISO/IEC
-            :17025:2017, ISO :6789-1 & 2:2017
+            <strong>Calibration Procedure :</strong> {{ calibration_procedure or '' }}
         </div>
 
         {% set has_standard3 = (standard3_nomenclature or standard3_manufacturer or standard3_model or
@@ -290,9 +310,9 @@
             <tr>
                 <td class="label-cell">Environmental condition:</td>
                 <td class="label-cell" style="text-align: center;">Temp</td>
-                <td class="value-cell" style="text-align: center;">{{ temperature }} °C</td>
+                <td class="value-cell" style="text-align: center;">{{ fmt(temperature) }} °C</td>
                 <td class="label-cell" style="text-align: center;">Humidity</td>
-                <td class="value-cell" style="text-align: center;">{{ humidity }}%</td>
+                <td class="value-cell" style="text-align: center;">{{ fmt(humidity) }}%</td>
             </tr>
         </table>
 
@@ -314,20 +334,36 @@
         <!-- SIGNATURE BLOCK END -->
 
 
-        <div class="notes">
-            <ul>
-                <li>All Calibrations are traceable to National/International standards as required in ISO/IEC 17025</li>
-                <pre><li>This Certificate refers only to the item calibrated and shall not be reproduced except in full,without approval of the Laboratory,<br>   Nextage Engineering Pvt Ltd. Bangalore - 560043.</li></pre>
+        <div class="notes" style="position: relative; padding-right: 100px; min-height: 64px; box-sizing: border-box;">
+            {#
+                Database-backed statements. The right padding reserves a
+                dedicated column for the QR code so statement text wraps
+                before reaching the QR area.
+            #}
+            {% set certificate_statements = (
+                statements_below_signature
+                | default(statement_below_signature, true)
+                | default([], true)
+            ) %}
 
-                <li>Results reported are valid at the time of and under the stated conditions of measurement.</li>
-                <li>Conformity Statement is given only when requested by the customer as per the Decision Rule applied.
+            {% if certificate_statements %}
+            <ul style="margin: 0; padding-left: 18px; padding-right: 0; box-sizing: border-box; width: 100%;">
+                {% for statement in certificate_statements | sort(attribute="order") %}
+                <li style="margin-bottom: 2px; overflow-wrap: break-word; word-wrap: break-word;">
+                    {{ statement.text }}
                 </li>
+                {% endfor %}
             </ul>
-            <div class="qr-code">
+            {% endif %}
+
+            <div class="qr-code"
+                style="position: absolute; top: 4px; right: 6px; width: 64px; height: 64px; padding: 0; margin: 0; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
                 {% if qr_code %}
-                <img src="{{ qr_code }}" alt="QR Code" style="max-width: 100%; max-height: 100%;">
+                <img src="{{ qr_code }}" alt="QR Code"
+                    style="display: block; width: 60px; height: 60px; max-width: 60px; max-height: 60px; object-fit: contain; margin: 0;">
                 {% else %}
-                <img src="htw_qr_code_certificate.png" alt="QR Code" style="max-width: 100%; max-height: 100%;">
+                <img src="htw_qr_code_certificate.png" alt="QR Code"
+                    style="display: block; width: 60px; height: 60px; max-width: 60px; max-height: 60px; object-fit: contain; margin: 0;">
                 {% endif %}
             </div>
         </div>
@@ -417,17 +453,17 @@
                 <tr>
                     <td rowspan="{{ row_count }}">{{ repeat.pressure }}</td>
                     <td rowspan="{{ row_count }}">{{ repeat.target }}</td>
-                    <td>{{ repeat.readings[0] }}</td>
-                    <td>{{ repeat.readings[0] - repeat.target }}</td>
-                    <td>{{ ((repeat.readings[0] - repeat.target) / repeat.target * 100)|round(2) }}</td>
-                    <td rowspan="{{ row_count }}">{{ repeat.repeatability }}</td>
-                    <td rowspan="{{ row_count }}">{{ repeat.repeatability_pct }}</td>
+                    <td>{{ fmt_by_target(repeat.readings[0], repeat.target) }}</td>
+                    <td>{{ fmt_by_target(repeat.readings[0] - repeat.target, repeat.target) }}</td>
+                    <td>{{ fmt((repeat.readings[0] - repeat.target) / repeat.target * 100) }}</td>
+                    <td rowspan="{{ row_count }}">{{ fmt(repeat.repeatability) }}</td>
+                    <td rowspan="{{ row_count }}">{{ fmt(repeat.repeatability_pct) }}</td>
                 </tr>
                 {% for reading in repeat.readings[1:] %}
                 <tr>
-                    <td>{{ reading }}</td>
-                    <td>{{ reading - repeat.target }}</td>
-                    <td>{{ ((reading - repeat.target) / repeat.target * 100)|round(2) }}</td>
+                    <td>{{ fmt_by_target(reading, repeat.target) }}</td>
+                    <td>{{ fmt_by_target(reading - repeat.target, repeat.target) }}</td>
+                    <td>{{ fmt((reading - repeat.target) / repeat.target * 100) }}</td>
                 </tr>
                 {% endfor %}
                 {% endfor %}
@@ -461,12 +497,12 @@
                 {% for reprod in reproducability_data %}
                 <tr>
                     <td>{{ reprod.target }}</td>
-                    <td>{{ reprod.series1 }}</td>
-                    <td>{{ reprod.series2 }}</td>
-                    <td>{{ reprod.series3 }}</td>
-                    <td>{{ reprod.series4 }}</td>
-                    <td>{{ reprod.error }}</td>
-                    <td>{{ reprod.error_pct }}</td>
+                    <td>{{ fmt_by_target(reprod.series1, reprod.target) }}</td>
+                    <td>{{ fmt_by_target(reprod.series2, reprod.target) }}</td>
+                    <td>{{ fmt_by_target(reprod.series3, reprod.target) }}</td>
+                    <td>{{ fmt_by_target(reprod.series4, reprod.target) }}</td>
+                    <td>{{ fmt(reprod.error) }}</td>
+                    <td>{{ fmt(reprod.error_pct) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -500,12 +536,12 @@
                 {% for geo in geometric_data %}
                 <tr>
                     <td>{{ geo.target }}</td>
-                    <td>{{ geo.pos0 }}</td>
-                    <td>{{ geo.pos90 }}</td>
-                    <td>{{ geo.pos180 }}</td>
-                    <td>{{ geo.pos270 }}</td>
-                    <td>{{ geo.error }}</td>
-                    <td>{{ geo.error_pct }}</td>
+                    <td>{{ fmt_by_target(geo.pos0, geo.target) }}</td>
+                    <td>{{ fmt_by_target(geo.pos90, geo.target) }}</td>
+                    <td>{{ fmt_by_target(geo.pos180, geo.target) }}</td>
+                    <td>{{ fmt_by_target(geo.pos270, geo.target) }}</td>
+                    <td>{{ fmt(geo.error) }}</td>
+                    <td>{{ fmt(geo.error_pct) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -609,12 +645,12 @@
                 {% for interface in interface_data %}
                 <tr>
                     <td>{{ interface.target }}</td>
-                    <td>{{ interface.series1 }}</td>
-                    <td>{{ interface.series2 }}</td>
-                    <td>{{ interface.series3 }}</td>
-                    <td>{{ interface.series4 }}</td>
-                    <td>{{ interface.error }}</td>
-                    <td>{{ interface.error_pct }}</td>
+                    <td>{{ fmt_by_target(interface.series1, interface.target) }}</td>
+                    <td>{{ fmt_by_target(interface.series2, interface.target) }}</td>
+                    <td>{{ fmt_by_target(interface.series3, interface.target) }}</td>
+                    <td>{{ fmt_by_target(interface.series4, interface.target) }}</td>
+                    <td>{{ fmt(interface.error) }}</td>
+                    <td>{{ fmt(interface.error_pct) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -643,13 +679,13 @@
                 <tr>
                     <td rowspan="2">{{ loading.torque }}</td>
                     <td>Position 1 <br></br> ({{ loading.position1 }})</td>
-                    <td>{{ loading.mean1 }}</td>
-                    <td rowspan="2">{{ loading.error }}</td>
-                    <td rowspan="2">{{ loading.error_pct }}</td>
+                    <td>{{ fmt_by_target(loading.mean1, loading.torque) }}</td>
+                    <td rowspan="2">{{ fmt(loading.error) }}</td>
+                    <td rowspan="2">{{ fmt(loading.error_pct) }}</td>
                 </tr>
                 <tr>
                     <td>Position 2 <br></br> ({{ loading.position2 }})</td>
-                    <td>{{ loading.mean2 }}</td>
+                    <td>{{ fmt_by_target(loading.mean2, loading.torque) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -689,13 +725,13 @@
                 {% for uncertainty in uncertainty_data %}
                 <tr>
                     <td>{{ uncertainty.calibration }}</td>
-                    <td>{{ uncertainty.average }}</td>
-                    <td>{{ uncertainty.error_pct }}</td>
-                    <td>{{ uncertainty.uncertainty_w }}</td>
-                    <td>{{ uncertainty.max_error }}</td>
-                    <td>{{ uncertainty.uncertainty_w_prime }}</td>
+                    <td>{{ fmt(uncertainty.average) }}</td>
+                    <td>{{ fmt(uncertainty.error_pct) }}</td>
+                    <td>{{ fmt(uncertainty.uncertainty_w) }}</td>
+                    <td>{{ fmt(uncertainty.max_error) }}</td>
+                    <td>{{ fmt(uncertainty.uncertainty_w_prime) }}</td>
                     {% if show_statement_of_conformity_columns %}
-                    <td>{{ uncertainty.permissible_deviation_iso_6789 }}</td>
+                    <td>{{ fmt(uncertainty.permissible_deviation_iso_6789) }}</td>
                     <td>{{ uncertainty.result }}</td>
                     {% endif %}
                 </tr>
