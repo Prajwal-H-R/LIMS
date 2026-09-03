@@ -899,10 +899,10 @@ const generatePDF = useCallback(async () => {
               <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-amber-800">
-                  {emptyFieldCount} field{emptyFieldCount > 1 ? "s" : ""} need{emptyFieldCount > 1 ? "" : "s"} your attention
+                  {emptyFieldCount} mandatory field{emptyFieldCount > 1 ? "s" : ""} need{emptyFieldCount > 1 ? "" : "s"} your attention
                 </p>
                 <p className="text-xs text-amber-700 mt-0.5">
-                  Empty fields are highlighted in amber below. Please review and fill in any missing values before submitting.
+                  Mandatory fields are highlighted in amber below. Please fill in all required fields marked with <span className="text-red-500 font-bold">*</span> before submitting.
                 </p>
               </div>
             </div>
@@ -938,7 +938,9 @@ const generatePDF = useCallback(async () => {
               </div>
  
               <div className="relative">
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Material Inward Date</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Material Inward Date <span className="text-red-500 ml-1">*</span>
+                  </label>
                   <input
                     type="date"
                     readOnly={!canEdit}
@@ -993,7 +995,9 @@ const generatePDF = useCallback(async () => {
  
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Contact Person</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Contact Person <span className="text-red-500 ml-1">*</span>
+                  </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <User size={16} className={canEdit && isEmpty(srfData.contact_person) ? "text-amber-500" : "text-gray-400"}/>
@@ -1015,7 +1019,9 @@ const generatePDF = useCallback(async () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Phone</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Phone <span className="text-red-500 ml-1">*</span>
+                  </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Phone size={16} className={canEdit && isEmpty(srfData.phone) ? "text-amber-500" : "text-gray-400"}/>
@@ -1037,7 +1043,9 @@ const generatePDF = useCallback(async () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Email</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Email <span className="text-red-500 ml-1">*</span>
+                  </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Mail size={16} className={canEdit && isEmpty(srfData.email) ? "text-amber-500" : "text-gray-400"}/>
@@ -1061,7 +1069,9 @@ const generatePDF = useCallback(async () => {
  
             <div className="space-y-6">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Certificate Issue Name</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Certificate Issue Name <span className="text-red-500 ml-1">*</span>
+                  </label>
                   <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Award size={16} className={canEdit && isEmpty(srfData.certificate_issue_name) ? "text-amber-500" : "text-indigo-500"}/>
@@ -1083,7 +1093,9 @@ const generatePDF = useCallback(async () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Certificate Issue Address</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Certificate Issue Address <span className="text-red-500 ml-1">*</span>
+                  </label>
                   <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 pt-2.5 flex items-start pointer-events-none">
                         <Home size={16} className={canEdit && isEmpty(srfData.certificate_issue_adress) ? "text-amber-500" : "text-indigo-500"}/>
@@ -1231,9 +1243,9 @@ const generatePDF = useCallback(async () => {
                     <th className="px-4 py-3">Model</th>
                     <th className="px-4 py-3">Serial No/ID</th>
                     <th className="px-4 py-3">Range</th>
-                    <th className="px-4 py-3">Unit</th>
-                    <th className="px-4 py-3">Calibration Points</th>
-                    <th className="px-4 py-3">Mode of Calibration</th>
+                    <th className="px-4 py-3">Unit <span className="text-red-500 ml-1">*</span></th>
+                    <th className="px-4 py-3">Calibration Points <span className="text-red-500 ml-1">*</span></th>
+                    <th className="px-4 py-3">Mode of Calibration <span className="text-red-500 ml-1">*</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1321,7 +1333,8 @@ const generatePDF = useCallback(async () => {
               <button
                   className="px-5 py-2.5 rounded-lg font-medium text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition disabled:opacity-60 disabled:cursor-not-allowed"
                   onClick={() => handleSaveSrf((srfData.status === "created" || srfData.status === "draft") ? "inward_completed" : srfData.status, true)}
-                  disabled={autoSaving || isLocked}
+                  disabled={autoSaving || isLocked || emptyFieldCount > 0}
+                  title={emptyFieldCount > 0 ? "Please fill all mandatory fields to submit" : ""}
               >
                 {activeSrfId ? "Save Changes & Submit" : "Create SRF & Submit"}
               </button>

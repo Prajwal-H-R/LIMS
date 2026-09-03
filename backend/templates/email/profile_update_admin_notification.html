@@ -3,63 +3,470 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
     <title>{{ title }}</title>
+
     <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4; }
-        .container { max-width: 650px; margin: 20px auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); }
-        .header { background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 45%, #7c3aed 100%); color: white; padding: 32px 28px; text-align: center; }
-        .header h1 { margin: 0; font-size: 28px; font-weight: 800; }
-        .content { padding: 28px; }
-        .card { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin: 18px 0; }
-        .label { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; color: #64748b; text-transform: uppercase; }
-        .value { font-size: 15px; margin-top: 6px; font-weight: 700; color: #0f172a; word-break: break-word; }
-        .button { display: inline-block; padding: 14px 26px; background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: 800; margin: 18px 5px 0; }
-        .subtle { color: #475569; font-size: 14px; }
-        .footer { background-color: #f8f9fa; padding: 20px; text-align: center; color: #64748b; font-size: 13px; border-top: 1px solid #e5e7eb; }
-        .list { margin: 10px 0 0; padding-left: 18px; }
-        .list li { margin: 6px 0; }
+        html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            background-color: #f3f5ff !important;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+        }
+
+        table, td {
+            border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+        }
+
+        a {
+            text-decoration: none;
+        }
+
+        .email-bg {
+            width: 100%;
+            background-color: #f3f5ff;
+        }
+
+        .email-card {
+            width: 100%;
+            max-width: 640px;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .header-bg {
+            background-color: #6d3df5;
+            background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 58%, #c084fc 100%);
+        }
+
+        .header-title {
+            margin: 0;
+            color: #ffffff;
+            font-size: 25px;
+            line-height: 1.3;
+            font-weight: 700;
+        }
+
+        .header-subtitle {
+            margin: 8px 0 0;
+            color: #ede9fe;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .content-bg {
+            background-color: #ffffff;
+        }
+
+        .content-text {
+            color: #475569;
+        }
+
+        .greeting {
+            color: #0f172a;
+            font-weight: 600;
+        }
+
+        .profile-card {
+            background-color: #f8faff;
+            border: 1px solid #e0e7ff;
+        }
+
+        .field-divider {
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .label {
+            color: #64748b;
+        }
+
+        .value {
+            color: #0f172a;
+        }
+
+        .changed-card {
+            background-color: #f4f0ff;
+            border: 1px solid #e9d5ff;
+        }
+
+        .changed-title {
+            color: #5b21b6;
+        }
+
+        .changed-list {
+            color: #475569;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 22px;
+            background-color: #7c3aed;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 9px;
+            font-size: 14px;
+            line-height: 1.3;
+            font-weight: 700;
+        }
+
+        .footer-bg {
+            background-color: #fafaff;
+            border-top: 1px solid #ede9fe;
+        }
+
+        .footer-text {
+            color: #64748b;
+        }
+
+        .footer-company {
+            color: #94a3b8;
+        }
+
+        .footer-link {
+            color: #6d28d9;
+        }
+
+        @media only screen and (max-width: 640px) {
+            .email-pad {
+                padding-left: 10px !important;
+                padding-right: 10px !important;
+            }
+
+            .header-pad {
+                padding: 26px 20px !important;
+            }
+
+            .content-pad {
+                padding: 24px 18px !important;
+            }
+
+            .footer-pad {
+                padding: 20px 18px 24px !important;
+            }
+
+            .mobile-button {
+                display: block !important;
+                width: auto !important;
+                text-align: center !important;
+            }
+        }
+
+        /* Keep the entire email on the intended light theme in dark-mode clients */
+        @media (prefers-color-scheme: dark) {
+            html, body, .email-bg {
+                background-color: #f3f5ff !important;
+            }
+
+            .email-card, .content-bg {
+                background-color: #ffffff !important;
+            }
+
+            .header-bg {
+                background-color: #6d3df5 !important;
+                background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 58%, #c084fc 100%) !important;
+            }
+
+            .header-title {
+                color: #ffffff !important;
+            }
+
+            .header-subtitle {
+                color: #ede9fe !important;
+            }
+
+            .greeting,
+            .value {
+                color: #0f172a !important;
+            }
+
+            .content-text,
+            .changed-list {
+                color: #475569 !important;
+            }
+
+            .profile-card {
+                background-color: #f8faff !important;
+                border-color: #e0e7ff !important;
+            }
+
+            .field-divider {
+                border-top-color: #e5e7eb !important;
+            }
+
+            .label {
+                color: #64748b !important;
+            }
+
+            .changed-card {
+                background-color: #f4f0ff !important;
+                border-color: #e9d5ff !important;
+            }
+
+            .changed-title {
+                color: #5b21b6 !important;
+            }
+
+            .button {
+                background-color: #7c3aed !important;
+                color: #ffffff !important;
+            }
+
+            .footer-bg {
+                background-color: #fafaff !important;
+                border-top-color: #ede9fe !important;
+            }
+
+            .footer-text {
+                color: #64748b !important;
+            }
+
+            .footer-company {
+                color: #94a3b8 !important;
+            }
+
+            .footer-link {
+                color: #6d28d9 !important;
+            }
+        }
+
+        /* Outlook.com / Microsoft dark-mode overrides */
+        [data-ogsc] html,
+        [data-ogsc] body,
+        [data-ogsc] .email-bg {
+            background-color: #f3f5ff !important;
+        }
+
+        [data-ogsc] .email-card,
+        [data-ogsc] .content-bg {
+            background-color: #ffffff !important;
+        }
+
+        [data-ogsc] .header-bg {
+            background-color: #6d3df5 !important;
+            background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 58%, #c084fc 100%) !important;
+        }
+
+        [data-ogsc] .header-title {
+            color: #ffffff !important;
+        }
+
+        [data-ogsc] .header-subtitle {
+            color: #ede9fe !important;
+        }
+
+        [data-ogsc] .greeting,
+        [data-ogsc] .value {
+            color: #0f172a !important;
+        }
+
+        [data-ogsc] .content-text,
+        [data-ogsc] .changed-list {
+            color: #475569 !important;
+        }
+
+        [data-ogsc] .profile-card {
+            background-color: #f8faff !important;
+            border-color: #e0e7ff !important;
+        }
+
+        [data-ogsc] .field-divider {
+            border-top-color: #e5e7eb !important;
+        }
+
+        [data-ogsc] .label {
+            color: #64748b !important;
+        }
+
+        [data-ogsc] .changed-card {
+            background-color: #f4f0ff !important;
+            border-color: #e9d5ff !important;
+        }
+
+        [data-ogsc] .changed-title {
+            color: #5b21b6 !important;
+        }
+
+        [data-ogsc] .button {
+            background-color: #7c3aed !important;
+            color: #ffffff !important;
+        }
+
+        [data-ogsc] .footer-bg {
+            background-color: #fafaff !important;
+            border-top-color: #ede9fe !important;
+        }
+
+        [data-ogsc] .footer-text {
+            color: #64748b !important;
+        }
+
+        [data-ogsc] .footer-company {
+            color: #94a3b8 !important;
+        }
+
+        [data-ogsc] .footer-link {
+            color: #6d28d9 !important;
+        }
     </style>
 </head>
+
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>{{ title }}</h1>
-            <p class="subtle" style="margin: 10px 0 0; color: rgba(255,255,255,0.95);">Customer updated profile details</p>
-        </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+        class="email-bg" style="width:100%; background-color:#f3f5ff;">
+        <tr>
+            <td align="center" class="email-pad"
+                style="padding:32px 16px; background-color:#f3f5ff;">
 
-        <div class="content">
-            <p>Dear Admin,</p>
-            <p class="subtle">A customer has updated their profile in the customer portal. Review the changes below.</p>
+                <!--[if mso]>
+                <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0">
+                <tr><td>
+                <![endif]-->
 
-            <div class="card">
-                <div>
-                    <div class="label">Customer</div>
-                    <div class="value">{{ customer_full_name }}</div>
-                </div>
-                <div style="height: 14px;"></div>
-                <div>
-                    <div class="label">Company / Organization</div>
-                    <div class="value">{{ customer_company }}</div>
-                </div>
-            </div>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                    class="email-card"
+                    style="width:100%; max-width:640px; margin:0 auto; background-color:#ffffff; border-radius:16px; overflow:hidden;">
 
-            <div class="card">
-                <div class="label">Changed details</div>
-                <ul class="list">
-                    {% for item in changed_fields %}
-                        <li>{{ item }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
+                    <tr>
+                        <td align="center" class="header-bg header-pad"
+                            style="padding:30px 28px; text-align:center; background-color:#6d3df5; background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 58%,#c084fc 100%);">
+                            <h1 class="header-title"
+                                style="margin:0; color:#ffffff; font-size:25px; line-height:1.3; font-weight:700;">
+                                {{ title }}
+                            </h1>
+                            <p class="header-subtitle"
+                                style="margin:8px 0 0; color:#ede9fe; font-size:14px; line-height:1.5;">
+                                Customer updated profile details
+                            </p>
+                        </td>
+                    </tr>
 
-            <div style="text-align: center; margin: 26px 0;">
-                <a href="{{ admin_user_management_link }}" class="button">Review in Admin Portal</a>
-            </div>
-        </div>
+                    <tr>
+                        <td class="content-bg content-pad"
+                            style="padding:32px 30px; background-color:#ffffff;">
 
-        <div class="footer">
-            <p>Please do not reply to this email. If you need assistance, contact support.</p>
-        </div>
-    </div>
+                            <p class="greeting"
+                                style="margin:0 0 12px; color:#0f172a; font-size:16px; line-height:1.6; font-weight:600;">
+                                Dear Admin,
+                            </p>
+
+                            <p class="content-text"
+                                style="margin:0 0 24px; color:#475569; font-size:15px; line-height:1.6;">
+                                A customer has updated their profile in the customer portal. Review the changes below.
+                            </p>
+
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                                class="profile-card"
+                                style="width:100%; background-color:#f8faff; border:1px solid #e0e7ff; border-radius:12px;">
+
+                                <tr>
+                                    <td style="padding:20px;">
+                                        <p class="label"
+                                            style="margin:0; color:#64748b; font-size:11px; line-height:1.4; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;">
+                                            Customer
+                                        </p>
+                                        <p class="value"
+                                            style="margin:6px 0 0; color:#0f172a; font-size:15px; line-height:1.5; font-weight:700; word-break:break-word;">
+                                            {{ customer_full_name }}
+                                        </p>
+                                    </td>
+                                </tr>
+
+                                <tr>
+                                    <td style="padding:0 20px;">
+                                        <div class="field-divider"
+                                            style="border-top:1px solid #e5e7eb; height:1px; line-height:1px; font-size:1px;">
+                                            &nbsp;
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <tr>
+                                    <td style="padding:16px 20px 20px;">
+                                        <p class="label"
+                                            style="margin:0; color:#64748b; font-size:11px; line-height:1.4; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;">
+                                            Company / Organization
+                                        </p>
+                                        <p class="value"
+                                            style="margin:6px 0 0; color:#0f172a; font-size:15px; line-height:1.5; font-weight:700; word-break:break-word;">
+                                            {{ customer_company }}
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                                class="changed-card"
+                                style="width:100%; margin-top:20px; background-color:#f4f0ff; border:1px solid #e9d5ff; border-radius:12px;">
+
+                                <tr>
+                                    <td style="padding:20px;">
+                                        <p class="changed-title"
+                                            style="margin:0 0 10px; color:#5b21b6; font-size:14px; line-height:1.5; font-weight:700;">
+                                            Changed details
+                                        </p>
+
+                                        <ul class="changed-list"
+                                            style="margin:0; padding-left:20px; color:#475569; font-size:14px; line-height:1.6;">
+                                            {% for item in changed_fields %}
+                                            <li style="margin:7px 0;">{{ item }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                                <tr>
+                                    <td align="center" style="padding:26px 0 6px;">
+                                        <a href="{{ admin_user_management_link }}"
+                                            class="button mobile-button"
+                                            style="display:inline-block; padding:12px 22px; background-color:#7c3aed; color:#ffffff; text-decoration:none; border-radius:9px; font-size:14px; line-height:1.3; font-weight:700;">
+                                            Review in Admin Portal
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td align="center" class="footer-bg footer-pad"
+                            style="padding:22px 26px 26px; background-color:#fafaff; border-top:1px solid #ede9fe; text-align:center;">
+                            <p class="footer-text"
+                                style="margin:0; color:#64748b; font-size:12px; line-height:1.6;">
+                                Please do not reply to this email. If you need assistance, contact support.
+                            </p>
+                            <p class="footer-company"
+                                style="margin:10px 0 0; color:#94a3b8; font-size:12px; line-height:1.5;">
+                                © 2026
+                                <a href="https://nextelengg.com/" target="_blank" class="footer-link"
+                                    style="color:#6d28d9; text-decoration:none; font-weight:600;">
+                                    NEXTAGE ENGINEERING Pvt. Ltd.
+                                </a>
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+
+                <!--[if mso]>
+                </td></tr>
+                </table>
+                <![endif]-->
+
+            </td>
+        </tr>
+    </table>
 </body>
 </html>

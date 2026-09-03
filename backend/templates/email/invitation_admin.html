@@ -1,88 +1,105 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LIMS Administrator Access</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 20px; }
-        .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 30px; border-radius: 8px 8px 0 0; text-align: center; }
-        .header h1 { margin: 0; font-size: 28px; font-weight: bold; }
-        .header p { margin: 10px 0 0; opacity: 0.9; font-size: 16px; }
-        .content { padding: 40px 30px; }
-        .welcome-box { background: #f8f9ff; border: 2px solid #e8ebff; border-radius: 8px; padding: 25px; margin: 20px 0; text-align: center; }
-        .credentials { background: #fff8e1; border: 1px solid #ffcc02; border-radius: 8px; padding: 20px; margin: 25px 0; }
-        .credentials h3 { margin-top: 0; color: #f57c00; font-size: 18px; }
-        .cred-item { margin: 10px 0; padding: 8px; background: white; border-radius: 4px; font-family: monospace; }
-        .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; transition: transform 0.2s; }
-        .button:hover { transform: translateY(-1px); }
-        .features { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 25px 0; }
-        .feature { background: #f8f9ff; padding: 15px; border-radius: 6px; border-left: 4px solid #667eea; }
-        .feature h4 { margin: 0 0 8px; color: #667eea; font-size: 16px; }
-        .warning { background: #fff3cd; border: 1px solid #ffc107; color: #856404; padding: 15px; border-radius: 6px; margin: 20px 0; }
-        .footer { background: #f8f9fa; padding: 20px 30px; border-radius: 0 0 8px 8px; text-align: center; color: #6c757d; font-size: 14px; }
-        @media (max-width: 600px) { .features { grid-template-columns: 1fr; } .container { margin: 0; border-radius: 0; } }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>LIMS Administrator Access</title>
+<style>
+html, body {
+    margin:0 !important; padding:0 !important; width:100% !important;
+    min-width:100% !important; background:#f3f5ff !important;
+}
+body {
+    font-family:Arial,Helvetica,sans-serif; color:#334155;
+    -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;
+}
+table { border-collapse:collapse; border-spacing:0; mso-table-lspace:0pt; mso-table-rspace:0pt; }
+td { font-family:Arial,Helvetica,sans-serif; }
+a { text-decoration:none; }
+.email-wrapper { width:100%; background:#f3f5ff; }
+.email-container {
+    width:100%; max-width:640px; background:#fff;
+    border-radius:16px; overflow:hidden;
+    box-shadow:0 8px 28px rgba(76,81,150,.10);
+}
+.mobile-padding { padding-left:40px; padding-right:40px; }
+@media screen and (max-width:600px) {
+    .email-container { width:100% !important; border-radius:0 !important; }
+    .mobile-padding { padding-left:20px !important; padding-right:20px !important; }
+    .header-title { font-size:26px !important; }
+    .cta-full { display:block !important; text-align:center !important; }
+}
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🛡️ Administrator Access Granted</h1>
-            <p>Welcome to the LIMS Administrative Dashboard</p>
-        </div>
-        
-        <div class="content">
-            <div class="welcome-box">
-                <h2>Welcome, {{ name }}!</h2>
-                <p>You've been granted <strong>Administrator</strong> privileges in our Laboratory Information Management System. You now have full access to manage users, oversee operations, and configure system settings.</p>
-            </div>
-
-            <div class="credentials">
-                <h3>🔐 Your Login Credentials</h3>
-                <div class="cred-item"><strong>Email:</strong> {{ email }}</div>
-                <div class="cred-item"><strong>Temporary Password:</strong> {{ temporary_password }}</div>
-                <div class="cred-item"><strong>Role:</strong> {{ role }}</div>
-            </div>
-
-            <div class="warning">
-                <strong>⚠️ Important Security Notice:</strong> Please change your password immediately after your first login for security purposes. Your temporary password expires in {{ expires_hours }} hours.
-            </div>
-
-            <div style="text-align: center;">
-                <a href="{{ activation_link }}" class="button">🚀 Activate Account & Set Password</a>
-            </div>
-
-            <h3>🎯 Your Administrative Capabilities:</h3>
-            <div class="features">
-                <div class="feature">
-                    <h4>👥 User Management</h4>
-                    <p>Create, modify, and manage user accounts across all roles</p>
-                </div>
-                <div class="feature">
-                    <h4>📊 System Analytics</h4>
-                    <p>Access comprehensive reports and system performance metrics</p>
-                </div>
-                <div class="feature">
-                    <h4>⚙️ Configuration</h4>
-                    <p>Configure system settings, workflows, and business rules</p>
-                </div>
-                <div class="feature">
-                    <h4>🔒 Security Oversight</h4>
-                    <p>Monitor system security and manage access permissions</p>
-                </div>
-            </div>
-
-            <div style="margin-top: 30px; padding: 20px; background: #e8f5e8; border-radius: 6px; border-left: 4px solid #28a745;">
-                <h4 style="color: #155724; margin-top: 0;">🎉 Ready to Get Started?</h4>
-                <p style="color: #155724; margin-bottom: 0;">Click the activation button above to set your secure password and begin managing your LIMS environment. If you have any questions, our support team is here to help.</p>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p>This invitation expires in {{ expires_hours }} hours. If you need assistance, please contact our support team.</p>
-            <p>© 2026 NEXTAGE ENGINEERING Pvt. Ltd.</p>
-        </div>
-    </div>
-</body>
-</html>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="email-wrapper">
+<tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="email-container">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td align="center" style="padding:32px 24px 28px;background-color:#6d3df5;background-image:linear-gradient(100deg,#4f46e5 0%,#7c3aed 50%,#c084fc 100%);">
+<div class="header-title" style="font-size:30px;line-height:38px;font-weight:800;color:#fff;letter-spacing:-.5px;">Yatharthata <span>LIMS</span></div>
+<div style="margin-top:6px;font-size:13px;line-height:20px;color:#f3e8ff;">Administrator Access</div>
+</td></tr>
+</table>
+</td></tr>
+<tr><td class="mobile-padding" style="padding-top:38px;padding-bottom:38px;background:#fff;">
+<div style="font-size:22px;line-height:30px;font-weight:700;color:#5b21b6;">Administrator Access Granted</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+<tr><td style="padding:18px 20px;background:#f4f0ff;border:1px solid #ddd6fe;border-left:4px solid #7c3aed;border-radius:9px;">
+<div style="font-size:15px;line-height:22px;font-weight:700;color:#5b21b6;">Welcome to the LIMS Administrative Dashboard</div>
+<div style="margin-top:7px;font-size:14px;line-height:22px;color:#5b21b6;">You've been granted Administrator privileges and can now manage users, oversee operations, and configure system settings.</div>
+</td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;"><tr><td style="padding:22px;background:#f8faff;border:1px solid #dfe5f3;border-radius:11px;"><div style="font-size:17px;line-height:24px;font-weight:700;color:#5b21b6;"><span style="display:inline-block;width:8px;height:8px;background:#7c3aed;border-radius:50%;vertical-align:middle;margin-right:8px;"></span>Your Login Credentials</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
+<tr><td style="padding:11px 13px;background:#fff;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;line-height:20px;color:#334155;"><strong>Email:</strong> {{ email }}</td></tr></table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;">
+<tr><td style="padding:11px 13px;background:#fff;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;line-height:20px;color:#334155;"><strong>Temporary Password:</strong> {{ temporary_password }}</td></tr></table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;">
+<tr><td style="padding:11px 13px;background:#fff;border:1px solid #e2e8f0;border-radius:7px;font-size:13px;line-height:20px;color:#334155;"><strong>Role:</strong> {{ role }}</td></tr></table></td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+<tr><td style="padding:18px 20px;background:#fff9ed;border:1px solid #f5d48a;border-left:4px solid #f59e0b;border-radius:9px;">
+<div style="font-size:15px;line-height:22px;font-weight:700;color:#78350f;">Important Security Notice</div>
+<div style="margin-top:7px;font-size:14px;line-height:22px;color:#78350f;">Please change your password immediately after your first login for security purposes. Your temporary password expires in {{ expires_hours }} hours.</div>
+</td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:25px auto 0;">
+<tr><td align="center">
+<a href="{{ activation_link }}" target="_blank" class="cta-full" style="display:inline-block;background:#7c3aed;color:#ffffff !important;font-size:15px;line-height:20px;font-weight:700;padding:14px 28px;border-radius:9px;">Activate Account &amp; Set Password</a>
+</td></tr></table>
+<div style="margin-top:34px;font-size:18px;font-weight:700;color:#0f172a;">Your Administrative Capabilities</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:15px;border:1px solid #e2e8f0;border-radius:11px;overflow:hidden;"><tr><td style="padding:17px 18px;background:#fff;border-left:4px solid #6366f1;border-bottom:1px solid #e2e8f0;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="30" valign="top"><span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:6px;background:#eef2ff;color:#6366f1;font-size:10px;font-weight:700;">01</span></td>
+<td valign="top"><div style="font-size:15px;line-height:22px;font-weight:700;color:#4338ca;">User Management</div>
+<div style="margin-top:4px;font-size:14px;line-height:22px;color:#475569;">Create, modify, and manage user accounts across all roles</div></td>
+</tr></table></td></tr><tr><td style="padding:17px 18px;background:#fff;border-left:4px solid #6366f1;border-bottom:1px solid #e2e8f0;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="30" valign="top"><span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:6px;background:#eef2ff;color:#6366f1;font-size:10px;font-weight:700;">02</span></td>
+<td valign="top"><div style="font-size:15px;line-height:22px;font-weight:700;color:#4338ca;">System Analytics</div>
+<div style="margin-top:4px;font-size:14px;line-height:22px;color:#475569;">Access comprehensive reports and system performance metrics</div></td>
+</tr></table></td></tr><tr><td style="padding:17px 18px;background:#fff;border-left:4px solid #6366f1;border-bottom:1px solid #e2e8f0;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="30" valign="top"><span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:6px;background:#eef2ff;color:#6366f1;font-size:10px;font-weight:700;">03</span></td>
+<td valign="top"><div style="font-size:15px;line-height:22px;font-weight:700;color:#4338ca;">Configuration</div>
+<div style="margin-top:4px;font-size:14px;line-height:22px;color:#475569;">Configure system settings, workflows, and business rules</div></td>
+</tr></table></td></tr><tr><td style="padding:17px 18px;background:#fff;border-left:4px solid #6366f1;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="30" valign="top"><span style="display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:6px;background:#eef2ff;color:#6366f1;font-size:10px;font-weight:700;">04</span></td>
+<td valign="top"><div style="font-size:15px;line-height:22px;font-weight:700;color:#4338ca;">Security Oversight</div>
+<div style="margin-top:4px;font-size:14px;line-height:22px;color:#475569;">Monitor system security and manage access permissions</div></td>
+</tr></table></td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
+<tr><td style="padding:18px 20px;background:#f4f0ff;border:1px solid #ddd6fe;border-left:4px solid #7c3aed;border-radius:9px;">
+<div style="font-size:15px;line-height:22px;font-weight:700;color:#5b21b6;">Ready to Get Started?</div>
+<div style="margin-top:7px;font-size:14px;line-height:22px;color:#5b21b6;">Click the activation button above to set your secure password and begin managing your LIMS environment. If you have any questions, our support team is here to help.</div>
+</td></tr></table>
+</td></tr>
+<tr><td align="center" style="padding:24px 25px;background:#fafaff;border-top:1px solid #e9e7f5;">
+<div style="margin-top:0px;font-size:12px;line-height:20px;color:#64748b;">This invitation expires in {{ expires_hours }} hours. If you need assistance, please contact our support team.</div>
+<div style="margin-top:8px;font-size:12px;line-height:20px;color:#94a3b8;">
+© 2026 <a href="https://nextelengg.com/" target="_blank" style="color:#7c3aed;font-weight:600;">NEXTAGE ENGINEERING Pvt. Ltd.</a>
+</div>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>

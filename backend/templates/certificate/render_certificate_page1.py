@@ -216,6 +216,61 @@ def render_certificate_combined(data, output_path=None, template_dir=None):
     return html
 
 
+def fetch_certificate_details(
+    certificate_details_id: int = 1,
+    api_base_url: str = "http://localhost:8000/api",
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch configurable certificate text from the certificate_details API.
+
+    The returned values are:
+      - calibration_procedure
+      - statements_below_signature
+
+    ``statements_below_signature`` is sorted by ``order`` so the certificate
+    always renders statements in the configured sequence.
+    """
+    try:
+        url = f"{api_base_url}/certificate-details/{certificate_details_id}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        statements = data.get("statement_below_signature") or []
+
+        if isinstance(statements, list):
+            statements = sorted(
+                statements,
+                key=lambda item: item.get("order", 0)
+                if isinstance(item, dict)
+                else 0,
+            )
+        else:
+            statements = []
+
+        return {
+            "certificate_details_id": data.get(
+                "certificate_details_id",
+                certificate_details_id,
+            ),
+            "calibration_procedure": data.get("calibration_procedure") or "",
+            "statements_below_signature": statements,
+        }
+
+    except Exception as e:
+        print(
+            f"Error fetching certificate details "
+            f"(certificate_details_id={certificate_details_id}): {e}"
+        )
+
+        # Keep certificate rendering alive if configuration cannot be fetched.
+        return {
+            "certificate_details_id": certificate_details_id,
+            "calibration_procedure": "",
+            "statements_below_signature": [],
+        }
+
+
 def fetch_inward_data(inward_id: int, api_base_url: str = "http://localhost:8000/api") -> Optional[Dict[str, Any]]:
     """
     Fetch full inward data from the API endpoint including customer and equipment data.
@@ -444,7 +499,13 @@ def map_standards_to_certificate_data(standards: List[Dict[str, Any]]) -> Dict[s
     return result
 
 
-def map_equipment_to_certificate_data(equipment: Dict[str, Any], standards: Optional[List[Dict[str, Any]]] = None, customer: Optional[Dict[str, Any]] = None, inward_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def map_equipment_to_certificate_data(
+    equipment: Dict[str, Any],
+    standards: Optional[List[Dict[str, Any]]] = None,
+    customer: Optional[Dict[str, Any]] = None,
+    inward_data: Optional[Dict[str, Any]] = None,
+    certificate_details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Map inward equipment data to certificate template fields.
     Only maps device under calibration fields, keeps others empty.
@@ -458,6 +519,29 @@ def map_equipment_to_certificate_data(equipment: Dict[str, Any], standards: Opti
     Returns:
         Dictionary with certificate data fields
     """
+    # Get configurable certificate text.
+    certificate_details = certificate_details or {}
+
+    calibration_procedure = certificate_details.get(
+        "calibration_procedure",
+        "",
+    ) or ""
+
+    statements_below_signature = certificate_details.get(
+        "statements_below_signature",
+        [],
+    ) or []
+
+    if isinstance(statements_below_signature, list):
+        statements_below_signature = sorted(
+            statements_below_signature,
+            key=lambda item: item.get("order", 0)
+            if isinstance(item, dict)
+            else 0,
+        )
+    else:
+        statements_below_signature = []
+
     # Map equipment fields to certificate fields
     device_nomenclature = equipment.get('material_description', '')
     device_make_model = ''
@@ -579,7 +663,8 @@ def map_equipment_to_certificate_data(equipment: Dict[str, Any], standards: Opti
         'units_of_measurement': units_of_measurement,
         'calibration_mode': calibration_mode,
         'pressure_gauge_resolution': '',
-        'calibration_procedure': '',
+        'calibration_procedure': calibration_procedure,
+        'statements_below_signature': statements_below_signature,
         
         # Reference Standards - populated from htw_job_standard_snapshot
         **standards_data,
@@ -590,7 +675,11 @@ def map_equipment_to_certificate_data(equipment: Dict[str, Any], standards: Opti
     }
 
 
-def get_certificate_data_from_inward(inward_id: int, api_base_url: str = "http://localhost:8000/api") -> Dict[str, Any]:
+def get_certificate_data_from_inward(
+    inward_id: int,
+    api_base_url: str = "http://localhost:8000/api",
+    certificate_details_id: int = 1,
+) -> Dict[str, Any]:
     """
     Fetch inward equipment data and map it to certificate template fields.
     Also fetches Reference Standard Details from htw_job_standard_snapshot table.
@@ -603,6 +692,12 @@ def get_certificate_data_from_inward(inward_id: int, api_base_url: str = "http:/
     Returns:
         Dictionary with certificate data fields (device under calibration, standards, and customer populated)
     """
+    # Fetch configurable certificate text.
+    certificate_details = fetch_certificate_details(
+        certificate_details_id=certificate_details_id,
+        api_base_url=api_base_url,
+    )
+
     # Fetch full inward data (includes customer and equipment)
     inward_data = fetch_inward_data(inward_id, api_base_url)
     
@@ -1230,9 +1325,21 @@ def get_certificate_data_from_inward(inward_id: int, api_base_url: str = "http:/
     
     # Get base certificate data
     if equipment:
-        cert_data = map_equipment_to_certificate_data(equipment, standards, customer, inward_data)
+        cert_data = map_equipment_to_certificate_data(
+            equipment,
+            standards,
+            customer,
+            inward_data,
+            certificate_details,
+        )
     else:
-        cert_data = map_equipment_to_certificate_data({}, standards, customer, inward_data)
+        cert_data = map_equipment_to_certificate_data(
+            {},
+            standards,
+            customer,
+            inward_data,
+            certificate_details,
+        )
     
     # Add repeatability, reproducibility, geometric, interface, and loading data
     cert_data['repeatability_data'] = repeatability_data
@@ -1285,6 +1392,7 @@ def get_empty_data():
         'pressure_gauge_resolution': '',
         'torque_range': '',
         'calibration_procedure': '',
+        'statements_below_signature': [],
         
         # Reference Standards
         'standard1_nomenclature': '',
@@ -1336,11 +1444,11 @@ if __name__ == '__main__':
             print("Fetched equipment data from API")
         except ValueError:
             print("Error: Invalid inward_id. Please provide a valid integer inward_id.")
-            print("Usage: python render_certificate_page1.py <inward_id> [api_url]")
+            print("Usage: python render_certificate_page1.py <inward_id> [api_url] [certificate_details_id]")
             sys.exit(1)
     else:
         print("Error: inward_id is required. All certificate data must come from database tables.")
-        print("Usage: python render_certificate_page1.py <inward_id> [api_url]")
+        print("Usage: python render_certificate_page1.py <inward_id> [api_url] [certificate_details_id]")
         sys.exit(1)
     
     # Render and save

@@ -1,105 +1,155 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>{{ title }}</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
+        html, body { margin:0; padding:0; width:100%; background-color:#f3f5ff; }
+        body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; line-height:1.6; color:#475569; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+        .page { width:100%; padding:32px 16px; box-sizing:border-box; }
+        .container { width:100%; max-width:640px; margin:0 auto; background:#fff; border-radius:16px; overflow:hidden; box-shadow:0 8px 28px rgba(76,29,149,.10); }
+        .header { padding:30px 28px; text-align:center; background-color:#6d3df5; background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 58%,#c084fc 100%); }
+        .header-title { margin:0; color:#fff; font-size:25px; line-height:1.3; font-weight:700; }
+        .header-subtitle { margin:8px 0 0; color:#ede9fe; font-size:14px; line-height:1.5; }
+        .content { padding:32px 30px; background:#fff; }
+        .intro { margin:0 0 24px; color:#475569; font-size:15px; }
+        .intro strong, .closing strong { color:#0f172a; }
+        .card { padding:20px; margin:20px 0; border-radius:12px; }
+        .credentials { background:#fff9ed; border:1px solid #fde7b2; }
+        .highlight { background:#f0fdf4; border:1px solid #bbf7d0; }
+        .section-title { margin:0 0 12px; color:#0f172a; font-size:15px; font-weight:700; }
+        .credentials .section-title { color:#92400e; }
+        .highlight .section-title { color:#166534; }
+        .details-list,.benefits-list,.steps-list { margin:0; padding-left:20px; color:#475569; font-size:14px; }
+        .details-list li,.benefits-list li,.steps-list li { margin:7px 0; }
+        .details-list strong { color:#334155; }
+        code { padding:3px 7px; border-radius:5px; background:#fff; border:1px solid #f1d7a1; color:#7c2d12; font-family:Consolas,"Courier New",monospace; font-size:13px; }
+        .button-row { text-align:center; margin:8px 0 4px; }
+        .button { display:inline-block; padding:12px 22px; margin:6px 4px; color:#fff; background:#7c3aed; text-decoration:none; border-radius:9px; font-size:14px; line-height:1.3; font-weight:700; }
+        .button.secondary { background:#eef2ff; color:#4f46e5; border:1px solid #c7d2fe; }
+        .activation-wrap { margin:22px 0 24px; text-align:center; }
+        .note { margin:22px 0; padding:16px 18px; background:#f8faff; border:1px solid #e0e7ff; border-left:4px solid #6366f1; border-radius:10px; color:#475569; font-size:14px; }
+        .note strong { color:#3730a3; }
+        .closing { margin:26px 0 0; color:#475569; font-size:14px; }
+        .footer { padding:22px 26px 26px; background:#fafaff; border-top:1px solid #ede9fe; text-align:center; }
+        .footer-text { margin:0; color:#64748b; font-size:12px; line-height:1.6; }
+        .footer-company { margin:10px 0 0; color:#94a3b8; font-size:12px; }
+        .footer-company a { color:#6d28d9; text-decoration:none; font-weight:600; }
+
+        @media only screen and (max-width:640px) {
+            .page { padding:16px 10px; }
+            .container { border-radius:12px; }
+            .header { padding:26px 20px; }
+            .content { padding:24px 18px; }
+            .button { display:block; margin:8px 0; text-align:center; }
+            .footer { padding:20px 18px 24px; }
         }
-        .container {
-            max-width: 600px;
-            margin: 20px auto;
-            padding: 20px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            background-color: #f9f9f9;
+
+        @media (prefers-color-scheme: dark) {
+            html,body { background-color:#f3f5ff !important; }
+            .container,.content { background-color:#fff !important; }
+            .header { background-color:#6d3df5 !important; background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 58%,#c084fc 100%) !important; }
+            .header-title { color:#fff !important; }
+            .header-subtitle { color:#ede9fe !important; }
+            .intro,.details-list,.benefits-list,.steps-list,.closing { color:#475569 !important; }
+            .intro strong,.section-title,.closing strong,.details-list strong { color:#0f172a !important; }
+            .credentials { background-color:#fff9ed !important; border-color:#fde7b2 !important; }
+            .credentials .section-title { color:#92400e !important; }
+            .highlight { background-color:#f0fdf4 !important; border-color:#bbf7d0 !important; }
+            .highlight .section-title { color:#166534 !important; }
+            code { background-color:#fff !important; border-color:#f1d7a1 !important; color:#7c2d12 !important; }
+            .button { background-color:#7c3aed !important; color:#fff !important; }
+            .button.secondary { background-color:#eef2ff !important; color:#4f46e5 !important; border-color:#c7d2fe !important; }
+            .note { background-color:#f8faff !important; border-color:#e0e7ff !important; border-left-color:#6366f1 !important; color:#475569 !important; }
+            .note strong { color:#3730a3 !important; }
+            .footer { background-color:#fafaff !important; border-color:#ede9fe !important; }
+            .footer-text { color:#64748b !important; }
+            .footer-company { color:#94a3b8 !important; }
+            .footer-company a { color:#6d28d9 !important; }
         }
-        .header {
-            font-size: 24px;
-            font-weight: 600;
-            color: #1a237e;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #3949ab;
-            padding-bottom: 10px;
-        }
-        .button {
-            display: inline-block;
-            padding: 12px 25px;
-            margin: 20px 10px 20px 0;
-            font-size: 16px;
-            font-weight: 500;
-            color: #ffffff;
-            background-color: #3949ab;
-            text-decoration: none;
-            border-radius: 5px;
-        }
-        .button.secondary {
-            background-color: #666;
-            margin-left: 10px;
-        }
-        .credentials {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
-        .footer {
-            font-size: 12px;
-            color: #777;
-            margin-top: 20px;
-        }
-        .highlight {
-            background-color: #e8f5e8;
-            border-left: 4px solid #4caf50;
-            padding: 15px;
-            margin: 20px 0;
-        }
+
+        [data-ogsc] html,[data-ogsc] body { background-color:#f3f5ff !important; }
+        [data-ogsc] .container,[data-ogsc] .content { background-color:#fff !important; }
+        [data-ogsc] .header { background-color:#6d3df5 !important; background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 58%,#c084fc 100%) !important; }
+        [data-ogsc] .header-title { color:#fff !important; }
+        [data-ogsc] .header-subtitle { color:#ede9fe !important; }
+        [data-ogsc] .intro,[data-ogsc] .details-list,[data-ogsc] .benefits-list,[data-ogsc] .steps-list,[data-ogsc] .closing { color:#475569 !important; }
+        [data-ogsc] .intro strong,[data-ogsc] .section-title,[data-ogsc] .closing strong,[data-ogsc] .details-list strong { color:#0f172a !important; }
+        [data-ogsc] .credentials { background-color:#fff9ed !important; border-color:#fde7b2 !important; }
+        [data-ogsc] .credentials .section-title { color:#92400e !important; }
+        [data-ogsc] .highlight { background-color:#f0fdf4 !important; border-color:#bbf7d0 !important; }
+        [data-ogsc] .highlight .section-title { color:#166534 !important; }
+        [data-ogsc] code { background-color:#fff !important; border-color:#f1d7a1 !important; color:#7c2d12 !important; }
+        [data-ogsc] .button { background-color:#7c3aed !important; color:#fff !important; }
+        [data-ogsc] .button.secondary { background-color:#eef2ff !important; color:#4f46e5 !important; border-color:#c7d2fe !important; }
+        [data-ogsc] .note { background-color:#f8faff !important; border-color:#e0e7ff !important; border-left-color:#6366f1 !important; color:#475569 !important; }
+        [data-ogsc] .note strong { color:#3730a3 !important; }
+        [data-ogsc] .footer { background-color:#fafaff !important; border-color:#ede9fe !important; }
+        [data-ogsc] .footer-text { color:#64748b !important; }
+        [data-ogsc] .footer-company { color:#94a3b8 !important; }
+        [data-ogsc] .footer-company a { color:#6d28d9 !important; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1 class="header">{{ title }}</h1>
-        <p>Welcome! Your LIMS customer account has been created for SRF No: <strong>{{ srf_no }}</strong>.</p>
-        
-        <div class="credentials">
-            <p><strong>Your Account Details:</strong></p>
-            <ul>
-                <li><strong>Email:</strong> {{ email }}</li>
-                <li><strong>Temporary Password:</strong> <code>{{ temporary_password }}</code></li>
-            </ul>
-        </div>
+    <div class="page">
+        <div class="container">
+            <div class="header">
+                <h1 class="header-title">{{ title }}</h1>
+                <p class="header-subtitle">Yatharthata LIMS &middot; Customer Account Invitation</p>
+            </div>
 
-        <div class="highlight">
-            <p><strong>Quick Access to Your Report:</strong></p>
-            <a href="{{ direct_link }}" class="button">View Your Inspection Report</a>
-        </div>
+            <div class="content">
+                <p class="intro">Welcome! Your LIMS customer account has been created for SRF No: <strong>{{ srf_no }}</strong>.</p>
 
-        <p><strong>To set up your permanent account:</strong></p>
-        <ol>
-            <li>Click the activation link below</li>
-            <li>Set your new password</li>
-            <li>Access your customer portal</li>
-        </ol>
+                <div class="card credentials">
+                    <p class="section-title">Your Account Details:</p>
+                    <ul class="details-list">
+                        <li><strong>Email:</strong> {{ email }}</li>
+                        <li><strong>Temporary Password:</strong> <code>{{ temporary_password }}</code></li>
+                    </ul>
+                </div>
 
-        <a href="{{ activation_link }}" class="button secondary">Activate Account</a>
+                <div class="card highlight">
+                    <p class="section-title">Quick Access to Your Report:</p>
+                    <div class="button-row">
+                        <a href="{{ direct_link }}" class="button">View Your Inspection Report</a>
+                    </div>
+                </div>
 
-        <p><strong>Important:</strong> This invitation is valid for {{ valid_for_hours }} hours from the time it was sent.</p>
+                <p class="section-title" style="margin-top:26px;">To set up your permanent account:</p>
+                <ol class="steps-list">
+                    <li>Click the activation link below</li>
+                    <li>Set your new password</li>
+                    <li>Access your customer portal</li>
+                </ol>
 
-        <p>Once your account is activated, you'll be able to:</p>
-        <ul>
-            <li>View all your inspection reports</li>
-            <li>Track the status of your equipment</li>
-            <li>Download certificates when ready</li>
-            <li>Submit feedback on our services</li>
-        </ul>
+                <div class="activation-wrap">
+                    <a href="{{ activation_link }}" class="button secondary">Activate Account</a>
+                </div>
 
-        <p>If you have any questions, please contact our support team.</p>
+                <div class="note">
+                    <strong>Important:</strong> This invitation is valid for {{ valid_for_hours }} hours from the time it was sent.
+                </div>
 
-        <p>Best regards,<br><strong>Nextage Labs Team</strong></p>
-        <div class="footer">
-            <p>This account was created for SRF {{ srf_no }}. If you didn't request this, please ignore this email.</p>
+                <p class="section-title" style="margin-top:26px;">Once your account is activated, you'll be able to:</p>
+                <ul class="benefits-list">
+                    <li>View all your inspection reports</li>
+                    <li>Track the status of your equipment</li>
+                    <li>Download certificates when ready</li>
+                    <li>Submit feedback on our services</li>
+                </ul>
+
+                <p class="closing">If you have any questions, please contact our support team.</p>
+                <p class="closing">Best regards,<br><strong>Nextage Labs Team</strong></p>
+            </div>
+
+            <div class="footer">
+                <p class="footer-text">This account was created for SRF {{ srf_no }}. If you didn't request this, please ignore this email.</p>
+                <p class="footer-company">© 2026 <a href="https://nextelengg.com/" target="_blank">NEXTAGE ENGINEERING Pvt. Ltd.</a></p>
+            </div>
         </div>
     </div>
 </body>

@@ -19,6 +19,7 @@ from backend.services.htw.htw_const_coverage_factor_service import get_active_co
 from backend.models.external_upload import ExternalUpload
 from backend.models.lab_scope import LabScope
 from backend.models.equipment_flow_config import EquipmentFlowConfig
+from backend.models.certificate.certificate_config import CertificateDetails
 # Set up logger
 logger = logging.getLogger(__name__)
  
@@ -111,8 +112,14 @@ def _map_equipment_to_template(equipment: Dict[str, Any], customer: Any, inward:
     elif equipment.get("model"):
         device_make_model = equipment["model"]
  
-    customer_name = customer.customer_details if customer else ""
-    customer_address = customer.bill_to_address if customer else ""
+    # Fetching certificate Issue Name & Address directly from the connected SRF Table
+    if inward and getattr(inward, "srf", None):
+        customer_name = inward.srf.certificate_issue_name or (customer.customer_details if customer else "")
+        # Used exact spelling "certificate_issue_adress" from your Srf model definition
+        customer_address = inward.srf.certificate_issue_adress or (customer.bill_to_address if customer else "")
+    else:
+        customer_name = customer.customer_details if customer else ""
+        customer_address = customer.bill_to_address if customer else ""
  
     ref_dc_no = inward.customer_dc_no or ""
     ref_date = inward.customer_dc_date or ""
@@ -299,174 +306,774 @@ def build_template_data(
 ) -> Dict[str, Any]:
     """
     Build full certificate template data from job and related tables.
-    base_url: API base (e.g. http://localhost:8000) for preview. Ignored if use_data_uris=True.
-    use_data_uris: If True, embed images as data URIs (for PDF). If False, use API URLs.
+
+    base_url:
+        API base URL for preview.
+        Example: http://localhost:8000
+
+    use_data_uris:
+        If True, embed images as data URIs for PDF generation.
+        If False, use API URLs.
     """
-    job = db.query(HTWJob).options(
-        joinedload(HTWJob.equipment_rel).joinedload(InwardEquipment.inward).joinedload(Inward.customer),
-        joinedload(HTWJob.equipment_rel).joinedload(InwardEquipment.srf_equipment),
-        joinedload(HTWJob.inward_rel).joinedload(Inward.customer),
-    ).filter(HTWJob.job_id == job_id).first()
- 
+
+    # ------------------------------------------------------------------
+    # JOB
+    # ------------------------------------------------------------------
+
+    job = (
+        db.query(HTWJob)
+        .options(
+            joinedload(HTWJob.equipment_rel)
+            .joinedload(InwardEquipment.inward)
+            .joinedload(Inward.customer),
+
+            # Include srf join so `inward.srf.certificate_issue_name` does not trigger a lazy load
+            joinedload(HTWJob.equipment_rel)
+            .joinedload(InwardEquipment.inward)
+            .joinedload(Inward.srf),
+
+            joinedload(HTWJob.equipment_rel)
+            .joinedload(InwardEquipment.srf_equipment),
+
+            joinedload(HTWJob.inward_rel)
+            .joinedload(Inward.customer),
+            
+            # Include srf join for inward_rel too
+            joinedload(HTWJob.inward_rel)
+            .joinedload(Inward.srf),
+        )
+        .filter(
+            HTWJob.job_id == job_id
+        )
+        .first()
+    )
+
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
- 
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found",
+        )
+
     equipment = job.equipment_rel
     inward = job.inward_rel
-    customer = inward.customer if inward else (equipment.inward.customer if equipment and equipment.inward else None)
- 
+
+    customer = (
+        inward.customer
+        if inward
+        else (
+            equipment.inward.customer
+            if equipment
+            and equipment.inward
+            else None
+        )
+    )
+
     if not equipment or not inward:
-        raise HTTPException(status_code=400, detail="Job has no linked equipment or inward")
- 
-    # --- Resolution Fetching Logic ---
+        raise HTTPException(
+            status_code=400,
+            detail="Job has no linked equipment or inward",
+        )
+
+    # ------------------------------------------------------------------
+    # RESOLUTION
+    # ------------------------------------------------------------------
+
     resolution_value = ""
     resolution_unit = ""
- 
+
     if job.res_pressure:
+
         try:
-            # 1. Try to treat res_pressure as an ID (int)
-            # Use float() first to handle cases like "1.00" stored in string or float column
-            res_id = int(float(job.res_pressure))
-           
+            res_id = int(
+                float(job.res_pressure)
+            )
+
             res_obj = (
-                db.query(HTWPressureGaugeResolution)
-                .filter(HTWPressureGaugeResolution.id == res_id)
+                db.query(
+                    HTWPressureGaugeResolution
+                )
+                .filter(
+                    HTWPressureGaugeResolution.id
+                    == res_id
+                )
                 .first()
             )
- 
+
             if res_obj:
-                # HTWPressureGaugeResolution stores the pressure value in `pressure`
-                # and its unit in `unit`.
-                resolution_value = str(res_obj.pressure)
-                resolution_unit = res_obj.unit or ""
+
+                resolution_value = str(
+                    res_obj.pressure
+                )
+
+                resolution_unit = (
+                    res_obj.unit or ""
+                )
+
             else:
-                # 2. If ID lookup fails, assume the value in job.res_pressure IS the value
-                resolution_value = str(job.res_pressure)
-                resolution_unit = "bar"  # Default unit if raw value is stored
-        except (ValueError, TypeError):
-            # 3. If conversion to int fails, treat as raw string value
-            resolution_value = str(job.res_pressure)
+
+                resolution_value = str(
+                    job.res_pressure
+                )
+
+                resolution_unit = "bar"
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            resolution_value = str(
+                job.res_pressure
+            )
+
             resolution_unit = "bar"
- 
-    eqp_dict = _build_equipment_dict(equipment)
-    standards = _build_standards_list(db, job_id)
-    std_map = _map_standards_to_template(standards)
-    eqp_map = _map_equipment_to_template(eqp_dict, customer, inward)
- 
+
+    # ------------------------------------------------------------------
+    # EQUIPMENT / STANDARDS
+    # ------------------------------------------------------------------
+
+    eqp_dict = _build_equipment_dict(
+        equipment
+    )
+
+    standards = _build_standards_list(
+        db,
+        job_id,
+    )
+
+    std_map = _map_standards_to_template(
+        standards
+    )
+
+    eqp_map = _map_equipment_to_template(
+        eqp_dict,
+        customer,
+        inward,
+    )
+
+    # ------------------------------------------------------------------
+    # CERTIFICATE DATES / NUMBER
+    # ------------------------------------------------------------------
+
     cal_date = job.date
-    cal_date_str = cal_date.strftime("%d-%m-%Y") if cal_date else ""
-    cert_no = certificate.certificate_no if certificate else _derive_certificate_no(eqp_dict.get("nepl_id", ""))
-    rec_cal_due = certificate.recommended_cal_due_date if certificate else (cal_date + timedelta(days=365) if cal_date else None)
-    rec_cal_str = rec_cal_due.strftime("%d-%m-%Y") if rec_cal_due else ""
- 
+
+    cal_date_str = (
+        cal_date.strftime("%d-%m-%Y")
+        if cal_date
+        else ""
+    )
+
+    cert_no = (
+        certificate.certificate_no
+        if certificate
+        else _derive_certificate_no(
+            eqp_dict.get("nepl_id", "")
+        )
+    )
+
+    rec_cal_due = (
+        certificate.recommended_cal_due_date
+        if certificate
+        else (
+            cal_date + timedelta(days=365)
+            if cal_date
+            else None
+        )
+    )
+
+    rec_cal_str = (
+        rec_cal_due.strftime("%d-%m-%Y")
+        if rec_cal_due
+        else ""
+    )
+
+    # ------------------------------------------------------------------
+    # CERTIFICATE DETAILS
+    # ------------------------------------------------------------------
+    #
+    # This fetches the configurable certificate text from
+    # certificate_details.
+    #
+    # IMPORTANT:
+    # Currently this uses the first active/configured record.
+    # If you later associate a certificate/job with a specific
+    # certificate_details_id, replace this query with that relation.
+    # ------------------------------------------------------------------
+
+    certificate_details = (
+        db.query(CertificateDetails)
+        .order_by(
+            CertificateDetails.certificate_details_id
+        )
+        .first()
+    )
+
+    if certificate_details:
+
+        calibration_procedure = (
+            certificate_details.calibration_procedure
+            or ""
+        )
+
+        statement_below_signature = (
+            certificate_details.statement_below_signature
+            or []
+        )
+
+    else:
+
+        calibration_procedure = ""
+
+        statement_below_signature = []
+
+    # ------------------------------------------------------------------
+    # NORMALIZE STATEMENTS
+    # ------------------------------------------------------------------
+    #
+    # Ensures JSONB data is always a list and sorted by "order".
+    # This also protects the Jinja template from malformed data.
+    # ------------------------------------------------------------------
+
+    if not isinstance(
+        statement_below_signature,
+        list,
+    ):
+        statement_below_signature = []
+
+    normalized_statements = []
+
+    for item in statement_below_signature:
+
+        if not isinstance(item, dict):
+            continue
+
+        text_value = item.get("text")
+
+        if not text_value:
+            continue
+
+        normalized_statements.append(
+            {
+                "order": item.get(
+                    "order",
+                    0,
+                ),
+                "text": str(
+                    text_value
+                ),
+            }
+        )
+
+    normalized_statements.sort(
+        key=lambda item: (
+            item.get("order", 0)
+            if isinstance(
+                item.get("order", 0),
+                (int, float),
+            )
+            else 0
+        )
+    )
+
+    # ------------------------------------------------------------------
+    # TEMPLATE DATA
+    # ------------------------------------------------------------------
+
     template_data = {
+
         "certificate_code": "",
+
         "certificate_no": cert_no,
+
         "calibration_date": cal_date_str,
-        "nepl_id": eqp_dict.get("nepl_id", ""),
+
+        "nepl_id": eqp_dict.get(
+            "nepl_id",
+            "",
+        ),
+
         "cal_due_date": rec_cal_str,
-        "ulr_no": certificate.ulr_no if certificate else "",
-        "issue_date": date.today().strftime("%d-%m-%Y"),
-        "field_of_parameter": certificate.field_of_parameter if certificate else "",
-        "item_status": (certificate.item_status or "Satisfactory") if certificate else "Satisfactory",
-        "pressure_gauge_resolution": resolution_value,
-        "pressure_gauge_unit": resolution_unit,
-        "torque_range": f"{job.range_min}-{job.range_max}" if job.range_min is not None and job.range_max is not None else eqp_dict.get("range", ""),
-        "calibration_procedure": "Done as per NEPL Ref: CP .No 02...",
+
+        "ulr_no": (
+            certificate.ulr_no
+            if certificate
+            else ""
+        ),
+
+        "issue_date": date.today().strftime(
+            "%d-%m-%Y"
+        ),
+
+        "field_of_parameter": (
+            certificate.field_of_parameter
+            if certificate
+            else ""
+        ),
+
+        "item_status": (
+            (
+                certificate.item_status
+                or "Satisfactory"
+            )
+            if certificate
+            else "Satisfactory"
+        ),
+
+        # --------------------------------------------------------------
+        # DEVICE
+        # --------------------------------------------------------------
+
+        "pressure_gauge_resolution": (
+            resolution_value
+        ),
+
+        "pressure_gauge_unit": (
+            resolution_unit
+        ),
+
+        "torque_range": (
+            f"{job.range_min}-{job.range_max}"
+            if (
+                job.range_min is not None
+                and job.range_max is not None
+            )
+            else eqp_dict.get(
+                "range",
+                "",
+            )
+        ),
+
+        # --------------------------------------------------------------
+        # DYNAMIC CERTIFICATE CONFIGURATION
+        # --------------------------------------------------------------
+
+        "calibration_procedure": (
+            calibration_procedure
+        ),
+
+        "statement_below_signature": (
+            normalized_statements
+        ),
+
+        # --------------------------------------------------------------
+        # EQUIPMENT
+        # --------------------------------------------------------------
+
         **eqp_map,
-        # Make type/classification dynamic instead of hard-coded in the template
-        "device_type": (getattr(job, "type", None) or "indicating").strip(),
-        "device_classification": (getattr(job, "classification", None) or "Type I Class C").strip(),
+
+        "device_type": (
+            getattr(
+                job,
+                "type",
+                None,
+            )
+            or "indicating"
+        ).strip(),
+
+        "device_classification": (
+            getattr(
+                job,
+                "classification",
+                None,
+            )
+            or "Type I Class C"
+        ).strip(),
+
+        # --------------------------------------------------------------
+        # STANDARDS
+        # --------------------------------------------------------------
+
         **std_map,
+
+        # --------------------------------------------------------------
+        # CALIBRATION RESULTS
+        # --------------------------------------------------------------
+
         "repeatability_data": [],
+
         "reproducability_data": [],
+
         "geometric_data": [],
+
         "interface_data": [],
+
         "loading_data": [],
+
         "uncertainty_data": [],
+
+        # --------------------------------------------------------------
+        # ENVIRONMENT
+        # --------------------------------------------------------------
+
         "temperature": "",
+
         "humidity": "",
-        "authorised_signatory": (certificate.authorised_signatory if certificate else None) or "Ramesh Ramakrishna",
-        "coverage_factor_k": get_active_coverage_factor_k(db) or 2,
+
+        # --------------------------------------------------------------
+        # SIGNATORY
+        # --------------------------------------------------------------
+
+        "authorised_signatory": (
+            (
+                certificate.authorised_signatory
+                if certificate
+                else None
+            )
+            or "Ramesh Ramakrishna"
+        ),
+
+        # --------------------------------------------------------------
+        # UNCERTAINTY
+        # --------------------------------------------------------------
+
+        "coverage_factor_k": (
+            get_active_coverage_factor_k(db)
+            or 2
+        ),
+
+        # --------------------------------------------------------------
+        # LAB
+        # --------------------------------------------------------------
+
         "lab_unique_number": "",
-        "show_statement_of_conformity_columns": bool(getattr(inward.srf, "statement_of_conformity", False)) if inward and inward.srf else False,
-        **get_certificate_asset_urls(base_url=base_url, use_data_uris=use_data_uris),
+
+        # --------------------------------------------------------------
+        # STATEMENT OF CONFORMITY
+        # --------------------------------------------------------------
+
+        "show_statement_of_conformity_columns": (
+            bool(
+                getattr(
+                    inward.srf,
+                    "statement_of_conformity",
+                    False,
+                )
+            )
+            if inward and inward.srf
+            else False
+        ),
+
+        # --------------------------------------------------------------
+        # ASSETS / IMAGES
+        # --------------------------------------------------------------
+
+        **get_certificate_asset_urls(
+            base_url=base_url,
+            use_data_uris=use_data_uris,
+        ),
     }
- 
-    rep_data = repeat_services.get_stored_repeatability(db, job_id)
-    if rep_data.get("status") == "success" and rep_data.get("results"):
-        template_data["repeatability_data"] = _map_repeatability(rep_data["results"])
- 
-    repro_data = repeat_services.get_stored_reproducibility(db, job_id)
-    template_data["reproducability_data"] = _map_reproducibility(repro_data)
- 
-    out_drive = repeat_services.get_stored_output_drive(db, job_id)
-    template_data["geometric_data"] = _map_output_drive(out_drive)
- 
-    drive_int = repeat_services.get_stored_drive_interface(db, job_id)
-    template_data["interface_data"] = _map_drive_interface(drive_int)
- 
-    load_pt = repeat_services.get_stored_loading_point(db, job_id)
-    template_data["loading_data"] = _map_loading_point(load_pt)
- 
-    budgets = db.query(HTWUncertaintyBudget).filter(HTWUncertaintyBudget.job_id == job_id).order_by(HTWUncertaintyBudget.step_percent).all()
-    template_data["uncertainty_data"] = _map_uncertainty_budget(budgets)
- 
-    # If certificate persisted ISO 6789 conformity values, use them for deterministic rendering.
+
+    # ------------------------------------------------------------------
+    # REPEATABILITY
+    # ------------------------------------------------------------------
+
+    rep_data = (
+        repeat_services
+        .get_stored_repeatability(
+            db,
+            job_id,
+        )
+    )
+
+    if (
+        rep_data.get("status")
+        == "success"
+        and rep_data.get("results")
+    ):
+
+        template_data[
+            "repeatability_data"
+        ] = _map_repeatability(
+            rep_data["results"]
+        )
+
+    # ------------------------------------------------------------------
+    # REPRODUCIBILITY
+    # ------------------------------------------------------------------
+
+    repro_data = (
+        repeat_services
+        .get_stored_reproducibility(
+            db,
+            job_id,
+        )
+    )
+
+    template_data[
+        "reproducability_data"
+    ] = _map_reproducibility(
+        repro_data
+    )
+
+    # ------------------------------------------------------------------
+    # OUTPUT DRIVE
+    # ------------------------------------------------------------------
+
+    out_drive = (
+        repeat_services
+        .get_stored_output_drive(
+            db,
+            job_id,
+        )
+    )
+
+    template_data[
+        "geometric_data"
+    ] = _map_output_drive(
+        out_drive
+    )
+
+    # ------------------------------------------------------------------
+    # DRIVE INTERFACE
+    # ------------------------------------------------------------------
+
+    drive_int = (
+        repeat_services
+        .get_stored_drive_interface(
+            db,
+            job_id,
+        )
+    )
+
+    template_data[
+        "interface_data"
+    ] = _map_drive_interface(
+        drive_int
+    )
+
+    # ------------------------------------------------------------------
+    # LOADING POINT
+    # ------------------------------------------------------------------
+
+    load_pt = (
+        repeat_services
+        .get_stored_loading_point(
+            db,
+            job_id,
+        )
+    )
+
+    template_data[
+        "loading_data"
+    ] = _map_loading_point(
+        load_pt
+    )
+
+    # ------------------------------------------------------------------
+    # UNCERTAINTY BUDGET
+    # ------------------------------------------------------------------
+
+    budgets = (
+        db.query(
+            HTWUncertaintyBudget
+        )
+        .filter(
+            HTWUncertaintyBudget.job_id
+            == job_id
+        )
+        .order_by(
+            HTWUncertaintyBudget.step_percent
+        )
+        .all()
+    )
+
+    template_data[
+        "uncertainty_data"
+    ] = _map_uncertainty_budget(
+        budgets
+    )
+
+    # ------------------------------------------------------------------
+    # SAVED ISO 6789 CONFORMITY VALUES
+    # ------------------------------------------------------------------
+
     if certificate:
-        saved_perm = getattr(certificate, "permissible_deviation_iso_6789", None)
-        saved_results = getattr(certificate, "iso_6789_results", None)
-        if isinstance(saved_perm, list) and isinstance(saved_results, list):
-            for idx, row in enumerate(template_data.get("uncertainty_data", [])):
-                if idx < len(saved_perm) and saved_perm[idx] is not None:
-                    # Normalize legacy "+-4" stored values to the proper ± (U+00B1) symbol.
-                    perm_value = saved_perm[idx]
-                    if isinstance(perm_value, str):
-                        perm_value = perm_value.replace("+-", "\u00b1")
-                    row["permissible_deviation_iso_6789"] = perm_value
-                if idx < len(saved_results) and saved_results[idx] is not None:
-                    row["result"] = saved_results[idx]
- 
-    # --- Lab Scope (lab_unique_number for text under right logo) ---
+
+        saved_perm = getattr(
+            certificate,
+            "permissible_deviation_iso_6789",
+            None,
+        )
+
+        saved_results = getattr(
+            certificate,
+            "iso_6789_results",
+            None,
+        )
+
+        if (
+            isinstance(
+                saved_perm,
+                list,
+            )
+            and isinstance(
+                saved_results,
+                list,
+            )
+        ):
+
+            for idx, row in enumerate(
+                template_data.get(
+                    "uncertainty_data",
+                    [],
+                )
+            ):
+
+                if (
+                    idx < len(saved_perm)
+                    and saved_perm[idx]
+                    is not None
+                ):
+
+                    perm_value = (
+                        saved_perm[idx]
+                    )
+
+                    if isinstance(
+                        perm_value,
+                        str,
+                    ):
+
+                        perm_value = (
+                            perm_value.replace(
+                                "+-",
+                                "\u00b1",
+                            )
+                        )
+
+                    row[
+                        "permissible_deviation_iso_6789"
+                    ] = perm_value
+
+                if (
+                    idx < len(saved_results)
+                    and saved_results[idx]
+                    is not None
+                ):
+
+                    row["result"] = (
+                        saved_results[idx]
+                    )
+
+    # ------------------------------------------------------------------
+    # LAB SCOPE
+    # ------------------------------------------------------------------
+
     try:
-        # Use a minimal raw SQL query to avoid ORM mapping failures when optional
-        # lab_scope columns differ across deployed database versions.
+
         row = db.execute(
-            text("SELECT lab_unique_number FROM lab_scope WHERE is_active = true LIMIT 1")
+            text(
+                """
+                SELECT lab_unique_number
+                FROM lab_scope
+                WHERE is_active = true
+                LIMIT 1
+                """
+            )
         ).first()
+
         if row and row[0]:
-            template_data["lab_unique_number"] = str(row[0])
+
+            template_data[
+                "lab_unique_number"
+            ] = str(row[0])
+
     except Exception:
-        # A DBAPI error here marks the current transaction as failed.
-        # Roll back so subsequent queries in the same request can proceed.
+
         db.rollback()
-        # Keep certificate preview resilient even if lab_scope schema differs.
+
+        # Certificate rendering should continue
+        # even if lab_scope schema differs.
         pass
- 
-    # --- Environment Data ---
+
+    # ------------------------------------------------------------------
+    # ENVIRONMENT DATA
+    # ------------------------------------------------------------------
+
     try:
-        # Import from the correct module path inside the htw package
-        from backend.services.htw.htw_job_environment_service import HTWJobEnvironmentService
-        env_svc = HTWJobEnvironmentService(db)
-        pre = env_svc._get_by_job_and_stage(job_id, "PRE")
-        post = env_svc._get_by_job_and_stage(job_id, "POST")
-        temps, hums = [], []
+
+        from backend.services.htw.htw_job_environment_service import (
+            HTWJobEnvironmentService,
+        )
+
+        env_svc = (
+            HTWJobEnvironmentService(db)
+        )
+
+        pre = (
+            env_svc
+            ._get_by_job_and_stage(
+                job_id,
+                "PRE",
+            )
+        )
+
+        post = (
+            env_svc
+            ._get_by_job_and_stage(
+                job_id,
+                "POST",
+            )
+        )
+
+        temps = []
+        hums = []
+
         if pre:
-            temps.append(float(pre.ambient_temperature or 0))
-            hums.append(float(pre.relative_humidity or 0))
+
+            temps.append(
+                float(
+                    pre.ambient_temperature
+                    or 0
+                )
+            )
+
+            hums.append(
+                float(
+                    pre.relative_humidity
+                    or 0
+                )
+            )
+
         if post:
-            temps.append(float(post.ambient_temperature or 0))
-            hums.append(float(post.relative_humidity or 0))
+
+            temps.append(
+                float(
+                    post.ambient_temperature
+                    or 0
+                )
+            )
+
+            hums.append(
+                float(
+                    post.relative_humidity
+                    or 0
+                )
+            )
+
         if temps:
-            template_data["temperature"] = f"{sum(temps)/len(temps):.1f}"
+
+            template_data[
+                "temperature"
+            ] = (
+                f"{sum(temps) / len(temps):.1f}"
+            )
+
         if hums:
-            template_data["humidity"] = f"{int(round(sum(hums)/len(hums)))}"
-    except (ImportError, Exception):
-        # Silently ignore environment service errors (missing file/data)
+
+            template_data[
+                "humidity"
+            ] = (
+                f"{int(round(sum(hums) / len(hums)))}"
+            )
+
+    except Exception:
+
+        # Environment data is optional.
         pass
- 
+
     return template_data
- 
+
  
 # --- Certificate CRUD and workflow ---
  
