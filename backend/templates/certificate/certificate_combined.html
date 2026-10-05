@@ -447,23 +447,40 @@
                     <th style="text-align: center;">in %</th>
                 </tr>
             </thead>
-            <tbody>
+                        <tbody>
                 {% for repeat in repeatability_data %}
                 {% set row_count = repeat.readings|length %}
                 <tr>
                     <td rowspan="{{ row_count }}">{{ repeat.pressure }}</td>
                     <td rowspan="{{ row_count }}">{{ repeat.target }}</td>
                     <td>{{ fmt_by_target(repeat.readings[0], repeat.target) }}</td>
-                    <td>{{ fmt_by_target(repeat.readings[0] - repeat.target, repeat.target) }}</td>
-                    <td>{{ fmt((repeat.readings[0] - repeat.target) / repeat.target * 100) }}</td>
+                    
+                    <!-- FIXED: We calculate it here as (Target - Reading) so preview doesn't crash -->
+                    <td>{{ fmt_by_target(repeat.target - repeat.readings[0], repeat.target) }}</td>
+                    <td>
+                        {% if repeat.target %}
+                            {{ fmt((repeat.target - repeat.readings[0]) / repeat.target * 100) }}
+                        {% else %}
+                            0.00
+                        {% endif %}
+                    </td>
+                    
                     <td rowspan="{{ row_count }}">{{ fmt(repeat.repeatability) }}</td>
                     <td rowspan="{{ row_count }}">{{ fmt(repeat.repeatability_pct) }}</td>
                 </tr>
                 {% for reading in repeat.readings[1:] %}
                 <tr>
                     <td>{{ fmt_by_target(reading, repeat.target) }}</td>
-                    <td>{{ fmt_by_target(reading - repeat.target, repeat.target) }}</td>
-                    <td>{{ fmt((reading - repeat.target) / repeat.target * 100) }}</td>
+                    
+                    <!-- FIXED: We calculate it here as (Target - Reading) -->
+                    <td>{{ fmt_by_target(repeat.target - reading, repeat.target) }}</td>
+                    <td>
+                        {% if repeat.target %}
+                            {{ fmt((repeat.target - reading) / repeat.target * 100) }}
+                        {% else %}
+                            0.00
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 {% endfor %}

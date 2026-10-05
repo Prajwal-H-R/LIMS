@@ -2123,8 +2123,7 @@ const CalibrationPage: React.FC = () => {
             resolutionOfPressureGauge: existingJob.resolution_pressure_gauge
               ? String(existingJob.resolution_pressure_gauge)
               : defaultPressure,
-            resolutionOfPressureGaugeUnit:
-              existingJob.resolution_unit || defaultResUnit,
+            resolutionOfPressureGaugeUnit: existingJob.resolution_unit || defaultResUnit,
           });
         } else {
           let extractedRangeUnit = foundEquipment.range_unit || "";
@@ -2190,7 +2189,7 @@ const CalibrationPage: React.FC = () => {
   }, [deviceDetails.make, deviceDetails.model, loading]);
 
   useEffect(() => {
-    if (loading || !manufacturerSpec || isLocked) return;
+    if (loading || !manufacturerSpec || isLocked || jobId) return;
     setDeviceDetails((prev) => {
       const next = { ...prev };
       let changed = false;
@@ -2229,32 +2228,83 @@ const CalibrationPage: React.FC = () => {
     allResolutions,
     loading,
     isLocked,
+    jobId,
   ]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const handleDeviceDetailChange = (
-    field: keyof typeof deviceDetails,
-    value: string
-  ) => {
-    if (isLocked) return;
-    setDeviceDetails((prev) => ({ ...prev, [field]: value }));
-  };
+  const handleDeviceDetailChange = async (
+  field: keyof typeof deviceDetails,
+  value: string
+) => {
+  if (isLocked) return;
 
-  const handleResolutionUnitChange = (
-    e: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    if (isLocked) return;
-    const selectedUnit = e.target.value;
-    const matched = allResolutions.find((r) => r.unit === selectedUnit);
-    setDeviceDetails((prev) => ({
-      ...prev,
-      resolutionOfPressureGaugeUnit: selectedUnit,
-      resolutionOfPressureGauge: matched
-        ? String(matched.pressure)
-        : prev.resolutionOfPressureGauge,
-    }));
-  };
+  // 1. Update local UI state immediately for a fast user experience
+  setDeviceDetails((prev) => ({ ...prev, [field]: value }));
 
+  // 2. If the job is already created (jobId exists), sync to the backend
+  if (jobId) {
+    // Map the frontend state keys to the backend API JSON keys
+    const payload: Record<string, any> = {};
+    
+    if (field === "calibrationDate") payload.calibration_date = value;
+    else if (field === "type") payload.device_type = value;
+    else if (field === "classification") payload.classification = value;
+    else if (field === "calibrationMode") payload.calibration_mode = value;
+
+    // Only send the request if it's one of the mapped fields
+    if (Object.keys(payload).length > 0) {
+      try {
+        await api.put(`/htw-jobs/${jobId}`, payload);
+        
+        // Re-fetch standards because changes (like Classification or Date) 
+        // might change which Master Standards are applicable
+        await fetchSavedStandards(jobId);
+        
+      } catch (err) {
+        console.error(`Failed to update ${field} in database`, err);
+        alert(`Failed to save ${field} to the database.`);
+      }
+    }
+  }
+};
+
+const handleResolutionUnitChange = async (
+  e: React.ChangeEvent<HTMLSelectElement>
+) => {
+  if (isLocked) return;
+  const selectedUnit = e.target.value;
+  const matched = allResolutions.find((r) => r.unit === selectedUnit);
+  
+  const newResolutionValue = matched
+    ? String(matched.pressure)
+    : deviceDetails.resolutionOfPressureGauge;
+
+  // 1. Update local state immediately for a snappy UI
+  setDeviceDetails((prev) => ({
+    ...prev,
+    resolutionOfPressureGaugeUnit: selectedUnit,
+    resolutionOfPressureGauge: newResolutionValue,
+  }));
+
+  // 2. If the job is already created in the DB, sync the change
+  if (jobId) {
+    try {
+      // Make sure this matches the API path you set up in FastAPI
+      await api.put(`/htw-jobs/${jobId}`, {
+        resolution_pressure_gauge: newResolutionValue,
+        resolution_unit: selectedUnit
+      });
+      
+      // 3. Because changing the resolution might change which Master Standards 
+      // are applicable, we should re-fetch the standards to update the UI table.
+      await fetchSavedStandards(jobId);
+      
+    } catch (err) {
+      console.error("Failed to update resolution in database", err);
+      alert("Failed to save resolution change to the database.");
+    }
+  }
+};
   const handleValidateAndCreate = async () => {
     if (isLocked) {
       alert("Record is locked.");

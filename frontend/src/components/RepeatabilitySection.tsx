@@ -697,6 +697,7 @@ interface RepeatabilityRowData {
 }
 
 interface UncertaintyReference {
+  applied_torque: number; // <-- ADDED: Needed for accurate math matching Excel
   indicated_torque: number;
   error_value: number;
 }
@@ -891,20 +892,27 @@ const RepeatabilitySection = forwardRef<
   // ── Math helpers ───────────────────────────────────────────────────────────
   const calculateInterpolation = (val: number): number => {
     if (references.length === 0) return 0;
-    const lowers = references.filter((r) => r.indicated_torque <= val);
-    const uppers = references.filter((r) => r.indicated_torque >= val);
+    
+    // UPDATED: Filter using applied_torque to match backend math
+    const lowers = references.filter((r) => r.applied_torque <= val);
+    const uppers = references.filter((r) => r.applied_torque >= val);
+    
     const lo = lowers.length > 0 ? lowers[lowers.length - 1] : null;
     const hi = uppers.length > 0 ? uppers[0] : null;
+    
     if (!lo && !hi) return 0;
     if (!lo && hi) return Math.abs(hi.error_value);
     if (lo && !hi) return Math.abs(lo.error_value);
-    if (lo && hi && lo.indicated_torque === hi.indicated_torque)
+    if (lo && hi && lo.applied_torque === hi.applied_torque)
       return Math.abs(lo.error_value);
+      
     if (lo && hi) {
-      const x1 = lo.indicated_torque,
-        y1 = lo.error_value;
-      const x2 = hi.indicated_torque,
-        y2 = hi.error_value;
+      // UPDATED: Variables assigned using applied_torque
+      const x1 = lo.applied_torque,
+            y1 = lo.error_value;
+      const x2 = hi.applied_torque,
+            y2 = hi.error_value;
+            
       return Math.abs(y1 + ((val - x1) * (y2 - y1)) / (x2 - x1));
     }
     return 0;
@@ -1011,7 +1019,7 @@ const RepeatabilitySection = forwardRef<
             set_torque: Number(item.set_torque) || 0,
             readings:
               item.stored_readings && item.stored_readings.length === 5
-                ? item.stored_readings.map(v => v === "0" ? "" : String(v))
+                ? item.stored_readings.map((v: any) => v === "0" || v === 0 ? "" : String(v))
                 : ["", "", "", "", ""],
             mean_xr: item.mean_xr || null,
             corrected_standard: item.corrected_standard || null,
@@ -1080,11 +1088,34 @@ const RepeatabilitySection = forwardRef<
       }
       try {
         setSaveStatus("saving");
-        await api.post("/htw-calculations/repeatability/draft", {
+        // We capture the response from the backend now!
+        const response = await api.post("/htw-calculations/repeatability/draft", {
           job_id: jobId,
           steps: payload,
         });
+        
         lastSavedPayload.current = payloadString;
+        
+        // Update the UI with true backend math
+        if (response.data && response.data.status === "success") {
+          const backendResults = response.data.results;
+          setTableData((prev) => 
+            prev.map(row => {
+              const backendRow = backendResults.find((b: any) => Number(b.step_percent) === Number(row.step_percent));
+              if (backendRow) {
+                return {
+                  ...row,
+                  mean_xr: backendRow.mean_xr,
+                  corrected_standard: backendRow.corrected_standard,
+                  corrected_mean: backendRow.corrected_mean,
+                  deviation_percent: backendRow.deviation_percent
+                };
+              }
+              return row;
+            })
+          );
+        }
+
         setSaveStatus("saved");
       } catch (err) {
         console.error("Draft save failed", err);
@@ -1198,10 +1229,12 @@ const RepeatabilitySection = forwardRef<
       return next;
     });
   };
- const handleClearClick = () => {
-    if (!window.confirm("Clear all reproducibility readings?")) return;
+
+  const handleClearClick = () => {
+    if (!window.confirm("Clear all repeatability readings?")) return;
     clearAllReadings();
   };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   if (loading) return <RepeatabilitySkeleton />;
 

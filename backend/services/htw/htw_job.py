@@ -6,9 +6,8 @@ from typing import Optional
 import re
  
 from backend.models.htw.htw_job import HTWJob
-from backend.schemas.htw.htw_job import HTWJobCreate
+from backend.schemas.htw.htw_job import HTWJobCreate, HTWJobUpdate
 from backend.services.htw.htw_job_standard_selection import auto_select_standards_for_job
- 
 # --- 1. Validation Function ---
 def validate_all_standards_present(db: Session):
     """
@@ -159,6 +158,7 @@ def create_job(db: Session, job_data: HTWJobCreate):
                 range_min=r_min,
                 range_max=r_max,
                 res_pressure=res_val,
+                res_pressure_unit=job_data.resolution_unit,
                 type=job_data.device_type,
                 classification=job_data.classification,
                 job_status="Created"
@@ -183,4 +183,76 @@ def create_job(db: Session, job_data: HTWJobCreate):
         db.rollback() # Rollback everything on error
         print(f"--- ERROR: Job Creation Rolled Back: {str(e)} ---")
         # Pass the specific error message to frontend
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def update_job(db: Session, job_id: int, job_data: HTWJobUpdate):
+    """
+    Dedicated update function for modifying an existing Job by job_id.
+    """
+    # STEP A: Strict Validation - Ensure reference standards are present
+    validate_all_standards_present(db)
+
+    # STEP B: Fetch the existing job
+    existing_job = db.query(HTWJob).filter(HTWJob.job_id == job_id).first()
+    if not existing_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # STEP C: Parse incoming data if provided
+    r_min, r_max = existing_job.range_min, existing_job.range_max
+    if job_data.range_value:
+        r_min, r_max = parse_range_string(job_data.range_value)
+    
+    res_val = existing_job.res_pressure
+    if job_data.resolution_pressure_gauge:
+        try:
+            # Ensure it is treated as a string before applying regex
+            clean_res = re.sub(r'[a-zA-Z%]+', '', str(job_data.resolution_pressure_gauge))
+            res_val = float(clean_res)
+        except ValueError:
+            res_val = None
+
+    # STEP D: Update with Atomic Transaction
+    try:
+        # Update fields only if they are provided in the request
+                # Update fields only if they are provided in the request
+        existing_job.range_min = r_min
+        existing_job.range_max = r_max
+        existing_job.res_pressure = res_val
+        
+        if hasattr(job_data, 'resolution_unit') and job_data.resolution_unit is not None:
+            existing_job.resolution_unit = job_data.resolution_unit
+        
+        if job_data.calibration_date:
+            existing_job.date = job_data.calibration_date
+        
+        if job_data.device_type:
+            existing_job.type = job_data.device_type
+            
+        if job_data.classification:
+            existing_job.classification = job_data.classification
+            
+        # ---> NEW: Add logic to update calibration_mode
+        if job_data.calibration_mode:
+            existing_job.calibration_mode = job_data.calibration_mode
+        # ADD THIS:
+        if job_data.resolution_unit is not None:
+            existing_job.res_pressure_unit = job_data.resolution_unit
+        db.flush()
+        
+        # Re-run auto selection because range, classification, or resolution might have changed
+        auto_select_standards_for_job(
+            db=db,
+            job_id=existing_job.job_id,
+            inward_eqp_id=existing_job.inward_eqp_id,
+            job_date=existing_job.date
+        )
+        
+        db.commit()
+        db.refresh(existing_job)
+        return existing_job
+
+    except Exception as e:
+        db.rollback()
+        print(f"--- ERROR: Job Update Rolled Back: {str(e)} ---")
         raise HTTPException(status_code=400, detail=str(e))

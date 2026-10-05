@@ -51,16 +51,17 @@ class HTWJobResponse(BaseModel):
     job_id: int
     inward_eqp_id: int
 
-    calibration_date: Optional[date] = Field(alias="date")
-    device_type: Optional[str] = Field(alias="type")
+    # Removed the alias, map this directly in flatten_orm
+    calibration_date: Optional[date] = None
+    device_type: Optional[str] = None
 
-    classification: Optional[str]
-    job_status: Optional[str]
-    created_at: Optional[datetime]
-
-    range_min: Optional[float]
-    range_max: Optional[float]
-    res_pressure: Optional[float]
+    classification: Optional[str] = None
+    job_status: Optional[str] = None
+    created_at: Optional[datetime] = None
+    
+    range_min: Optional[float] = None
+    range_max: Optional[float] = None
+    res_pressure: Optional[float] = None
 
     # flattened fields
     srf_no: Optional[str] = None
@@ -73,6 +74,10 @@ class HTWJobResponse(BaseModel):
 
     range_value: Optional[str] = None
     range_unit: Optional[str] = None
+    calibration_mode: Optional[str] = None
+    
+    resolution_pressure_gauge: Optional[float] = None
+    resolution_unit: Optional[str] = None
 
     # =====================================================
     # CLEAN ORM FLATTENING (ONE SOURCE OF TRUTH)
@@ -83,7 +88,6 @@ class HTWJobResponse(BaseModel):
         """
         Converts SQLAlchemy ORM object → clean API response
         """
-
         if isinstance(data, dict) or data is None:
             return data
 
@@ -92,32 +96,41 @@ class HTWJobResponse(BaseModel):
 
         range_min = getattr(data, "range_min", None)
         range_max = getattr(data, "range_max", None)
+        res_pressure = getattr(data, "res_pressure", None)
+        res_pressure_unit = getattr(data, "res_pressure_unit", None)
 
         return {
             "job_id": getattr(data, "job_id", None),
             "inward_eqp_id": getattr(data, "inward_eqp_id", None),
 
-            "date": getattr(data, "date", None),
-            "type": getattr(data, "type", None),
+            # --- FIX IS HERE ---
+            # Map DB 'date' to API 'calibration_date'
+            "calibration_date": getattr(data, "date", None),
+            # Map DB 'type' to API 'device_type'
+            "device_type": getattr(data, "type", None),
+            
             "classification": getattr(data, "classification", None),
+            "calibration_mode": getattr(data, "calibration_mode", None),
             "job_status": getattr(data, "job_status", None),
             "created_at": getattr(data, "created_at", None),
 
             "range_min": range_min,
             "range_max": range_max,
-            "res_pressure": getattr(data, "res_pressure", None),
+            "res_pressure": res_pressure,
 
-            # computed
+            # Computed fields
             "range_value": f"{range_min} - {range_max}" if range_min is not None and range_max is not None else None,
-
-            # inward equipment
+            "resolution_pressure_gauge": res_pressure,
+            "resolution_unit": res_pressure_unit,
+            # Inward equipment relationships
             "nepl_id": getattr(eqp, "nepl_id", None) if eqp else None,
             "make": getattr(eqp, "make", None) if eqp else None,
             "model": getattr(eqp, "model", None) if eqp else None,
             "serial_no": getattr(eqp, "serial_no", None) if eqp else None,
             "material_nomenclature": getattr(eqp, "material_description", None) if eqp else None,
+            "range_unit": getattr(eqp, "range_unit", None) if eqp else None,
 
-            # inward
+            # Inward relationships
             "srf_no": getattr(inward, "srf_no", None) if inward else None,
         }
 
@@ -132,3 +145,12 @@ class HTWJobResponse(BaseModel):
 class HTWJobListResponse(BaseModel):
     total_count: int
     jobs: List[HTWJobResponse]
+
+class HTWJobUpdate(BaseModel):
+    range_value: Optional[str] = None
+    resolution_pressure_gauge: Optional[str] = None
+    resolution_unit: Optional[str] = None         # <-- Add this line
+    calibration_date: Optional[date] = None
+    device_type: Optional[str] = None
+    classification: Optional[str] = None
+    calibration_mode: Optional[str] = None

@@ -787,12 +787,6 @@ def calculate_repeatability_error(readings: List[float]) -> Tuple[float, float]:
 def map_repeatability_to_certificate_data(repeatability_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Map repeatability data from API to certificate template format.
-    
-    Args:
-        repeatability_results: List of repeatability result dictionaries from API
-    
-    Returns:
-        List of dictionaries formatted for certificate template
     """
     certificate_data = []
     
@@ -810,14 +804,34 @@ def map_repeatability_to_certificate_data(repeatability_results: List[Dict[str, 
         # Get set pressure and target value (set_torque is the target Xa)
         set_pressure = result.get('set_pressure', 0.0)
         target_value = result.get('set_torque', 0.0)  # This is Xa (Target Value)
+        target_float = float(target_value) if target_value else 0.0
         
         # Calculate repeatability error
         repeatability_nm, repeatability_pct = calculate_repeatability_error(readings_float)
         
+        # --- THE FIX: Calculate Errors correctly (Target - Reading) ---
+        measurement_errors = result.get('measurement_error')
+        if not measurement_errors:
+            measurement_errors = [(target_float - r) for r in readings_float]
+            
+        relative_measurement_errors = result.get('relative_measurement_error')
+        if not relative_measurement_errors:
+            relative_measurement_errors = [
+                ((target_float - r) / target_float * 100) if target_float != 0 else 0.0 
+                for r in readings_float
+            ]
+        # --------------------------------------------------------------
+        
         certificate_data.append({
             'pressure': round(float(set_pressure), 2) if set_pressure else 0.0,
-            'target': round(float(target_value), 0) if target_value else 0.0,
+            'target': round(target_float, 0) if target_float else 0.0,
             'readings': readings_float,  # Reference Values Xr
+            
+            # --- NEW ADDITIONS FOR HTML ---
+            'measurement_error': measurement_errors,
+            'relative_measurement_error': relative_measurement_errors,
+            # ------------------------------
+            
             'repeatability': repeatability_nm,  # Repeatability error in Nm
             'repeatability_pct': repeatability_pct  # Repeatability error in %
         })
