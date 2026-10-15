@@ -39,6 +39,7 @@ class HTWJob(Base):
     res_pressure_unit = Column(String)
     range_min = Column(Numeric(14, 4))
     range_max = Column(Numeric(14, 4))
+    range_unit = Column(String)
     date = Column(Date)
     
     # Default values as per SQL 'server_default'

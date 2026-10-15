@@ -51,7 +51,6 @@ class HTWJobResponse(BaseModel):
     job_id: int
     inward_eqp_id: int
 
-    # Removed the alias, map this directly in flatten_orm
     calibration_date: Optional[date] = None
     device_type: Optional[str] = None
 
@@ -103,10 +102,7 @@ class HTWJobResponse(BaseModel):
             "job_id": getattr(data, "job_id", None),
             "inward_eqp_id": getattr(data, "inward_eqp_id", None),
 
-            # --- FIX IS HERE ---
-            # Map DB 'date' to API 'calibration_date'
             "calibration_date": getattr(data, "date", None),
-            # Map DB 'type' to API 'device_type'
             "device_type": getattr(data, "type", None),
             
             "classification": getattr(data, "classification", None),
@@ -122,13 +118,13 @@ class HTWJobResponse(BaseModel):
             "range_value": f"{range_min} - {range_max}" if range_min is not None and range_max is not None else None,
             "resolution_pressure_gauge": res_pressure,
             "resolution_unit": res_pressure_unit,
+            "range_unit": getattr(data, "range_unit", None),
             # Inward equipment relationships
             "nepl_id": getattr(eqp, "nepl_id", None) if eqp else None,
             "make": getattr(eqp, "make", None) if eqp else None,
             "model": getattr(eqp, "model", None) if eqp else None,
             "serial_no": getattr(eqp, "serial_no", None) if eqp else None,
             "material_nomenclature": getattr(eqp, "material_description", None) if eqp else None,
-            "range_unit": getattr(eqp, "range_unit", None) if eqp else None,
 
             # Inward relationships
             "srf_no": getattr(inward, "srf_no", None) if inward else None,
@@ -146,10 +142,15 @@ class HTWJobListResponse(BaseModel):
     total_count: int
     jobs: List[HTWJobResponse]
 
+
+# =========================================================
+# UPDATE SCHEMA
+# =========================================================
 class HTWJobUpdate(BaseModel):
     range_value: Optional[str] = None
+    range_unit: Optional[str] = None              # <-- Added this line for updating
     resolution_pressure_gauge: Optional[str] = None
-    resolution_unit: Optional[str] = None         # <-- Add this line
+    resolution_unit: Optional[str] = None         
     calibration_date: Optional[date] = None
     device_type: Optional[str] = None
     classification: Optional[str] = None

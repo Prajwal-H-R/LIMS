@@ -9,6 +9,14 @@
     {%- endif -%}
 {%- endmacro -%}
 
+{%- macro fmt_whole(val) -%}
+    {%- if val != "" and val != None -%}
+        {{ "%.0f" | format(val | float) }}
+    {%- else -%}
+        {{ val }}
+    {%- endif -%}
+{%- endmacro -%}
+
 {%- macro fmt_by_target(val, target) -%}
     {%- if val is number -%}
         {%- set t_val = target | float(default=0) -%}
@@ -131,7 +139,8 @@
             <colgroup>
                 <col style="width: 18%;">
                 <col style="width: 1%;">
-                <col style="width: 31%;">
+                <col style="width: 19%;">
+                <col style="width: 12%;">
                 <col style="width: 18%;">
                 <col style="width: 1%;">
                 <col style="width: 12%;">
@@ -139,8 +148,8 @@
             </colgroup>
             <thead>
                 <tr>
-                    <!-- Colspan is 7 because the last column is effectively split into two for the resolution row -->
-                    <th colspan="7" style="border: 1px solid #000; text-align: left; padding: 5px;">Device Under
+                    <!-- Colspan is 8 because we split both Torque Range (left) and Resolution (right) into two separate columns -->
+                    <th colspan="8" style="border: 1px solid #000; text-align: left; padding: 5px;">Device Under
                         Calibration :</th>
                 </tr>
             </thead>
@@ -149,10 +158,9 @@
                 <tr>
                     <td class="label-cell">Nomenclature</td>
                     <td class="colon-cell">:</td>
-                    <td class="value-cell">{{ device_nomenclature }}</td>
+                    <td class="value-cell" colspan="2">{{ device_nomenclature }}</td>
                     <td class="label-cell">Units of measurement</td>
                     <td class="colon-cell">:</td>
-                    <!-- colspan="2" to span across the split resolution columns below -->
                     <td class="value-cell" colspan="2">{{ units_of_measurement }}</td>
                 </tr>
 
@@ -160,10 +168,9 @@
                 <tr>
                     <td class="label-cell">Make/Model</td>
                     <td class="colon-cell">:</td>
-                    <td class="value-cell">{{ device_make_model }}</td>
+                    <td class="value-cell" colspan="2">{{ device_make_model }}</td>
                     <td class="label-cell">Calibration Mode</td>
                     <td class="colon-cell">:</td>
-                    <!-- colspan="2" -->
                     <td class="value-cell" colspan="2">{{ calibration_mode }}</td>
                 </tr>
 
@@ -171,7 +178,7 @@
                 <tr>
                     <td class="label-cell">Type/Classification</td>
                     <td class="colon-cell">:</td>
-                    <td class="value-cell" style="padding: 0;">
+                    <td class="value-cell" colspan="2" style="padding: 0;">
                         <div class="typeclass-split">
                             <div class="typeclass-left">{{ device_type }}</div>
                             <div class="typeclass-right">{{ device_classification }}</div>
@@ -186,7 +193,7 @@
                 <tr>
                     <td class="label-cell">SI No</td>
                     <td class="colon-cell">:</td>
-                    <td class="value-cell">{{ si_no }}</td>
+                    <td class="value-cell" colspan="2">{{ si_no }}</td>
 
                     <!-- Resolution Label (Spans 2 rows) -->
                     <td class="label-cell" rowspan="2" style="vertical-align: middle;">Resolution of the pressure gauge
@@ -209,8 +216,18 @@
                 <tr>
                     <td class="label-cell">Torque Range</td>
                     <td class="colon-cell">:</td>
-                    <td class="value-cell">{{ torque_range }}</td>
-                    <!-- No cells here for the right side because the rows above are spanning down -->
+                    
+                    <!-- SPLIT VALUE CELL 1: The Range -->
+                    <td class="value-cell" style="border-right: 1px solid #000;">
+                        {{ torque_range }}
+                    </td>
+                    
+                    <!-- SPLIT VALUE CELL 2: The Range Unit -->
+                    <td class="value-cell">
+                        {{ torque_range_unit }}
+                    </td>
+                    
+                    <!-- No cells here for the right side because the resolution rows above are spanning down -->
                 </tr>
             </tbody>
         </table>
@@ -447,15 +464,15 @@
                     <th style="text-align: center;">in %</th>
                 </tr>
             </thead>
-                        <tbody>
+            <tbody>
                 {% for repeat in repeatability_data %}
                 {% set row_count = repeat.readings|length %}
                 <tr>
-                    <td rowspan="{{ row_count }}">{{ repeat.pressure }}</td>
-                    <td rowspan="{{ row_count }}">{{ repeat.target }}</td>
+                    <!-- Uses fmt_whole to enforce 0 decimal points -->
+                    <td rowspan="{{ row_count }}">{{ fmt_whole(repeat.pressure) }}</td>
+                    <td rowspan="{{ row_count }}">{{ fmt_whole(repeat.target) }}</td>
                     <td>{{ fmt_by_target(repeat.readings[0], repeat.target) }}</td>
                     
-                    <!-- FIXED: We calculate it here as (Target - Reading) so preview doesn't crash -->
                     <td>{{ fmt_by_target(repeat.target - repeat.readings[0], repeat.target) }}</td>
                     <td>
                         {% if repeat.target %}
@@ -472,7 +489,6 @@
                 <tr>
                     <td>{{ fmt_by_target(reading, repeat.target) }}</td>
                     
-                    <!-- FIXED: We calculate it here as (Target - Reading) -->
                     <td>{{ fmt_by_target(repeat.target - reading, repeat.target) }}</td>
                     <td>
                         {% if repeat.target %}
@@ -513,11 +529,12 @@
             <tbody>
                 {% for reprod in reproducability_data %}
                 <tr>
-                    <td>{{ reprod.target }}</td>
-                    <td>{{ fmt_by_target(reprod.series1, reprod.target) }}</td>
-                    <td>{{ fmt_by_target(reprod.series2, reprod.target) }}</td>
-                    <td>{{ fmt_by_target(reprod.series3, reprod.target) }}</td>
-                    <td>{{ fmt_by_target(reprod.series4, reprod.target) }}</td>
+                    <!-- Uses fmt_whole to enforce 0 decimal points -->
+                    <td>{{ fmt_whole(reprod.target) }}</td>
+                    <td>{{ fmt(reprod.series1) }}</td>
+                    <td>{{ fmt(reprod.series2) }}</td>
+                    <td>{{ fmt(reprod.series3) }}</td>
+                    <td>{{ fmt(reprod.series4) }}</td>
                     <td>{{ fmt(reprod.error) }}</td>
                     <td>{{ fmt(reprod.error_pct) }}</td>
                 </tr>
@@ -552,11 +569,12 @@
             <tbody>
                 {% for geo in geometric_data %}
                 <tr>
-                    <td>{{ geo.target }}</td>
-                    <td>{{ fmt_by_target(geo.pos0, geo.target) }}</td>
-                    <td>{{ fmt_by_target(geo.pos90, geo.target) }}</td>
-                    <td>{{ fmt_by_target(geo.pos180, geo.target) }}</td>
-                    <td>{{ fmt_by_target(geo.pos270, geo.target) }}</td>
+                    <!-- Uses fmt_whole to enforce 0 decimal points -->
+                    <td>{{ fmt_whole(geo.target) }}</td>
+                    <td>{{ fmt(geo.pos0) }}</td>
+                    <td>{{ fmt(geo.pos90) }}</td>
+                    <td>{{ fmt(geo.pos180) }}</td>
+                    <td>{{ fmt(geo.pos270) }}</td>
                     <td>{{ fmt(geo.error) }}</td>
                     <td>{{ fmt(geo.error_pct) }}</td>
                 </tr>
@@ -661,11 +679,12 @@
             <tbody>
                 {% for interface in interface_data %}
                 <tr>
-                    <td>{{ interface.target }}</td>
-                    <td>{{ fmt_by_target(interface.series1, interface.target) }}</td>
-                    <td>{{ fmt_by_target(interface.series2, interface.target) }}</td>
-                    <td>{{ fmt_by_target(interface.series3, interface.target) }}</td>
-                    <td>{{ fmt_by_target(interface.series4, interface.target) }}</td>
+                    <!-- Uses fmt_whole to enforce 0 decimal points -->
+                    <td>{{ fmt_whole(interface.target) }}</td>
+                    <td>{{ fmt(interface.series1) }}</td>
+                    <td>{{ fmt(interface.series2) }}</td>
+                    <td>{{ fmt(interface.series3) }}</td>
+                    <td>{{ fmt(interface.series4) }}</td>
                     <td>{{ fmt(interface.error) }}</td>
                     <td>{{ fmt(interface.error_pct) }}</td>
                 </tr>
@@ -694,15 +713,16 @@
             <tbody>
                 {% for loading in loading_data %}
                 <tr>
-                    <td rowspan="2">{{ loading.torque }}</td>
+                    <!-- Uses fmt_whole to enforce 0 decimal points -->
+                    <td rowspan="2">{{ fmt_whole(loading.torque) }}</td>
                     <td>Position 1 <br></br> ({{ loading.position1 }})</td>
-                    <td>{{ fmt_by_target(loading.mean1, loading.torque) }}</td>
+                    <td>{{ fmt(loading.mean1) }}</td>
                     <td rowspan="2">{{ fmt(loading.error) }}</td>
                     <td rowspan="2">{{ fmt(loading.error_pct) }}</td>
                 </tr>
                 <tr>
                     <td>Position 2 <br></br> ({{ loading.position2 }})</td>
-                    <td>{{ fmt_by_target(loading.mean2, loading.torque) }}</td>
+                    <td>{{ fmt(loading.mean2) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -741,7 +761,8 @@
             <tbody>
                 {% for uncertainty in uncertainty_data %}
                 <tr>
-                    <td>{{ uncertainty.calibration }}</td>
+                    <!-- Uses fmt_whole to enforce 0 decimal points -->
+                    <td>{{ fmt_whole(uncertainty.calibration) }}</td>
                     <td>{{ fmt(uncertainty.average) }}</td>
                     <td>{{ fmt(uncertainty.error_pct) }}</td>
                     <td>{{ fmt(uncertainty.uncertainty_w) }}</td>

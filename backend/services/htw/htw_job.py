@@ -8,6 +8,7 @@ import re
 from backend.models.htw.htw_job import HTWJob
 from backend.schemas.htw.htw_job import HTWJobCreate, HTWJobUpdate
 from backend.services.htw.htw_job_standard_selection import auto_select_standards_for_job
+
 # --- 1. Validation Function ---
 def validate_all_standards_present(db: Session):
     """
@@ -38,9 +39,9 @@ def validate_all_standards_present(db: Session):
         try:
             has_data = db.execute(query).scalar()
             if not has_data:
-                empty_tables.append(required_tables[table])  # ✅ use label
+                empty_tables.append(required_tables[table])  
         except Exception:
-            empty_tables.append(required_tables[table])      # ✅ use label
+            empty_tables.append(required_tables[table])      
 
     if empty_tables:
         print(f"--- DEBUG: Job Creation Blocked. Missing data in: {empty_tables} ---")
@@ -49,11 +50,12 @@ def validate_all_standards_present(db: Session):
             detail={
                 "error_code": "MISSING_STANDARDS",
                 "message": "Required reference standards are missing.",
-                "missing_tables": empty_tables  # now contains labels
+                "missing_tables": empty_tables  
             }
         )
    
     return True
+
 # --- 2. Helper Functions ---
 def parse_range_string(range_str: str):
     if not range_str:
@@ -124,15 +126,18 @@ def create_job(db: Session, job_data: HTWJobCreate):
         existing_job = db.query(HTWJob).filter(HTWJob.inward_eqp_id == job_data.inward_eqp_id).first()
        
         if existing_job:
-            # UPDATE LOGIC
+            # UPDATE LOGIC (If job was already generated for this equipment)
             existing_job.srf_id = final_srf_id
             existing_job.srf_eqp_id = final_srf_eqp_id
             existing_job.range_min = r_min
             existing_job.range_max = r_max
+            existing_job.range_unit = job_data.range_unit  # <-- Added range unit update
             existing_job.res_pressure = res_val
+            existing_job.res_pressure_unit = job_data.resolution_unit
             existing_job.date = job_data.calibration_date
             existing_job.type = job_data.device_type
             existing_job.classification = job_data.classification
+            existing_job.calibration_mode = job_data.calibration_mode
            
             db.flush()
            
@@ -157,10 +162,12 @@ def create_job(db: Session, job_data: HTWJobCreate):
                 date=job_data.calibration_date,
                 range_min=r_min,
                 range_max=r_max,
+                range_unit=job_data.range_unit,           # <-- Added range unit create
                 res_pressure=res_val,
                 res_pressure_unit=job_data.resolution_unit,
                 type=job_data.device_type,
                 classification=job_data.classification,
+                calibration_mode=job_data.calibration_mode,
                 job_status="Created"
             )
            
@@ -214,14 +221,18 @@ def update_job(db: Session, job_id: int, job_data: HTWJobUpdate):
 
     # STEP D: Update with Atomic Transaction
     try:
-        # Update fields only if they are provided in the request
-                # Update fields only if they are provided in the request
+        # Update parsed values
         existing_job.range_min = r_min
         existing_job.range_max = r_max
         existing_job.res_pressure = res_val
         
-        if hasattr(job_data, 'resolution_unit') and job_data.resolution_unit is not None:
-            existing_job.resolution_unit = job_data.resolution_unit
+        # ---> NEW: Update range_unit if provided
+        if job_data.range_unit is not None:
+            existing_job.range_unit = job_data.range_unit
+        
+        # (Cleaned up: Map resolution_unit directly to the correct DB column res_pressure_unit)
+        if job_data.resolution_unit is not None:
+            existing_job.res_pressure_unit = job_data.resolution_unit
         
         if job_data.calibration_date:
             existing_job.date = job_data.calibration_date
@@ -232,12 +243,9 @@ def update_job(db: Session, job_id: int, job_data: HTWJobUpdate):
         if job_data.classification:
             existing_job.classification = job_data.classification
             
-        # ---> NEW: Add logic to update calibration_mode
         if job_data.calibration_mode:
             existing_job.calibration_mode = job_data.calibration_mode
-        # ADD THIS:
-        if job_data.resolution_unit is not None:
-            existing_job.res_pressure_unit = job_data.resolution_unit
+            
         db.flush()
         
         # Re-run auto selection because range, classification, or resolution might have changed

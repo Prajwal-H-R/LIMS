@@ -6,6 +6,7 @@ from sqlalchemy import text, or_  # Added or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
 from sqlalchemy import func
+
 from backend.models.certificate.certificate import HTWCertificate
 from backend.services.certificate.certificate_assets_helper import get_certificate_asset_urls
 from backend.models.htw.htw_job import HTWJob
@@ -20,6 +21,8 @@ from backend.models.external_upload import ExternalUpload
 from backend.models.lab_scope import LabScope
 from backend.models.equipment_flow_config import EquipmentFlowConfig
 from backend.models.certificate.certificate_config import CertificateDetails
+from backend.models.htw.htw_repeatability import HTWRepeatability
+
 # Set up logger
 logger = logging.getLogger(__name__)
  
@@ -262,17 +265,29 @@ def _map_loading_point(data: Dict) -> List[Dict]:
     }]
  
  
-def _map_uncertainty_budget(budgets: List) -> List[Dict]:
+def _map_uncertainty_budget(budgets: List, rep_lookup: Dict[float, float] = None) -> List[Dict]:
     """Map HTWUncertaintyBudget to certificate template uncertainty_data."""
+    if rep_lookup is None:
+        rep_lookup = {}
+        
     out: List[Dict[str, Any]] = []
     permissible_deviation_pct = 4.0
+    
     for b in budgets[:3]:
-        avg = float(b.set_torque_ts) if b.set_torque_ts else 0
+        # Calibration Value Xa
+        calibration_val = float(b.set_torque_ts) if b.set_torque_ts else 0.0
+        
+        # Get step_percent safely to map the corresponding corrected_mean
+        step_pct = float(b.step_percent) if getattr(b, 'step_percent', None) is not None else 0.0
+        
+        # Average Value of Xa (from the HTWRepeatability table)
+        average_val = rep_lookup.get(step_pct, 0.0)
+
         mean_err_pct = float(b.mean_measurement_error or 0)  # Mean Value of the error in %
         result = "Pass" if abs(mean_err_pct) <= permissible_deviation_pct else "Fail"
         out.append({
-            "calibration": round(avg, 0),
-            "average": round(avg, 2),
+            "calibration": round(calibration_val, 0),
+            "average": round(average_val, 2),
             "error_pct": round(mean_err_pct, 4),
             "uncertainty_w": round(float(b.expanded_uncertainty or 0), 4),
             "max_error": round(float(b.max_device_error or 0), 4),
@@ -374,59 +389,20 @@ def build_template_data(
             detail="Job has no linked equipment or inward",
         )
 
-    # ------------------------------------------------------------------
     # RESOLUTION
     # ------------------------------------------------------------------
-
-    resolution_value = ""
-    resolution_unit = ""
-
-    if job.res_pressure:
-
-        try:
-            res_id = int(
-                float(job.res_pressure)
-            )
-
-            res_obj = (
-                db.query(
-                    HTWPressureGaugeResolution
-                )
-                .filter(
-                    HTWPressureGaugeResolution.id
-                    == res_id
-                )
-                .first()
-            )
-
-            if res_obj:
-
-                resolution_value = str(
-                    res_obj.pressure
-                )
-
-                resolution_unit = (
-                    res_obj.unit or ""
-                )
-
-            else:
-
-                resolution_value = str(
-                    job.res_pressure
-                )
-
-                resolution_unit = "bar"
-
-        except (
-            ValueError,
-            TypeError,
-        ):
-
-            resolution_value = str(
-                job.res_pressure
-            )
-
-            resolution_unit = "bar"
+ 
+    resolution_value = (
+        str(job.res_pressure)
+        if job.res_pressure is not None
+        else ""
+    )
+ 
+    resolution_unit = (
+        (job.res_pressure_unit or "").strip()
+    )
+ 
+ 
 
     # ------------------------------------------------------------------
     # EQUIPMENT / STANDARDS
@@ -641,6 +617,13 @@ def build_template_data(
                 "range",
                 "",
             )
+        ),
+        
+        # ---> NEW: Add torque range unit fetched from Job or fallback to Equipment Unit
+        "torque_range_unit": (
+            (job.range_unit).strip()
+            if getattr(job, "range_unit", None)
+            else eqp_dict.get("unit", "").strip()
         ),
 
         # --------------------------------------------------------------
@@ -864,24 +847,17 @@ def build_template_data(
     # ------------------------------------------------------------------
 
     budgets = (
-        db.query(
-            HTWUncertaintyBudget
-        )
-        .filter(
-            HTWUncertaintyBudget.job_id
-            == job_id
-        )
-        .order_by(
-            HTWUncertaintyBudget.step_percent
-        )
+        db.query(HTWUncertaintyBudget)
+        .filter(HTWUncertaintyBudget.job_id == job_id)
+        .order_by(HTWUncertaintyBudget.step_percent)
         .all()
     )
 
-    template_data[
-        "uncertainty_data"
-    ] = _map_uncertainty_budget(
-        budgets
-    )
+    # Fetch Repeatability to get the corrected_mean mapped by step_percent
+    repeatabilities = db.query(HTWRepeatability).filter(HTWRepeatability.job_id == job_id).all()
+    rep_lookup = {float(r.step_percent): float(r.corrected_mean or 0) for r in repeatabilities if r.step_percent is not None}
+
+    template_data["uncertainty_data"] = _map_uncertainty_budget(budgets, rep_lookup)
 
     # ------------------------------------------------------------------
     # SAVED ISO 6789 CONFORMITY VALUES
@@ -1137,7 +1113,12 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
     existing = db.query(HTWCertificate).filter(HTWCertificate.job_id == job_id).first()
  
     budgets = db.query(HTWUncertaintyBudget).filter(HTWUncertaintyBudget.job_id == job_id).order_by(HTWUncertaintyBudget.step_percent).all()
-    mapped_uncertainty_rows = _map_uncertainty_budget(budgets)
+    
+    # Fetch Repeatability to get the corrected_mean mapped by step_percent
+    repeatabilities = db.query(HTWRepeatability).filter(HTWRepeatability.job_id == job_id).all()
+    rep_lookup = {float(r.step_percent): float(r.corrected_mean or 0) for r in repeatabilities if r.step_percent is not None}
+    
+    mapped_uncertainty_rows = _map_uncertainty_budget(budgets, rep_lookup)
     permissible_arr = [row.get("permissible_deviation_iso_6789") for row in mapped_uncertainty_rows]
     results_arr = [row.get("result") for row in mapped_uncertainty_rows]
  

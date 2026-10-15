@@ -1966,8 +1966,8 @@ const CalibrationPage: React.FC = () => {
     calibrationMode: "Clockwise",
     type: "Indicating",
     classification: "Type I Class C",
-    resolutionOfPressureGaugeUnit: "",
-    resolutionOfPressureGauge: "",
+    resolutionOfPressureGaugeUnit: "bar",
+    resolutionOfPressureGauge: "0.1",
   });
 
   // ── Fetch saved standards ──────────────────────────────────────────────────
