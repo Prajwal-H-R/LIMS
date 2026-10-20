@@ -14,7 +14,7 @@ export interface EquipmentDetail {
   // FIX: Allowing null to match backend data and prevent type errors
   inspe_notes?: string | null; 
   
-  calibration_by: 'In Lab' | 'Outsource' | 'Out Lab'; // Keep this specific for form logic
+  calibration_by: 'In House(Torque Lab)' | 'Outsource' | 'Out Lab'; // Keep this specific for form logic
   supplier?: string;
   out_dc?: string;
   in_dc?: string;

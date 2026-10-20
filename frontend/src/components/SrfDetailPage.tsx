@@ -370,7 +370,7 @@ const generatePDF = useCallback(async () => {
     
     const officeLinesRaw = [
       "FOR OUR OFFICE USE ONLY",
-      `1. Calibration by ${checkboxText(true)} NEPL (In-Lab) / ${checkboxText(false)} NEPL (on-site) / ${checkboxText(true)} outsource`,
+      `1. Calibration by ${checkboxText(true)} NEPL(In-House(Torque Lab)) / ${checkboxText(false)} NEPL (on-site) / ${checkboxText(true)} outsource`,
       `2. Date received: ${srfData.date || "-"} | 3. Nextage Unique ID: ${srfData.srf_no || "-"}`,
       `4. Resources reviewed: ${checkboxText(true)} Meets requirement | 5. Contract Ref: ${srfData.inward?.customer_dc_no || "-"}`,
     ];

@@ -6,9 +6,9 @@ from typing import Optional
 import re
  
 from backend.models.htw.htw_job import HTWJob
-from backend.schemas.htw.htw_job import HTWJobCreate
+from backend.schemas.htw.htw_job import HTWJobCreate, HTWJobUpdate
 from backend.services.htw.htw_job_standard_selection import auto_select_standards_for_job
- 
+
 # --- 1. Validation Function ---
 def validate_all_standards_present(db: Session):
     """
@@ -39,9 +39,9 @@ def validate_all_standards_present(db: Session):
         try:
             has_data = db.execute(query).scalar()
             if not has_data:
-                empty_tables.append(required_tables[table])  # ✅ use label
+                empty_tables.append(required_tables[table])  
         except Exception:
-            empty_tables.append(required_tables[table])      # ✅ use label
+            empty_tables.append(required_tables[table])      
 
     if empty_tables:
         print(f"--- DEBUG: Job Creation Blocked. Missing data in: {empty_tables} ---")
@@ -50,11 +50,12 @@ def validate_all_standards_present(db: Session):
             detail={
                 "error_code": "MISSING_STANDARDS",
                 "message": "Required reference standards are missing.",
-                "missing_tables": empty_tables  # now contains labels
+                "missing_tables": empty_tables  
             }
         )
    
     return True
+
 # --- 2. Helper Functions ---
 def parse_range_string(range_str: str):
     if not range_str:
@@ -125,15 +126,18 @@ def create_job(db: Session, job_data: HTWJobCreate):
         existing_job = db.query(HTWJob).filter(HTWJob.inward_eqp_id == job_data.inward_eqp_id).first()
        
         if existing_job:
-            # UPDATE LOGIC
+            # UPDATE LOGIC (If job was already generated for this equipment)
             existing_job.srf_id = final_srf_id
             existing_job.srf_eqp_id = final_srf_eqp_id
             existing_job.range_min = r_min
             existing_job.range_max = r_max
+            existing_job.range_unit = job_data.range_unit  # <-- Added range unit update
             existing_job.res_pressure = res_val
+            existing_job.res_pressure_unit = job_data.resolution_unit
             existing_job.date = job_data.calibration_date
             existing_job.type = job_data.device_type
             existing_job.classification = job_data.classification
+            existing_job.calibration_mode = job_data.calibration_mode
            
             db.flush()
            
@@ -158,9 +162,12 @@ def create_job(db: Session, job_data: HTWJobCreate):
                 date=job_data.calibration_date,
                 range_min=r_min,
                 range_max=r_max,
+                range_unit=job_data.range_unit,           # <-- Added range unit create
                 res_pressure=res_val,
+                res_pressure_unit=job_data.resolution_unit,
                 type=job_data.device_type,
                 classification=job_data.classification,
+                calibration_mode=job_data.calibration_mode,
                 job_status="Created"
             )
            
@@ -183,4 +190,77 @@ def create_job(db: Session, job_data: HTWJobCreate):
         db.rollback() # Rollback everything on error
         print(f"--- ERROR: Job Creation Rolled Back: {str(e)} ---")
         # Pass the specific error message to frontend
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def update_job(db: Session, job_id: int, job_data: HTWJobUpdate):
+    """
+    Dedicated update function for modifying an existing Job by job_id.
+    """
+    # STEP A: Strict Validation - Ensure reference standards are present
+    validate_all_standards_present(db)
+
+    # STEP B: Fetch the existing job
+    existing_job = db.query(HTWJob).filter(HTWJob.job_id == job_id).first()
+    if not existing_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # STEP C: Parse incoming data if provided
+    r_min, r_max = existing_job.range_min, existing_job.range_max
+    if job_data.range_value:
+        r_min, r_max = parse_range_string(job_data.range_value)
+    
+    res_val = existing_job.res_pressure
+    if job_data.resolution_pressure_gauge:
+        try:
+            # Ensure it is treated as a string before applying regex
+            clean_res = re.sub(r'[a-zA-Z%]+', '', str(job_data.resolution_pressure_gauge))
+            res_val = float(clean_res)
+        except ValueError:
+            res_val = None
+
+    # STEP D: Update with Atomic Transaction
+    try:
+        # Update parsed values
+        existing_job.range_min = r_min
+        existing_job.range_max = r_max
+        existing_job.res_pressure = res_val
+        
+        # ---> NEW: Update range_unit if provided
+        if job_data.range_unit is not None:
+            existing_job.range_unit = job_data.range_unit
+        
+        # (Cleaned up: Map resolution_unit directly to the correct DB column res_pressure_unit)
+        if job_data.resolution_unit is not None:
+            existing_job.res_pressure_unit = job_data.resolution_unit
+        
+        if job_data.calibration_date:
+            existing_job.date = job_data.calibration_date
+        
+        if job_data.device_type:
+            existing_job.type = job_data.device_type
+            
+        if job_data.classification:
+            existing_job.classification = job_data.classification
+            
+        if job_data.calibration_mode:
+            existing_job.calibration_mode = job_data.calibration_mode
+            
+        db.flush()
+        
+        # Re-run auto selection because range, classification, or resolution might have changed
+        auto_select_standards_for_job(
+            db=db,
+            job_id=existing_job.job_id,
+            inward_eqp_id=existing_job.inward_eqp_id,
+            job_date=existing_job.date
+        )
+        
+        db.commit()
+        db.refresh(existing_job)
+        return existing_job
+
+    except Exception as e:
+        db.rollback()
+        print(f"--- ERROR: Job Update Rolled Back: {str(e)} ---")
         raise HTTPException(status_code=400, detail=str(e))

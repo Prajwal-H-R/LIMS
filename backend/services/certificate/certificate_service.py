@@ -2,10 +2,12 @@ from datetime import date, datetime, timedelta
 from typing import Optional, Dict, Any, List
 import secrets
 import logging  # Added for debugging
+import math
 from sqlalchemy import text, or_  # Added or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
 from sqlalchemy import func
+
 from backend.models.certificate.certificate import HTWCertificate
 from backend.services.certificate.certificate_assets_helper import get_certificate_asset_urls
 from backend.models.htw.htw_job import HTWJob
@@ -20,6 +22,8 @@ from backend.models.external_upload import ExternalUpload
 from backend.models.lab_scope import LabScope
 from backend.models.equipment_flow_config import EquipmentFlowConfig
 from backend.models.certificate.certificate_config import CertificateDetails
+from backend.models.htw.htw_repeatability import HTWRepeatability
+
 # Set up logger
 logger = logging.getLogger(__name__)
  
@@ -161,10 +165,151 @@ def _map_equipment_to_template(equipment: Dict[str, Any], customer: Any, inward:
     }
  
  
-def _map_repeatability(results: List[Dict]) -> List[Dict]:
-    """Map repeatability API-style results to certificate format."""
+def _jsonb_numeric_leaf(value: Any) -> Any:
+    """Convert one JSONB item to a numeric value, preserving missing values as blank."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, dict):
+        # JSONB rows may store the number under a descriptive key.
+        for key in (
+            "relative_measurement_error",
+            "value",
+            "error",
+            "deviation",
+            "percentage",
+            "percent",
+        ):
+            if key in value:
+                return _jsonb_numeric_leaf(value[key])
+        return ""
+    if isinstance(value, (list, tuple)):
+        # A nested list is not expected for a single reading. Avoid displaying a
+        # misleading representation if an unexpected shape is stored.
+        return ""
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else ""
+    except (TypeError, ValueError, OverflowError):
+        return ""
+
+
+def _jsonb_numeric_values(value: Any) -> List[Any]:
+    """Normalize JSONB relative-error data to an ordered list aligned with readings.
+
+    Supported shapes include a JSON array, a dictionary containing a named array,
+    or an index-keyed dictionary. The database value is used as-is; values are not
+    recalculated from the repeatability readings.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [_jsonb_numeric_leaf(item) for item in value]
+    if isinstance(value, dict):
+        for key in (
+            "relative_measurement_error",
+            "values",
+            "data",
+            "readings",
+            "items",
+            "errors",
+        ):
+            if key in value:
+                return _jsonb_numeric_values(value[key])
+
+        # Preserve numeric index order for structures such as {"0": ..., "1": ...}.
+        items = list(value.items())
+        if items and all(str(key).isdigit() for key, _ in items):
+            items.sort(key=lambda item: int(str(item[0])))
+        output: List[Any] = []
+        for _, item in items:
+            if isinstance(item, (list, tuple)):
+                output.extend(_jsonb_numeric_values(item))
+            elif isinstance(item, dict):
+                output.append(_jsonb_numeric_leaf(item))
+            else:
+                output.append(_jsonb_numeric_leaf(item))
+        return output
+    return [_jsonb_numeric_leaf(value)]
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    """Return a finite float or None for values that cannot be compared safely."""
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _record_value(record: Any, name: str) -> Any:
+    """Read a field from either an ORM instance or a SQLAlchemy RowMapping."""
+    if record is None:
+        return None
+    try:
+        return record[name]
+    except (KeyError, TypeError, IndexError):
+        return getattr(record, name, None)
+
+
+def _resolve_repeatability_step_percent(
+    result: Dict[str, Any],
+    repeatability_rows: List[HTWRepeatability],
+) -> Optional[float]:
+    """Find the stored step_percent for one service result without relying on row order."""
+    explicit_step = _safe_float(result.get("step_percent"))
+    if explicit_step is not None:
+        return round(explicit_step, 2)
+
+    target = _safe_float(result.get("set_torque"))
+    pressure = _safe_float(result.get("set_pressure"))
+
+    def matching_rows(use_target: bool, use_pressure: bool) -> List[HTWRepeatability]:
+        matched: List[HTWRepeatability] = []
+        for row in repeatability_rows:
+            checks = []
+            row_target = _safe_float(getattr(row, "set_torque_ts", None))
+            row_pressure = _safe_float(getattr(row, "set_pressure_ps", None))
+
+            if use_target and target is not None and row_target is not None:
+                checks.append(math.isclose(target, row_target, rel_tol=1e-4, abs_tol=0.05))
+            if use_pressure and pressure is not None and row_pressure is not None:
+                checks.append(math.isclose(pressure, row_pressure, rel_tol=1e-4, abs_tol=0.05))
+
+            if checks and all(checks):
+                matched.append(row)
+        return matched
+
+    # Prefer matching on both saved setpoints, then use one unique setpoint match.
+    candidate_sets = []
+    if target is not None and pressure is not None:
+        candidate_sets.append(matching_rows(use_target=True, use_pressure=True))
+    if target is not None:
+        candidate_sets.append(matching_rows(use_target=True, use_pressure=False))
+    if pressure is not None:
+        candidate_sets.append(matching_rows(use_target=False, use_pressure=True))
+
+    for candidates in candidate_sets:
+        if len(candidates) == 1 and candidates[0].step_percent is not None:
+            return round(float(candidates[0].step_percent), 2)
+    return None
+
+
+def _map_repeatability(
+    results: List[Dict],
+    resolution_lookup: Dict[float, Any] = None,
+    repeatability_rows: List[HTWRepeatability] = None,
+) -> List[Dict]:
+    """Map repeatability rows while sourcing relative error and BRE from saved DB values."""
     import math
+
+    resolution_lookup = resolution_lookup or {}
+    repeatability_rows = repeatability_rows or []
     out = []
+
     for r in results:
         readings = r.get("stored_readings", [])
         if not readings:
@@ -172,21 +317,43 @@ def _map_repeatability(results: List[Dict]) -> List[Dict]:
         readings_float = [float(x) for x in readings if x is not None]
         if not readings_float:
             continue
+
+        # Match to the saved resolution record via its step percentage. No reading-order
+        # fallback is used, because that could attach another calibration step's values.
+        step_pct = _resolve_repeatability_step_percent(r, repeatability_rows)
+        resolution = resolution_lookup.get(round(step_pct, 2)) if step_pct is not None else None
+
+        relative_errors = _jsonb_numeric_values(
+            _record_value(resolution, "relative_measurement_error")
+        ) if resolution else []
+
         mean = sum(readings_float) / len(readings_float)
-        var = sum((x - mean) ** 2 for x in readings_float) / len(readings_float)
-        std = math.sqrt(var)
-        pct = (std / mean * 100) if mean else 0
+        bre_db = _safe_float(
+            _record_value(resolution, "variation_due_to_repeatability")
+        ) if resolution else None
+
+        # BRE is the persisted variation_due_to_repeatability. Preserve the certificate's
+        # percentage column by expressing that stored value relative to the reading mean.
+        if bre_db is None:
+            bre_value: Any = ""
+            bre_pct: Any = ""
+        else:
+            bre_value = round(bre_db, 2)
+            bre_pct = round(abs(bre_db / mean * 100), 2) if mean else 0.0
+
         out.append({
             "pressure": round(float(r.get("set_pressure", 0) or 0), 2),
             "target": round(float(r.get("set_torque", 0) or 0), 0),
             "readings": readings_float,
-            "repeatability": round(std, 2),
-            "repeatability_pct": round(pct, 2),
+            "relative_measurement_errors": relative_errors,
+            "repeatability": bre_value,
+            "repeatability_pct": bre_pct,
+            "step_percent": step_pct,
         })
+
     out.sort(key=lambda x: x["pressure"])
     return out
- 
- 
+
 def _map_reproducibility(data: Dict) -> List[Dict]:
     if not data or data.get("status") != "success":
         return []
@@ -262,37 +429,74 @@ def _map_loading_point(data: Dict) -> List[Dict]:
     }]
  
  
-def _map_uncertainty_budget(budgets: List) -> List[Dict]:
-    """Map HTWUncertaintyBudget to certificate template uncertainty_data."""
+def _map_uncertainty_budget(
+    budgets: List,
+    rep_lookup: Dict[float, float] = None,
+    deviation_percent_lookup: Dict[float, Optional[float]] = None,
+) -> List[Dict]:
+    """Map uncertainty-budget rows, sourcing the mean error from HTWRepeatability.deviation_percent."""
+    if rep_lookup is None:
+        rep_lookup = {}
+    if deviation_percent_lookup is None:
+        deviation_percent_lookup = {}
+
     out: List[Dict[str, Any]] = []
     permissible_deviation_pct = 4.0
-    for b in budgets[:3]:
-        avg = float(b.set_torque_ts) if b.set_torque_ts else 0
-        mean_err_pct = float(b.mean_measurement_error or 0)  # Mean Value of the error in %
-        result = "Pass" if abs(mean_err_pct) <= permissible_deviation_pct else "Fail"
+
+    # Include every saved uncertainty-budget step. Some jobs can have 4, 5, or more
+    # calibration steps, so never truncate this list to a fixed number of rows.
+    for b in budgets:
+        # Calibration Value Xa
+        calibration_val = float(b.set_torque_ts) if b.set_torque_ts is not None else 0.0
+
+        # Match each uncertainty row to repeatability data by the persisted step percentage.
+        step_pct = (
+            float(b.step_percent)
+            if getattr(b, "step_percent", None) is not None
+            else 0.0
+        )
+        step_key = round(step_pct, 2)
+
+        # Average Value of Xa remains sourced from HTWRepeatability.corrected_mean.
+        average_val = rep_lookup.get(step_key, 0.0)
+
+        # IMPORTANT: Section F's "Mean Value of the error in %" must come from
+        # HTWRepeatability.deviation_percent, not HTWUncertaintyBudget.mean_measurement_error.
+        mean_err_pct = _safe_float(deviation_percent_lookup.get(step_key))
+        if mean_err_pct is None:
+            # Do not silently substitute a different field or present missing data as zero.
+            error_pct_value: Any = ""
+            mean_measurement_error_value: Any = ""
+            result = ""
+        else:
+            error_pct_value = round(mean_err_pct, 4)
+            mean_measurement_error_value = round(mean_err_pct, 4)
+            result = "Pass" if abs(mean_err_pct) <= permissible_deviation_pct else "Fail"
+
+        cmc_of_reading = _safe_float(getattr(b, "cmc_of_reading", None))
+        expanded_uncertainty = _safe_float(getattr(b, "expanded_uncertainty", None))
+        uncertainty_candidates = [
+            value
+            for value in (cmc_of_reading, expanded_uncertainty)
+            if value is not None
+        ]
+        uncertainty_w = round(max(uncertainty_candidates), 4) if uncertainty_candidates else 0.0
+
         out.append({
-            "calibration": round(avg, 0),
-            "average": round(avg, 2),
-            "error_pct": round(mean_err_pct, 4),
-            "uncertainty_w": round(float(b.expanded_uncertainty or 0), 4),
+            "calibration": round(calibration_val, 0),
+            "average": round(float(average_val or 0), 2),
+            "error_pct": error_pct_value,
+            "uncertainty_w": uncertainty_w,
+            # Keep this key for the updated HTML template while retaining compatibility
+            # with any template that still reads error_pct.
+            "mean_measurement_error": mean_measurement_error_value,
             "max_error": round(float(b.max_device_error or 0), 4),
             "uncertainty_w_prime": round(float(b.final_wl or 0), 4),
             "permissible_deviation_iso_6789": "\u00b14",
             "result": result,
         })
- 
-    # Ensure the table renders exactly 3 rows/entries as per template requirement.
-    while len(out) < 3:
-        out.append({
-            "calibration": "",
-            "average": "",
-            "error_pct": "",
-            "uncertainty_w": "",
-            "max_error": "",
-            "uncertainty_w_prime": "",
-            "permissible_deviation_iso_6789": "\u00b14",
-            "result": "",
-        })
+
+    # Do not pad to a fixed row count. Return only real database-backed steps.
     return out
  
  
@@ -374,59 +578,20 @@ def build_template_data(
             detail="Job has no linked equipment or inward",
         )
 
-    # ------------------------------------------------------------------
     # RESOLUTION
     # ------------------------------------------------------------------
-
-    resolution_value = ""
-    resolution_unit = ""
-
-    if job.res_pressure:
-
-        try:
-            res_id = int(
-                float(job.res_pressure)
-            )
-
-            res_obj = (
-                db.query(
-                    HTWPressureGaugeResolution
-                )
-                .filter(
-                    HTWPressureGaugeResolution.id
-                    == res_id
-                )
-                .first()
-            )
-
-            if res_obj:
-
-                resolution_value = str(
-                    res_obj.pressure
-                )
-
-                resolution_unit = (
-                    res_obj.unit or ""
-                )
-
-            else:
-
-                resolution_value = str(
-                    job.res_pressure
-                )
-
-                resolution_unit = "bar"
-
-        except (
-            ValueError,
-            TypeError,
-        ):
-
-            resolution_value = str(
-                job.res_pressure
-            )
-
-            resolution_unit = "bar"
+ 
+    resolution_value = (
+        str(job.res_pressure)
+        if job.res_pressure is not None
+        else ""
+    )
+ 
+    resolution_unit = (
+        (job.res_pressure_unit or "").strip()
+    )
+ 
+ 
 
     # ------------------------------------------------------------------
     # EQUIPMENT / STANDARDS
@@ -642,6 +807,13 @@ def build_template_data(
                 "",
             )
         ),
+        
+        # ---> NEW: Add torque range unit fetched from Job or fallback to Equipment Unit
+        "torque_range_unit": (
+            (job.range_unit).strip()
+            if getattr(job, "range_unit", None)
+            else eqp_dict.get("unit", "").strip()
+        ),
 
         # --------------------------------------------------------------
         # DYNAMIC CERTIFICATE CONFIGURATION
@@ -764,8 +936,35 @@ def build_template_data(
     }
 
     # ------------------------------------------------------------------
-    # REPEATABILITY
+    # REPEATABILITY / SAVED RESOLUTION VALUES
     # ------------------------------------------------------------------
+
+    # Use saved rows from both tables to associate each displayed repeatability step
+    # with the matching htw_un_resolution step_percent.
+    repeatability_headers = (
+        db.query(HTWRepeatability)
+        .filter(HTWRepeatability.job_id == job_id)
+        .all()
+    )
+    resolution_rows = db.execute(
+        text(
+            """
+            SELECT id, step_percent, relative_measurement_error,
+                   variation_due_to_repeatability
+            FROM htw_un_resolution
+            WHERE job_id = :job_id
+            ORDER BY step_percent ASC, id DESC
+            """
+        ),
+        {"job_id": job_id},
+    ).mappings().all()
+    resolution_lookup: Dict[float, Any] = {}
+    for resolution_row in resolution_rows:
+        if resolution_row["step_percent"] is None:
+            continue
+        resolution_key = round(float(resolution_row["step_percent"]), 2)
+        # If duplicate step rows exist, retain the newest (largest id) record.
+        resolution_lookup.setdefault(resolution_key, resolution_row)
 
     rep_data = (
         repeat_services
@@ -784,7 +983,9 @@ def build_template_data(
         template_data[
             "repeatability_data"
         ] = _map_repeatability(
-            rep_data["results"]
+            rep_data["results"],
+            resolution_lookup,
+            repeatability_headers,
         )
 
     # ------------------------------------------------------------------
@@ -864,23 +1065,29 @@ def build_template_data(
     # ------------------------------------------------------------------
 
     budgets = (
-        db.query(
-            HTWUncertaintyBudget
-        )
-        .filter(
-            HTWUncertaintyBudget.job_id
-            == job_id
-        )
-        .order_by(
-            HTWUncertaintyBudget.step_percent
-        )
+        db.query(HTWUncertaintyBudget)
+        .filter(HTWUncertaintyBudget.job_id == job_id)
+        .order_by(HTWUncertaintyBudget.step_percent)
         .all()
     )
 
-    template_data[
-        "uncertainty_data"
-    ] = _map_uncertainty_budget(
-        budgets
+    # Map repeatability values by step_percent. The Section F mean error is specifically
+    # sourced from HTWRepeatability.deviation_percent; corrected_mean remains the Average Xa.
+    rep_lookup = {
+        round(float(r.step_percent), 2): float(r.corrected_mean or 0)
+        for r in repeatability_headers
+        if r.step_percent is not None
+    }
+    deviation_percent_lookup = {
+        round(float(r.step_percent), 2): _safe_float(r.deviation_percent)
+        for r in repeatability_headers
+        if r.step_percent is not None
+    }
+
+    template_data["uncertainty_data"] = _map_uncertainty_budget(
+        budgets,
+        rep_lookup,
+        deviation_percent_lookup,
     )
 
     # ------------------------------------------------------------------
@@ -1137,7 +1344,26 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
     existing = db.query(HTWCertificate).filter(HTWCertificate.job_id == job_id).first()
  
     budgets = db.query(HTWUncertaintyBudget).filter(HTWUncertaintyBudget.job_id == job_id).order_by(HTWUncertaintyBudget.step_percent).all()
-    mapped_uncertainty_rows = _map_uncertainty_budget(budgets)
+    
+    # Keep the saved repeatability values aligned to uncertainty rows by step_percent.
+    # corrected_mean supplies Average Xa; deviation_percent supplies Section F mean error (%).
+    repeatabilities = db.query(HTWRepeatability).filter(HTWRepeatability.job_id == job_id).all()
+    rep_lookup = {
+        round(float(r.step_percent), 2): float(r.corrected_mean or 0)
+        for r in repeatabilities
+        if r.step_percent is not None
+    }
+    deviation_percent_lookup = {
+        round(float(r.step_percent), 2): _safe_float(r.deviation_percent)
+        for r in repeatabilities
+        if r.step_percent is not None
+    }
+
+    mapped_uncertainty_rows = _map_uncertainty_budget(
+        budgets,
+        rep_lookup,
+        deviation_percent_lookup,
+    )
     permissible_arr = [row.get("permissible_deviation_iso_6789") for row in mapped_uncertainty_rows]
     results_arr = [row.get("result") for row in mapped_uncertainty_rows]
  

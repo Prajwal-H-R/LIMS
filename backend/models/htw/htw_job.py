@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, Numeric, Text, Date, TIMESTAMP, 
+    Column, Integer, Numeric,Float, Text, Date, TIMESTAMP, 
     ForeignKey, UniqueConstraint, func, String
 )
 from sqlalchemy.orm import relationship,Mapped, mapped_column
@@ -35,14 +35,17 @@ class HTWJob(Base):
     pressure_gauge_ref_id = Column(Integer, ForeignKey("htw_pressure_gauge_resolution.id"), nullable=True)
 
     # --- DATA COLUMNS ---
-    res_pressure = Column(Numeric(14, 4))
+    res_pressure = Column(Float)
+    res_pressure_unit = Column(String)
     range_min = Column(Numeric(14, 4))
     range_max = Column(Numeric(14, 4))
+    range_unit = Column(String)
     date = Column(Date)
     
     # Default values as per SQL 'server_default'
     type = Column(Text, server_default="indicating")
     classification = Column(Text, server_default="Type I Class C")
+    calibration_mode = Column(String)
     job_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)    
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

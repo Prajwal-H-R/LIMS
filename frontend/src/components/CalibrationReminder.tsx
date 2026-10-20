@@ -1,13 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bell,
   CalendarDays,
   Clock3,
   Filter,
+  GripVertical,
   Search,
   X,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpRight,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/config";
@@ -241,25 +245,257 @@ const CustomerSummaryCard: React.FC<{
   );
 };
 
+const CALIBRATION_REMINDER_POSITION_KEY = "engineer_calibration_reminder_vertical_position_v1";
+
 export const CalibrationReminderFloatingButton: React.FC<{
   count: number;
   onOpen: () => void;
+  onOpenExplorer?: () => void;
   label?: string;
-}> = ({ count, onOpen, label }) => {
+}> = ({ count, onOpen, onOpenExplorer, label }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [verticalPosition, setVerticalPosition] = useState<number>(() => {
+    try {
+      const rawPosition = localStorage.getItem(CALIBRATION_REMINDER_POSITION_KEY);
+      if (rawPosition === null) return 0.5;
+      const stored = Number(rawPosition);
+      return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.5;
+    } catch {
+      // Storage can be unavailable in private browsing; keep the default position.
+      return 0.5;
+    }
+  });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startRatio: number;
+    lastRatio: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const countLabel = count > 99 ? "99+" : count;
+  const actionLabel = label || (count > 0 ? "View due reminders" : "Open calibration explorer");
+  const accessibleLabel =
+    label ||
+    (count > 0
+      ? `Open calibration reminders (${count} due)`
+      : "Open calibration explorer");
+
+  // Store a normalized vertical position so the tab restores sensibly after a resize
+  // or when the same user opens the portal on a screen with a different height.
+  const clampPosition = useCallback((ratio: number) => {
+    if (typeof window === "undefined" || window.innerHeight <= 0) return ratio;
+
+    const viewportHeight = window.innerHeight;
+    const widgetHeight = containerRef.current?.getBoundingClientRect().height ?? 112;
+    const margin = 12;
+    const minimum = (widgetHeight / 2 + margin) / viewportHeight;
+    const maximum = 1 - minimum;
+
+    // For unusually short viewports, centering is safer than forcing an invalid range.
+    if (maximum < minimum) return 0.5;
+    return Math.min(maximum, Math.max(minimum, ratio));
+  }, []);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+
+    suppressClickRef.current = false;
+    const initialRatio = verticalPosition;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startRatio: initialRatio,
+      lastRatio: initialRatio,
+      moved: false,
+    };
+
+    // Pointer capture keeps dragging reliable if the pointer briefly leaves the handle.
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // The browser may already have released the pointer; normal pointer events still work.
+    }
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || typeof window === "undefined") return;
+
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.moved && Math.abs(deltaY) < 4) return;
+
+    drag.moved = true;
+    event.preventDefault();
+    drag.lastRatio = clampPosition(drag.startRatio + deltaY / window.innerHeight);
+
+    // Move the existing DOM node directly during the gesture. React state is committed
+    // only on release, avoiding a render for every pointer-move event.
+    if (containerRef.current) {
+      containerRef.current.style.top = `${drag.lastRatio * 100}%`;
+    }
+  };
+
+  const handlePointerEnd = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    dragRef.current = null;
+    if (drag.moved) {
+      suppressClickRef.current = true;
+      setVerticalPosition(drag.lastRatio);
+      try {
+        localStorage.setItem(CALIBRATION_REMINDER_POSITION_KEY, String(drag.lastRatio));
+      } catch {
+        // Dragging still works for this session if browser storage is unavailable.
+      }
+      // Do not leave a stale suppression flag if the browser does not synthesize click.
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
+  };
+
+  const handleExpandClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (suppressClickRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      return;
+    }
+    setExpanded(true);
+  };
+
+  // When opening the larger panel or resizing the browser, keep the entire widget on-screen.
+  useEffect(() => {
+    const keepInBounds = () => {
+      const nextPosition = clampPosition(verticalPosition);
+      if (Math.abs(nextPosition - verticalPosition) < 0.0001) return;
+
+      setVerticalPosition(nextPosition);
+      try {
+        localStorage.setItem(CALIBRATION_REMINDER_POSITION_KEY, String(nextPosition));
+      } catch {
+        // Position clamping should not depend on storage availability.
+      }
+    };
+
+    const frame = window.requestAnimationFrame(keepInBounds);
+    window.addEventListener("resize", keepInBounds);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", keepInBounds);
+    };
+  }, [clampPosition, expanded, verticalPosition]);
+
+  const renderedPosition = dragRef.current?.lastRatio ?? verticalPosition;
+
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="fixed bottom-6 right-6 z-[340] inline-flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-xl transition hover:bg-indigo-700"
+    <div
+      ref={containerRef}
+      className={`fixed right-0 z-[340] -translate-y-1/2 transition-[width] duration-200 ease-out ${
+        expanded ? "w-72 max-w-[calc(100vw-0.75rem)]" : "w-11"
+      }`}
+      style={{ top: `${renderedPosition * 100}%` }}
+      aria-label="Calibration reminder shortcut"
     >
-      <Bell className="h-4 w-4" />
-      {label || (count > 0 ? "Calibration Due" : "Open calibration explorer")}
-      {count > 0 && (
-        <span className="ml-1 inline-flex min-w-6 items-center justify-center rounded-full bg-white/20 px-2 py-0.5 text-xs font-bold">
-          {count > 99 ? "99+" : count}
-        </span>
+      {expanded ? (
+        <div className="max-h-[calc(100vh-1.5rem)] overflow-hidden rounded-l-2xl border border-r-0 border-indigo-100 bg-white shadow-[0_12px_36px_-12px_rgba(15,23,42,0.35)]">
+          <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-white px-3 py-3">
+            <div
+              className="group flex min-w-0 flex-1 cursor-grab select-none items-center gap-3 touch-none active:cursor-grabbing"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerEnd}
+              onPointerCancel={handlePointerEnd}
+              title="Drag up or down to reposition"
+              aria-label="Drag calibration reminder panel up or down"
+            >
+              <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-300 opacity-70 transition-colors group-hover:text-slate-400" aria-hidden="true" />
+              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md ring-2 ring-indigo-100">
+                <Bell className="h-5 w-5" />
+                {count > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">
+                    {countLabel}
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-900">Calibration reminders</p>
+                <p className="text-xs text-slate-500">
+                  {count > 0
+                    ? `${count} certificate${count === 1 ? "" : "s"} due`
+                    : "Open the calibration explorer"}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              aria-label="Collapse calibration reminders to the right edge"
+              title="Collapse"
+            >
+              <ChevronRight className="h-4 w-4 text-slate-400" />
+            </button>
+          </div>
+
+          <div className="border-t border-slate-100 p-3">
+            <button
+              type="button"
+              onClick={onOpen}
+              className="inline-flex w-full items-center justify-between gap-3 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              aria-label={accessibleLabel}
+            >
+              <span>{actionLabel}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-white/80" />
+            </button>
+
+            {count > 0 && onOpenExplorer && (
+              <button
+                type="button"
+                onClick={onOpenExplorer}
+                className="group mt-2 inline-flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2"
+                aria-label="Open reminder explorer to search all calibration reminders"
+              >
+                <span>Open Reminder Explorer</span>
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition group-hover:bg-indigo-100 group-hover:text-indigo-700">
+                  <ArrowUpRight className="h-4 w-4" />
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onClick={handleExpandClick}
+          className="relative flex h-28 w-11 touch-none select-none flex-col items-center justify-center gap-2 rounded-l-2xl border border-r-0 border-indigo-200 bg-white/95 text-indigo-700 shadow-lg shadow-slate-900/10 backdrop-blur transition hover:w-12 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 cursor-grab active:cursor-grabbing"
+          aria-label={`Expand ${accessibleLabel}`}
+          aria-expanded={false}
+          title={`${accessibleLabel} — drag up or down to reposition`}
+        >
+          <GripVertical className="h-3.5 w-3.5 text-slate-300 opacity-70" aria-hidden="true" />
+          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md ring-2 ring-indigo-100">
+            <Bell className="h-4 w-4" />
+            {count > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">
+                {countLabel}
+              </span>
+            )}
+          </span>
+          <ChevronLeft className="h-3.5 w-3.5 text-slate-400" />
+        </button>
       )}
-    </button>
+    </div>
   );
 };
 
@@ -364,6 +600,7 @@ export const CalibrationReminderWidget: React.FC<{
       <CalibrationReminderFloatingButton
         count={total}
         onOpen={total > 0 ? () => reminder.setOpen(true) : handleOpenExplorer}
+        onOpenExplorer={handleOpenExplorer}
       />
     </>
   );

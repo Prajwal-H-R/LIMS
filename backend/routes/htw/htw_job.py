@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ...db import get_db
-from ...schemas.htw.htw_job import HTWJobCreate, HTWJobResponse, JobStatusUpdate
+from ...schemas.htw.htw_job import HTWJobCreate, HTWJobResponse, JobStatusUpdate,HTWJobUpdate
 from ...services.htw import htw_job as service
 
 # --- NEW IMPORTS for the "Finish Job" endpoint ---
@@ -96,3 +96,10 @@ def finish_htw_job_and_create_deviation_if_oot(
 # ====================================================================
 # END: NEW "FINISH JOB" ENDPOINT
 # ====================================================================
+@router.put("/{job_id}", summary="Update an existing Job by ID")
+def update_existing_job(job_id: int, job_data: HTWJobUpdate, db: Session = Depends(get_db)):
+    """
+    Updates specific fields of an existing HTW Job by its job_id.
+    Automatically re-calculates reference standards after update.
+    """
+    return service.update_job(db=db, job_id=job_id, job_data=job_data)

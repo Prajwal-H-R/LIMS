@@ -156,18 +156,53 @@ def get_set_values_safe(specs: HTWManufacturerSpec, step_percent: float):
     return None, None
 
 def calculate_interpolation(db: Session, mean_xr: float) -> float:
-    # This function remains the same
     val = float(mean_xr)
-    lower_ref = db.query(HTWStandardUncertaintyReference).filter(and_(HTWStandardUncertaintyReference.indicated_torque <= val, HTWStandardUncertaintyReference.is_active == True)).order_by(desc(HTWStandardUncertaintyReference.indicated_torque)).first()
-    upper_ref = db.query(HTWStandardUncertaintyReference).filter(and_(HTWStandardUncertaintyReference.indicated_torque >= val, HTWStandardUncertaintyReference.is_active == True)).order_by(asc(HTWStandardUncertaintyReference.indicated_torque)).first()
-    if not lower_ref and not upper_ref: return 0.0
-    if not lower_ref and upper_ref: return abs(float(upper_ref.error_value))
-    if lower_ref and not upper_ref: return abs(float(lower_ref.error_value))
-    if lower_ref.id == upper_ref.id: return abs(float(lower_ref.error_value))
-    x, x1, y1, x2, y2 = val, float(lower_ref.indicated_torque), float(lower_ref.error_value), float(upper_ref.indicated_torque), float(upper_ref.error_value)
-    if (x2 - x1) == 0: raw_y = y1
-    else: raw_y = y1 + ((x - x1) * (y2 - y1) / (x2 - x1))
-    return round(abs(raw_y), 2)
+    
+    # 1. Search the database using APPLIED_TORQUE
+    lower_ref = db.query(HTWStandardUncertaintyReference).filter(
+        and_(
+            HTWStandardUncertaintyReference.applied_torque <= val, 
+            HTWStandardUncertaintyReference.is_active == True
+        )
+    ).order_by(desc(HTWStandardUncertaintyReference.applied_torque)).first()
+    
+    upper_ref = db.query(HTWStandardUncertaintyReference).filter(
+        and_(
+            HTWStandardUncertaintyReference.applied_torque >= val, 
+            HTWStandardUncertaintyReference.is_active == True
+        )
+    ).order_by(asc(HTWStandardUncertaintyReference.applied_torque)).first()
+    
+    # 2. Handle out of bounds / edge cases
+    if not lower_ref and not upper_ref: 
+        return 0.0
+    if not lower_ref and upper_ref: 
+        res = (float(upper_ref.error_value))
+        return res
+    if lower_ref and not upper_ref: 
+        res = (float(lower_ref.error_value))
+        return res
+    if lower_ref.id == upper_ref.id: 
+        res = (float(lower_ref.error_value))
+        return res
+        
+    # 3. Assign the math variables
+    x = val
+    x1 = float(lower_ref.applied_torque)
+    y1 = float(lower_ref.error_value)
+    x2 = float(upper_ref.applied_torque)
+    y2 = float(upper_ref.error_value)
+    
+    # 4. Perform the interpolation
+    if (x2 - x1) == 0: 
+        raw_y = y1
+    else: 
+        raw_y = y1 + ((x - x1) * (y2 - y1) / (x2 - x1))
+        
+    # 5. Return as a positive absolute value, rounded to 2 decimals
+    final_res = round((raw_y), 2)
+    
+    return final_res
 
 # ==================================================================================
 #                           SECTION A: REPEATABILITY
@@ -277,12 +312,25 @@ def get_stored_repeatability(db: Session, job_id: int):
     return {"job_id": job_id, "status": "success", "results": results_summary, "defaults": all_defaults}
 
 def get_uncertainty_references(db: Session):
-    # This function remains the same
     try:
-        refs = db.query(HTWStandardUncertaintyReference).filter(HTWStandardUncertaintyReference.is_active == True).order_by(asc(HTWStandardUncertaintyReference.indicated_torque)).all()
-        return [{"indicated_torque": float(r.indicated_torque), "error_value": float(r.error_value)} for r in refs]
+        # Changed order_by to applied_torque
+        refs = db.query(HTWStandardUncertaintyReference).filter(
+            HTWStandardUncertaintyReference.is_active == True
+        ).order_by(asc(HTWStandardUncertaintyReference.applied_torque)).all()
+        
+        # Added applied_torque to the return dictionary
+        return [
+            {
+                "applied_torque": float(r.applied_torque), # <--- ADDED THIS
+                "indicated_torque": float(r.indicated_torque), 
+                "error_value": float(r.error_value)
+            } 
+            for r in refs
+        ]
     except Exception as e:
-        db.rollback(); print(f"DB Error getting references: {e}"); return []
+        db.rollback()
+        print(f"DB Error getting references: {e}")
+        return []
 
 # ==================================================================================
 #                           ALL OTHER SECTIONS

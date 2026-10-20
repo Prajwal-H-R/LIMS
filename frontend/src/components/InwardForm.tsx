@@ -26,7 +26,7 @@ interface EquipmentDetail extends Omit<BaseEquipmentDetail, 'inspe_notes' | 'cal
   inspe_status: 'OK' | 'Not OK';
   inspe_remarks: string; 
   engineer_remarks?: string; 
-  calibration_by: 'In Lab' | 'Outsource' | 'On-Site';
+  calibration_by: 'In House(Torque Lab)' | 'Outsource' | 'On-Site';
   accessories_included?: string;
   remarks_and_decision?: string | null;
   status?: string; 
@@ -711,9 +711,9 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       setMaterialOptions(prev => Array.from(new Set([...prev, ...usedMaterials])).filter(Boolean).sort());
 
       const allMappedEquipment: EquipmentDetail[] = (inward.equipments ?? []).map((eq) => {
-        let rawCalibBy = eq.calibration_by || 'In Lab';
+        let rawCalibBy = eq.calibration_by || 'In House(Torque Lab)';
         if (rawCalibBy === 'Out Lab') rawCalibBy = 'On-Site';
-        const calibrationBy = (['In Lab', 'Outsource', 'On-Site'] as const).includes(rawCalibBy as any) ? (rawCalibBy as 'In Lab' | 'Outsource' | 'On-Site') : 'In Lab';
+        const calibrationBy = (['In House(Torque Lab)', 'Outsource', 'On-Site'] as const).includes(rawCalibBy as any) ? (rawCalibBy as 'In House(Torque Lab)' | 'Outsource' | 'On-Site') : 'In House(Torque Lab)';
         const isOk = (eq.visual_inspection_notes || 'OK').trim().toUpperCase() === 'OK';
         const existingPhotoUrls = Array.isArray(eq.photos) ? eq.photos.filter((path): path is string => typeof path === 'string' && path.trim().length > 0) : [];
         if (eq.make) fetchModelsForMake(eq.make);
@@ -743,7 +743,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
       
       if (visibleEquipment.length > 0) setEquipmentList(visibleEquipment);
       else if (allMappedEquipment.length > 0) { setEquipmentList([]); showMessage('error', 'No items with "reviewed" or "updated" status found.'); }
-      else { setEquipmentList([{ nepl_id: `${inward.srf_no}-1`, material_desc: '', make: '', model: '', qty: 1, calibration_by: 'In Lab' as const, inspe_status: 'OK' as const, inspe_remarks: '', engineer_remarks: '', accessories_included: '', photos: [], photoPreviews: [], existingPhotoUrls: [] }]); }
+      else { setEquipmentList([{ nepl_id: `${inward.srf_no}-1`, material_desc: '', make: '', model: '', qty: 1, calibration_by: 'In House(Torque Lab)' as const, inspe_status: 'OK' as const, inspe_remarks: '', engineer_remarks: '', accessories_included: '', photos: [], photoPreviews: [], existingPhotoUrls: [] }]); }
     } catch (error) { showMessage('error', 'Failed to load inward data.'); navigate('/engineer/view-inward'); } finally { setIsLoadingData(false); }
   };
 
@@ -772,7 +772,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     try {
       const displaySrf = "TBD";
       const newFormData: ExtendedInwardFormType = { srf_no: displaySrf, received_date: safeDate(new Date().toISOString()), material_inward_date: safeDate(new Date().toISOString()), customer_dc_date: '', customer_dc_no: '', receiver: user?.full_name || user?.username || '', customer_id: null, customer_details: '', status: 'created' as const };
-      const newEquipmentList: EquipmentDetail[] = [{ nepl_id: `${displaySrf}-1`, material_desc: '', make: '', model: '', qty: 1, calibration_by: 'In Lab' as const, inspe_status: 'OK' as const, inspe_remarks: '', engineer_remarks: '', accessories_included: '', photos: [], photoPreviews: [], existingPhotoUrls: [] }];
+      const newEquipmentList: EquipmentDetail[] = [{ nepl_id: `${displaySrf}-1`, material_desc: '', make: '', model: '', qty: 1, calibration_by: 'In House(Torque Lab)' as const, inspe_status: 'OK' as const, inspe_remarks: '', engineer_remarks: '', accessories_included: '', photos: [], photoPreviews: [], existingPhotoUrls: [] }];
       setFormData(newFormData); setEquipmentList(newEquipmentList); lastSavedDataRef.current = serializeDraftState({ formData: newFormData, equipmentList: newEquipmentList });
     } catch (error: any) { setFormData(prev => ({ ...prev, srf_no: 'Error!' })); } finally { setIsLoadingData(false); }
   };
@@ -959,7 +959,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
           equipmentToUpdate.inspe_status = value as 'OK' | 'Not OK';
           if (value === 'OK') equipmentToUpdate.engineer_remarks = ''; 
       } else if (field === 'calibration_by') {
-          (equipmentToUpdate as any).calibration_by = value as 'In Lab' | 'Outsource' | 'On-Site';
+          (equipmentToUpdate as any).calibration_by = value as 'In House(Torque Lab)' | 'Outsource' | 'On-Site';
           if (value !== 'Outsource') { delete (equipmentToUpdate as any).supplier; delete (equipmentToUpdate as any).in_dc; delete (equipmentToUpdate as any).out_dc; }
       } else if (field === 'make') {
           equipmentToUpdate.make = String(value);
@@ -994,7 +994,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     if (isLocked) return; 
     setEquipmentList(currentList => {
       const newIndex = currentList.length + 1;
-      return [...currentList, { nepl_id: `${formData.srf_no}-${newIndex}`, material_desc: '', make: '', model: '', qty: 1, calibration_by: 'In Lab' as const, inspe_status: 'OK' as const, inspe_remarks: '', engineer_remarks: '', accessories_included: '', photos: [], photoPreviews: [], existingPhotoUrls: [] }];
+      return [...currentList, { nepl_id: `${formData.srf_no}-${newIndex}`, material_desc: '', make: '', model: '', qty: 1, calibration_by: 'In House(Torque Lab)' as const, inspe_status: 'OK' as const, inspe_remarks: '', engineer_remarks: '', accessories_included: '', photos: [], photoPreviews: [], existingPhotoUrls: [] }];
     });
   };
 
@@ -1489,7 +1489,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                         <td className="p-2"><input value={equipment.range} readOnly={isHydraulic} onChange={e => !isHydraulic && handleEquipmentChange(index, 'range', e.target.value)} className={`w-full px-2 py-1.5 border rounded-md ${isHydraulic ? 'bg-gray-50' : ''}`} placeholder={isHydraulic ? 'Auto-filled' : 'Enter Range'} disabled={isLocked} /></td>
                         <td className="p-2"><input value={equipment.serial_no} onChange={e=>handleEquipmentChange(index,'serial_no',e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked} /></td>
                         <td className="p-2"><input type="number" value={equipment.qty} min={1} onChange={e=>handleEquipmentChange(index,'qty',e.target.value)} required className="w-full px-2 py-1.5 border rounded-md text-center" disabled={isLocked} /></td>
-                        <td className="p-2"><select value={equipment.calibration_by} onChange={e=>handleEquipmentChange(index,'calibration_by',e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked}><option value="In Lab">In Lab</option><option value="Outsource">Outsource</option><option value="On-Site">On-Site</option></select></td>
+                        <td className="p-2"><select value={equipment.calibration_by} onChange={e=>handleEquipmentChange(index,'calibration_by',e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked}><option value="In House(Torque Lab)">In House(Torque Lab)</option><option value="Outsource">Outsource</option><option value="On-Site">On-Site</option></select></td>
                         {equipment.calibration_by === 'Outsource' ? (
                           <>
                             <td className="p-2"><input placeholder="Supplier" value={(equipment as any).supplier || ''} onChange={(e) => handleEquipmentChange(index, 'supplier' as any, e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked} /></td>

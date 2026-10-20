@@ -1,5 +1,5 @@
 #htw_const_coverage_factor.py
-from sqlalchemy import Column, Integer, Numeric, Boolean, TIMESTAMP, func
+from sqlalchemy import Column, Integer, Numeric, Boolean,Float, TIMESTAMP, func
 from backend.db import Base
  
  
@@ -8,7 +8,7 @@ class HTWConstCoverageFactor(Base):
  
     id = Column(Integer, primary_key=True, index=True)
  
-    k = Column(Numeric(6, 4), nullable=False)
+    k = Column(Float, nullable=False)
  
     is_active = Column(Boolean, default=True)
  
