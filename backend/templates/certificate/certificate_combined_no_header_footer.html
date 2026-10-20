@@ -690,8 +690,7 @@
 
         <div
             style="text-align: center; margin-top: 15px; font-size: 8pt; border: 1px solid #000; padding: 8px; background-color: white;">
-            The Estimated Uncertainty of Measurement associated with the results is calculated at a confidence level of 95% <br>approximately with a coverage factor k={{ coverage_factor_k | default(2) }}
-        </div>
+            The Estimated Uncertainty of Measurement associated with the results is calculated at a confidence level of 95% <br>approximately with a coverage factor k={{ '%g' | format((coverage_factor_k or 2) | float) }}
 
         <!-- SIGNATURE BLOCK START -->
         <div style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between;">
