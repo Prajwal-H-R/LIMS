@@ -467,6 +467,8 @@
             <tbody>
                 {% for repeat in repeatability_data %}
                 {% set row_count = repeat.readings|length %}
+                {# Values are supplied from htw_un_resolution.relative_measurement_error (JSONB). #}
+                {% set relative_errors = repeat.relative_measurement_errors | default([], true) %}
                 <tr>
                     <!-- Uses fmt_whole to enforce 0 decimal points -->
                     <td rowspan="{{ row_count }}">{{ fmt_whole(repeat.pressure) }}</td>
@@ -475,10 +477,9 @@
                     
                     <td>{{ fmt_by_target(repeat.target - repeat.readings[0], repeat.target) }}</td>
                     <td>
-                        {% if repeat.target %}
-                            {{ fmt((repeat.target - repeat.readings[0]) / repeat.target * 100) }}
-                        {% else %}
-                            0.00
+                        {# Use the saved JSONB value; do not recalculate relative measurement error here. #}
+                        {% if relative_errors|length > 0 %}
+                            {{ fmt(relative_errors[0]) }}
                         {% endif %}
                     </td>
                     
@@ -491,10 +492,9 @@
                     
                     <td>{{ fmt_by_target(repeat.target - reading, repeat.target) }}</td>
                     <td>
-                        {% if repeat.target %}
-                            {{ fmt((repeat.target - reading) / repeat.target * 100) }}
-                        {% else %}
-                            0.00
+                        {# loop.index is the original reading index because this loop starts at readings[1:]. #}
+                        {% if relative_errors|length > loop.index %}
+                            {{ fmt(relative_errors[loop.index]) }}
                         {% endif %}
                     </td>
                 </tr>
@@ -764,7 +764,8 @@
                     <!-- Uses fmt_whole to enforce 0 decimal points -->
                     <td>{{ fmt_whole(uncertainty.calibration) }}</td>
                     <td>{{ fmt(uncertainty.average) }}</td>
-                    <td>{{ fmt(uncertainty.error_pct) }}</td>
+                    {# Explicit database-backed mean error, with the legacy key as compatibility fallback. #}
+                    <td>{{ fmt(uncertainty.mean_measurement_error | default(uncertainty.error_pct)) }}</td>
                     <td>{{ fmt(uncertainty.uncertainty_w) }}</td>
                     <td>{{ fmt(uncertainty.max_error) }}</td>
                     <td>{{ fmt(uncertainty.uncertainty_w_prime) }}</td>

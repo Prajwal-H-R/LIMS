@@ -177,13 +177,13 @@ def calculate_interpolation(db: Session, mean_xr: float) -> float:
     if not lower_ref and not upper_ref: 
         return 0.0
     if not lower_ref and upper_ref: 
-        res = abs(float(upper_ref.error_value))
+        res = (float(upper_ref.error_value))
         return res
     if lower_ref and not upper_ref: 
-        res = abs(float(lower_ref.error_value))
+        res = (float(lower_ref.error_value))
         return res
     if lower_ref.id == upper_ref.id: 
-        res = abs(float(lower_ref.error_value))
+        res = (float(lower_ref.error_value))
         return res
         
     # 3. Assign the math variables
@@ -200,7 +200,7 @@ def calculate_interpolation(db: Session, mean_xr: float) -> float:
         raw_y = y1 + ((x - x1) * (y2 - y1) / (x2 - x1))
         
     # 5. Return as a positive absolute value, rounded to 2 decimals
-    final_res = round(abs(raw_y), 2)
+    final_res = round((raw_y), 2)
     
     return final_res
 

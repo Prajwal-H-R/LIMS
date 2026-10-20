@@ -32,6 +32,7 @@
 
 <!-- PAGE 1 -->
 <div class="page">
+
     <div class="content-wrapper">
         <div class="page-number">Page 1 of 3</div>
 
@@ -109,7 +110,7 @@
         </table>
 
         <table class="device-under-calibration"
-            style="table-layout: fixed; width: 100%; border-collapse: collapse; border: 1px solid #000;">
+            style="width: 100%; border-collapse: collapse; border: 1px solid #000; table-layout: fixed;">
             <colgroup>
                 <col style="width: 18%;">
                 <col style="width: 1%;">
@@ -122,6 +123,7 @@
             </colgroup>
             <thead>
                 <tr>
+                    <!-- Colspan is 8 because we split both Torque Range (left) and Resolution (right) into two separate columns -->
                     <th colspan="8" style="border: 1px solid #000; text-align: left; padding: 5px;">Device Under
                         Calibration :</th>
                 </tr>
@@ -168,35 +170,45 @@
                     <td class="colon-cell">:</td>
                     <td class="value-cell" colspan="2">{{ si_no }}</td>
 
+                    <!-- Resolution Label (Spans 2 rows) -->
                     <td class="label-cell" rowspan="2" style="vertical-align: middle;">Resolution of the pressure gauge
                     </td>
+                    <!-- Resolution Colon (Spans 2 rows) -->
                     <td class="colon-cell" rowspan="2" style="vertical-align: middle;">:</td>
 
+                    <!-- SPLIT VALUE CELL 1: The Number (Spans 2 rows) -->
                     <td class="value-cell" rowspan="2" style="vertical-align: middle; border-right: 1px solid #000;">
                         {{ pressure_gauge_resolution }}
                     </td>
 
+                    <!-- SPLIT VALUE CELL 2: The Unit (Spans 2 rows) -->
                     <td class="value-cell" rowspan="2" style="vertical-align: middle;">
                         {{ pressure_gauge_unit }}
                     </td>
                 </tr>
 
-                <!-- ROW 5: TORQUE RANGE -->
+                <!-- ROW 5: TORQUE RANGE (Resolution cells from above span down here) -->
                 <tr>
                     <td class="label-cell">Torque Range</td>
                     <td class="colon-cell">:</td>
+                    
+                    <!-- SPLIT VALUE CELL 1: The Range -->
                     <td class="value-cell" style="border-right: 1px solid #000;">
                         {{ torque_range }}
                     </td>
+                    
+                    <!-- SPLIT VALUE CELL 2: The Range Unit -->
                     <td class="value-cell">
                         {{ torque_range_unit }}
                     </td>
+                    
+                    <!-- No cells here for the right side because the resolution rows above are spanning down -->
                 </tr>
             </tbody>
         </table>
 
         <div style="margin: 5px 0 10px 0; white-space: nowrap; font-size: 7pt; border: 1px solid #000; padding: 5px;">
-            <strong>Calibration Procedure :</strong> {{ calibration_procedure | default('', true) }}
+            <strong>Calibration Procedure :</strong> {{ calibration_procedure or '' }}
         </div>
 
         {% set has_standard3 = (standard3_nomenclature or standard3_manufacturer or standard3_model or
@@ -313,8 +325,12 @@
         </div>
         <!-- SIGNATURE BLOCK END -->
 
-        <!-- DATABASE-BACKED STATEMENTS + QR CODE -->
         <div class="notes" style="position: relative; padding-right: 100px; min-height: 64px; box-sizing: border-box;">
+            {#
+                Database-backed statements. The right padding reserves a
+                dedicated column for the QR code so statement text wraps
+                before reaching the QR area.
+            #}
             {% set certificate_statements = (
                 statements_below_signature
                 | default(statement_below_signature, true)
@@ -343,10 +359,12 @@
             </div>
         </div>
     </div>
+
 </div>
 
 <!-- PAGE 2 -->
 <div class="page">
+
     <div class="content-wrapper">
         <div class="page-number">Page 2 of 3</div>
 
@@ -391,21 +409,36 @@
             <tbody>
                 {% for repeat in repeatability_data %}
                 {% set row_count = repeat.readings|length %}
+                {# Values are supplied from htw_un_resolution.relative_measurement_error (JSONB). #}
+                {% set relative_errors = repeat.relative_measurement_errors | default([], true) %}
                 <tr>
                     <!-- Uses fmt_whole to enforce 0 decimal points -->
                     <td rowspan="{{ row_count }}">{{ fmt_whole(repeat.pressure) }}</td>
                     <td rowspan="{{ row_count }}">{{ fmt_whole(repeat.target) }}</td>
-                    <td>{{ fmt(repeat.readings[0]) }}</td>
-                    <td>{{ fmt(repeat.readings[0] - repeat.target) }}</td>
-                    <td>{{ fmt((repeat.readings[0] - repeat.target) / repeat.target * 100) }}</td>
+                    <td>{{ fmt_by_target(repeat.readings[0], repeat.target) }}</td>
+                    
+                    <td>{{ fmt_by_target(repeat.target - repeat.readings[0], repeat.target) }}</td>
+                    <td>
+                        {# Use the saved JSONB value; do not recalculate relative measurement error here. #}
+                        {% if relative_errors|length > 0 %}
+                            {{ fmt(relative_errors[0]) }}
+                        {% endif %}
+                    </td>
+                    
                     <td rowspan="{{ row_count }}">{{ fmt(repeat.repeatability) }}</td>
                     <td rowspan="{{ row_count }}">{{ fmt(repeat.repeatability_pct) }}</td>
                 </tr>
                 {% for reading in repeat.readings[1:] %}
                 <tr>
-                    <td>{{ fmt(reading) }}</td>
-                    <td>{{ fmt(reading - repeat.target) }}</td>
-                    <td>{{ fmt((reading - repeat.target) / repeat.target * 100) }}</td>
+                    <td>{{ fmt_by_target(reading, repeat.target) }}</td>
+                    
+                    <td>{{ fmt_by_target(repeat.target - reading, repeat.target) }}</td>
+                    <td>
+                        {# loop.index is the original reading index because this loop starts at readings[1:]. #}
+                        {% if relative_errors|length > loop.index %}
+                            {{ fmt(relative_errors[loop.index]) }}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 {% endfor %}
@@ -491,8 +524,7 @@
             </tbody>
         </table>
 
-
-    <!-- SIGNATURE BLOCK START -->
+        <!-- SIGNATURE BLOCK START -->
         <div style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between;">
             <div style="width: 150px; text-align: center; margin-left: 8px;">
                 <div style="margin-bottom: 3px;"><strong>Checked By</strong></div>
@@ -509,10 +541,12 @@
         </div>
         <!-- SIGNATURE BLOCK END -->
     </div>
+
 </div>
 
 <!-- PAGE 3 -->
 <div class="page">
+
     <div class="content-wrapper">
         <div class="page-number">Page 3 of 3</div>
 
@@ -640,7 +674,8 @@
                     <!-- Uses fmt_whole to enforce 0 decimal points -->
                     <td>{{ fmt_whole(uncertainty.calibration) }}</td>
                     <td>{{ fmt(uncertainty.average) }}</td>
-                    <td>{{ fmt(uncertainty.error_pct) }}</td>
+                    {# Explicit database-backed mean error, with the legacy key as compatibility fallback. #}
+                    <td>{{ fmt(uncertainty.mean_measurement_error | default(uncertainty.error_pct)) }}</td>
                     <td>{{ fmt(uncertainty.uncertainty_w) }}</td>
                     <td>{{ fmt(uncertainty.max_error) }}</td>
                     <td>{{ fmt(uncertainty.uncertainty_w_prime) }}</td>
@@ -655,12 +690,10 @@
 
         <div
             style="text-align: center; margin-top: 15px; font-size: 8pt; border: 1px solid #000; padding: 8px; background-color: white;">
-            The Estimated Uncertainty of Measurement associated with the results is calculated at a confidence level of
-            95% approximately with a coverage factor k={{ coverage_factor_k | default(2) }}
+            The Estimated Uncertainty of Measurement associated with the results is calculated at a confidence level of 95% <br>approximately with a coverage factor k={{ coverage_factor_k | default(2) }}
         </div>
 
-
-    <!-- SIGNATURE BLOCK START -->
+        <!-- SIGNATURE BLOCK START -->
         <div style="margin-top: 15px; margin-bottom: 15px; display: flex; justify-content: space-between;">
             <div style="width: 175px; text-align: center; margin-left: 8px;">
                 <div style="margin-bottom: 3px;"><strong>Checked By</strong></div>
@@ -676,10 +709,12 @@
             </div>
         </div>
         <!-- SIGNATURE BLOCK END -->
+
+        <div style="text-align: center; margin-top: 30px; font-weight: bold;">
+            *** END OF CERTIFICATE ***
+        </div>
+
     </div>
 
-    <div style="text-align: center; margin-top: auto; font-weight: bold; margin-bottom: 0;">
-        *** END OF CERTIFICATE ***
     </div>
-</div>
-{% endblock %}
+    {% endblock %}
