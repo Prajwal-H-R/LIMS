@@ -26,7 +26,7 @@ RUN apt-get update && \
 RUN rm -f /etc/nginx/conf.d/default.conf && \
     cat > /etc/nginx/conf.d/default.conf <<'EOF'
 server {
-    listen 8080;
+    listen 80;
     server_name _;
 
     root /usr/share/nginx/html;
