@@ -38,6 +38,7 @@ interface EquipmentForRemarks {
   engineer_remarks: string | null;
   customer_remarks: string | null;
   photos?: string[];
+  accessories_included: string | null;
 }
  
 interface InwardForRemarks {
@@ -152,6 +153,7 @@ const CustomerRemarksSkeleton: React.FC = () => {
                     <th className="px-4 py-3 min-w-[100px]"><div className="h-4 w-24 bg-slate-300 rounded"></div></th>
                     <th className="px-4 py-3 w-16"><div className="h-4 w-8 mx-auto bg-slate-300 rounded"></div></th>
                     <th className="px-4 py-3 w-24"><div className="h-4 w-16 bg-slate-300 rounded"></div></th>
+                    <th className="px-4 py-3 min-w-[180px]"><div className="h-4 w-32 bg-slate-300 rounded"></div></th>
                     <th className="px-4 py-3 min-w-[250px]"><div className="h-4 w-32 bg-slate-300 rounded"></div></th>
                   </tr>
                 </thead>
@@ -174,6 +176,7 @@ const CustomerRemarksSkeleton: React.FC = () => {
                       <td className="px-4 py-4 align-top"><div className="h-4 w-24 bg-slate-200 rounded"></div></td>
                       <td className="px-4 py-4 align-top"><div className="h-4 w-4 mx-auto bg-slate-200 rounded"></div></td>
                       <td className="px-4 py-4 align-top"><div className="h-6 w-20 bg-slate-200 rounded-full"></div></td>
+                      <td className="px-4 py-4 align-top"><div className="h-4 w-32 bg-slate-200 rounded"></div></td>
                       <td className="px-4 py-4 align-top"><div className="h-9 w-32 bg-slate-200 rounded-md"></div></td>
                     </tr>
                   ))}
@@ -490,6 +493,7 @@ export const CustomerRemarksPortal: React.FC<Props> = ({ directAccess = false, a
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[100px]">Serial No</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-16">Qty</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider w-24">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[180px]">Accessories Included</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[250px]">Remarks / Action</th>
                     </tr>
                   </thead>
@@ -557,14 +561,20 @@ export const CustomerRemarksPortal: React.FC<Props> = ({ directAccess = false, a
                               </span>
                             )}
                           </td>
- 
+
+                          <td className="px-4 py-4 text-sm text-slate-700 align-top min-w-[180px]">
+                            <div className="whitespace-pre-wrap break-words">
+                              {eq.accessories_included?.trim() || '-'}
+                            </div>
+                          </td>
+
                           <td className="px-4 py-4 align-top">
                             <div className="space-y-3">
                               {/* Engineer Remarks Display (Only for Deviations) */}
                               {isDeviated && (
                                 <div className="bg-white p-3 rounded border border-amber-200 text-sm text-amber-900 shadow-sm">
                                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-amber-700 mb-2">
-                                    <Wrench size={12} /> Engineer's Remarks
+                                    <Wrench size={12} /> Nextage Remarks
                                   </div>
                                   <div className="text-amber-900/90 bg-amber-50/50 p-2 rounded">
                                     {eq.engineer_remarks ? (

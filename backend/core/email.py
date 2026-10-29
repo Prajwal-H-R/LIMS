@@ -34,6 +34,7 @@ conf = ConnectionConfig(
     MAIL_USERNAME=settings.SMTP_USER,
     MAIL_PASSWORD=settings.SMTP_PASSWORD,
     MAIL_FROM=settings.FROM_EMAIL,
+    MAIL_FROM_NAME="Nextage CMS",
     MAIL_PORT=settings.SMTP_PORT,
     MAIL_SERVER=settings.SMTP_SERVER,
     MAIL_STARTTLS=True,

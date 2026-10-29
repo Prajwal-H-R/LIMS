@@ -135,7 +135,8 @@ class SrfBase(BaseModel):
     certificate_issue_name: Optional[str] = None
     certificate_issue_adress: Optional[str] = None
     status: str = 'created'
- 
+    # New field
+    resources_capability_reviewed_cal: Optional[bool] = None
     # Validator to handle cases where srf_no comes as int
     @field_validator('srf_no', mode='before')
     @classmethod
@@ -194,7 +195,8 @@ class SrfDetailUpdate(BaseModel):
     turnaround_time: Optional[int] = None
     remark_special_instructions: Optional[str] = None
     remarks: Optional[str] = None
- 
+
+    resources_capability_reviewed_cal: Optional[bool] = None
     # CRITICAL: Ignore any other fields React sends (like inward object, srf_id, etc.)
     model_config = ConfigDict(extra='ignore')
  

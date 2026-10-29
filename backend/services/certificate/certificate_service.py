@@ -161,7 +161,13 @@ def _map_equipment_to_template(equipment: Dict[str, Any], customer: Any, inward:
         "customer_address": customer_address,
         "reference_dc_no": ref_dc_no,
         "reference_no_date": ref_date,
-        "receipt_date": date.today().strftime("%d-%m-%Y"),
+        # Date of Receipt comes from the linked inward record,
+# not the PDF generation date.
+        "receipt_date": (
+            inward.material_inward_date.strftime("%d-%m-%Y")
+            if inward and inward.material_inward_date
+            else ""
+        ),
     }
  
  
@@ -765,8 +771,12 @@ def build_template_data(
             else ""
         ),
 
-        "issue_date": date.today().strftime(
-            "%d-%m-%Y"
+        # Use the timestamp recorded when the admin issued the certificate.
+        # Do not substitute today's date for certificates without an issue timestamp.
+        "issue_date": (
+            certificate.issued_at.strftime("%d-%m-%Y")
+            if certificate and certificate.issued_at
+            else ""
         ),
 
         "field_of_parameter": (

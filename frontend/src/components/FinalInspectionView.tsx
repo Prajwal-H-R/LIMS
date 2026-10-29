@@ -788,10 +788,10 @@ function downloadWCCPdf(wcc: WCCRecord) {
     doc.setLineWidth(0.2);
     doc.rect(1.2, 1.2, pageWidth - 2.4, pageHeight - 2.4, "S");
   }
-
   const safeNumber = wccSafe(wcc.wcc_no).replace(/[^a-zA-Z0-9_-]+/g, "-") || `inward-${wcc.inward_id ?? "record"}`;
   doc.save(`WCC-${safeNumber}.pdf`);
 }
+
 
 function WCCActions({ inwardId, customerName }: { inwardId: number; customerName: string }) {
   const [existingWcc, setExistingWcc] = useState<WCCRecord | null>(null);
@@ -1022,6 +1022,63 @@ export const FinalInspectionView: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [showSuccessUI, setShowSuccessUI] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // WCC existence is checked by inward_id, which is the authoritative link.
+  const [wccPresence, setWccPresence] = useState<"checking" | "present" | "missing" | "error">("checking");
+  const [wccDispatchAlert, setWccDispatchAlert] = useState("");
+
+  const verifyWccForDispatch = useCallback(async (showAlert = false): Promise<boolean> => {
+    const linkedInwardId = Number(inwardId);
+    const requiredMessage = "Please complete and save the Work Completion Certificate first, then dispatch the Final Inspection Report.";
+
+    if (!Number.isInteger(linkedInwardId) || linkedInwardId <= 0) {
+      setWccPresence("error");
+      if (showAlert) {
+        setWccDispatchAlert("Unable to identify this inward record. The Final Inspection Report has not been dispatched.");
+      }
+      return false;
+    }
+
+    try {
+      // The WCC endpoint looks up the record by the same inward_id shown in this page.
+      const response = await api.get(`${WCC_COLLECTION}by-inward/${linkedInwardId}`);
+      const certificate = response.data as WCCRecord;
+
+      // Do not accept a record associated with a different inward ID.
+      if (!certificate || Number(certificate.inward_id) !== linkedInwardId) {
+        setWccPresence("missing");
+        if (showAlert) setWccDispatchAlert(requiredMessage);
+        return false;
+      }
+
+      setWccPresence("present");
+      if (showAlert) setWccDispatchAlert("");
+      return true;
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
+        setWccPresence("missing");
+        if (showAlert) setWccDispatchAlert(requiredMessage);
+      } else {
+        setWccPresence("error");
+        if (showAlert) {
+          setWccDispatchAlert("Could not verify the Work Completion Certificate. Please try again; the report has not been dispatched.");
+        }
+      }
+      return false;
+    }
+  }, [inwardId]);
+
+  // Resolve the initial state for the page, but only show the alert after an
+  // engineer attempts to dispatch without a saved WCC.
+  useEffect(() => {
+    void verifyWccForDispatch(false);
+  }, [verifyWccForDispatch]);
+
+  const handleOpenDispatchModal = async () => {
+    setWccDispatchAlert("");
+    const wccExists = await verifyWccForDispatch(true);
+    if (!wccExists) return;
+    setIsModalOpen(true);
+  };
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -1046,6 +1103,15 @@ export const FinalInspectionView: React.FC = () => {
 
   const handleSendFir = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Re-check immediately before sending so a stale/open modal cannot bypass
+    // the WCC prerequisite. The same inward_id must have a saved WCC record.
+    const wccExists = await verifyWccForDispatch(true);
+    if (!wccExists) {
+      setIsModalOpen(false);
+      return;
+    }
+
     const validEmails = reportEmails.filter(email => email.trim() && email.includes('@'));
     if (validEmails.length === 0) return toast.error("Please enter at least one valid email.");
 
@@ -1265,15 +1331,30 @@ export const FinalInspectionView: React.FC = () => {
             </div>
         </div>
 
-        {/* Action Button: Still available even if approved, but maybe highlight if rejected */}
-        <div className="flex justify-end pt-4 pb-12">
-            <button 
-                onClick={() => setIsModalOpen(true)}
-                className={`flex items-center gap-3 px-10 py-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${
-                    data.customer_decision === 'REJECTED' 
-                    ? 'bg-red-600 hover:bg-red-700 shadow-red-100' 
+        {/* Dispatch is permitted only when a WCC exists for this exact inward_id. */}
+        <div className="flex flex-col items-end gap-2 pt-4 pb-12">
+            {wccDispatchAlert && (
+                <div
+                    id="wcc-dispatch-prerequisite-alert"
+                    role="alert"
+                    aria-live="polite"
+                    className="flex max-w-xl items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm"
+                >
+                    <AlertCircle size={17} className="mt-0.5 shrink-0 text-amber-600" />
+                    <span>{wccDispatchAlert}</span>
+                </div>
+            )}
+            <button
+                type="button"
+                onClick={() => void handleOpenDispatchModal()}
+                disabled={isSending}
+                title={wccPresence === "checking" ? "Verify Work Completion Certificate before dispatch" : wccPresence === "present" ? "Dispatch Final Inspection Report" : "A saved WCC is required before dispatch"}
+                aria-describedby={wccDispatchAlert ? "wcc-dispatch-prerequisite-alert" : undefined}
+                className={`flex items-center gap-3 rounded-xl px-10 py-4 font-bold text-white shadow-lg transition-all active:scale-95 disabled:cursor-wait disabled:opacity-60 ${
+                    data.customer_decision === 'REJECTED'
+                    ? 'bg-red-600 hover:bg-red-700 shadow-red-100'
                     : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
-                } text-white`}
+                }`}
             >
                 <Share2 size={20} />
                 {data.customer_decision === 'REJECTED' ? 'Re-Dispatch Final Report' : 'Dispatch Final Report'}

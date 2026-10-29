@@ -2,7 +2,8 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from jose import jwt, JWTError
+import jwt
+from jwt.exceptions import InvalidTokenError as PyJWTInvalidTokenError
 from passlib.context import CryptContext
 from typing import Optional
 
@@ -102,7 +103,7 @@ def decode_access_token(token: str) -> dict:
             options={"leeway": leeway_in_seconds}
         )
         return payload
-    except JWTError as e:
+    except InvalidTokenError as e:
         raise InvalidTokenError(f"Token signature or claims are invalid: {e}")
 
 # --- Refresh Token Functions ---
@@ -137,5 +138,5 @@ def decode_refresh_token(token: str) -> dict:
             options={"leeway": leeway_in_seconds}
         )
         return payload
-    except JWTError:
+    except InvalidTokenError:
         raise InvalidTokenError("Refresh token signature or claims are invalid.")
