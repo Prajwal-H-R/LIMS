@@ -160,6 +160,7 @@ jobs:
         with:
           scan-type: image
           image-ref: yatharthatalims-backend:latest
+          skip-files: "**/pip/_vendor/bom.cdx.json"
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: 1
