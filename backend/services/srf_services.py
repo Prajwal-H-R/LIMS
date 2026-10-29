@@ -153,6 +153,7 @@ class SrfService:
             contact_person=srf_data.get('contact_person'),
             email=srf_data.get('email'),
             certificate_issue_name=srf_data.get('certificate_issue_name', customer.customer_details if customer else ""),
+            resources_capability_reviewed_cal=srf_data.get('resources_capability_reviewed_cal'),
             status='created' # Initial status
         )
         self.db.add(new_srf)
@@ -208,7 +209,8 @@ class SrfService:
             "certificate_issue_adress",
             "calibration_frequency", "statement_of_conformity",
             "ref_iso_is_doc", "ref_manufacturer_manual",
-            "ref_customer_requirement", "turnaround_time", "remarks"
+            "ref_customer_requirement", "turnaround_time", "remarks",
+            "resources_capability_reviewed_cal"
         ]
         for field in updatable_fields:
             if field in update_data:
@@ -356,6 +358,7 @@ class SrfService:
                 "Ref ISO/IS Doc": self._bool_to_text(srf.ref_iso_is_doc),
                 "Ref Manufacturer Manual": self._bool_to_text(srf.ref_manufacturer_manual),
                 "Ref Customer Requirement": self._bool_to_text(srf.ref_customer_requirement),
+                "Resources Capability Reviewed Cal": self._bool_to_text(srf.resources_capability_reviewed_cal),
                 "Turnaround Time": srf.turnaround_time,
                 "Remarks": srf.remarks or "",
                 "SRF Created At": srf.created_at,

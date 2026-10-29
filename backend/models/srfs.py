@@ -20,6 +20,8 @@ class Srf(Base):
     ref_iso_is_doc = Column(Boolean, default=False)
     ref_manufacturer_manual = Column(Boolean, default=False)
     ref_customer_requirement = Column(Boolean, default=False)
+    resources_capability_reviewed_cal= Column(Boolean)
+
     turnaround_time = Column(Integer, default=7)
     remark_special_instructions = Column(Text)
     remarks = Column(Text)

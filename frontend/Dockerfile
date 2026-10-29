@@ -13,9 +13,11 @@ RUN npm run build
 
 # --- Final Stage ---
 
-FROM nginx:1.27-bookworm
+FROM nginxinc/nginx-unprivileged:1.27-bookworm
 
-# FIX: Update OS packages to patch the CVEs found by Trivy
+# Temporarily use root for OS package updates and Nginx configuration
+USER root
+
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get clean && \
@@ -24,7 +26,7 @@ RUN apt-get update && \
 RUN rm -f /etc/nginx/conf.d/default.conf && \
     cat > /etc/nginx/conf.d/default.conf <<'EOF'
 server {
-    listen 80;
+    listen 8080;
     server_name _;
 
     root /usr/share/nginx/html;
@@ -49,6 +51,9 @@ EOF
 
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 8080
+
+# Run the application as a non-root user
+USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]

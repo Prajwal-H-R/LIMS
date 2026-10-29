@@ -138,12 +138,42 @@ jobs:
 
           mkdir -p backend/uploads/inward_photos
           chmod -R 777 backend/uploads
+      
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
 
       - name: Validate docker compose file
         run: docker compose --env-file .env.docker config
 
       - name: Build all images
         run: docker compose --env-file .env.docker build
+      
+      - name: Trivy backend image scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: image
+          image-ref: yatharthatalims-backend:latest
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      - name: Trivy frontend image scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: image
+          image-ref: yatharthatalims-frontend:latest
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
 
       - name: Start stack
         run: docker compose --env-file .env.docker up -d
@@ -175,20 +205,20 @@ jobs:
         run: |
           docker tag \
             yatharthatalims-backend:latest \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:v1.0.4
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:v1.0.5
 
       - name: Tag frontend image for GHCR
         run: |
           docker tag \
             yatharthatalims-frontend:latest \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:v1.0.4
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:v1.0.5
 
       - name: Push backend image to GHCR
         run: |
           docker push \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:v1.0.4
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-backend:v1.0.5
 
       - name: Push frontend image to GHCR
         run: |
           docker push \
-            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:v1.0.4
+            ghcr.io/${{ env.OWNER_LC }}/yatharthatalims-frontend:v1.0.5

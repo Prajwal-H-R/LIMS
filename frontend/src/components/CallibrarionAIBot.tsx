@@ -1,5 +1,5 @@
 // src/components/CalibrationAIBot.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Bot,
   Zap,
@@ -143,6 +143,199 @@ export const SECTION_CONFIGS: SectionConfig[] = [
   },
 ];
 
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON INPUT HELPERS
+// Accepts a single-section payload or one combined object keyed by section ID.
+// The matrices are converted to the row orientation expected by each section's
+// existing SectionBotHandle. Those section components still calculate means,
+// errors and auto-save exactly as they do for manual input.
+// ─────────────────────────────────────────────────────────────────────────────
+type JsonObject = Record<string, unknown>;
+type AppliedReadingRow = { rowIndex: number; readings: string[] };
+
+const SECTION_KEY_ALIASES: Record<string, string> = {
+  repeatability: "repeatability",
+  reproducibility: "reproducibility",
+  outputdrive: "outputDrive",
+  driveinterface: "driveInterface",
+  loadingpoint: "loadingPoint",
+};
+
+const canonicalSectionId = (key: string): string | undefined =>
+  SECTION_KEY_ALIASES[key.toLowerCase().replace(/[^a-z]/g, "")];
+
+const isJsonObject = (value: unknown): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const numericCellToString = (value: unknown, location: string): string => {
+  if (
+    (typeof value !== "number" && typeof value !== "string") ||
+    (typeof value === "string" && value.trim() === "") ||
+    !Number.isFinite(Number(value))
+  ) {
+    throw new Error(`${location} must be a finite number.`);
+  }
+  return String(value).trim();
+};
+
+const readNumericMatrix = (
+  value: unknown,
+  expectedColumns: number,
+  label: string,
+  expectedRows?: number
+): string[][] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${label} must be a non-empty 2D array.`);
+  }
+  if (expectedRows !== undefined && value.length !== expectedRows) {
+    throw new Error(`${label} must contain exactly ${expectedRows} rows; received ${value.length}.`);
+  }
+  return value.map((row, rowIndex) => {
+    if (!Array.isArray(row) || row.length !== expectedColumns) {
+      const actual = Array.isArray(row) ? row.length : "a non-array value";
+      throw new Error(
+        `${label}[${rowIndex}] must contain ${expectedColumns} values; received ${actual}.`
+      );
+    }
+    return row.map((cell, columnIndex) =>
+      numericCellToString(cell, `${label}[${rowIndex}][${columnIndex}]`)
+    );
+  });
+};
+
+const validateOptionalColumns = (
+  payload: JsonObject,
+  expectedCount: number,
+  sectionLabel: string
+) => {
+  if (payload.columns === undefined) return;
+  if (!Array.isArray(payload.columns) || payload.columns.length !== expectedCount) {
+    throw new Error(
+      `${sectionLabel}.columns must contain ${expectedCount} labels.`
+    );
+  }
+};
+
+const transposeMatrix = (matrix: string[][]): string[][] =>
+  matrix[0].map((_, columnIndex) =>
+    matrix.map((row) => row[columnIndex])
+  );
+
+const flattenValues = (value: unknown): unknown[] => {
+  if (!Array.isArray(value)) return [value];
+  return value.reduce<unknown[]>(
+    (all, child) => all.concat(flattenValues(child)),
+    []
+  );
+};
+
+const inferSingleSection = (
+  payload: JsonObject,
+  fallbackSectionId: string
+): string => {
+  if (payload.positions !== undefined) return "loadingPoint";
+
+  if (Array.isArray(payload.columns)) {
+    const labels = payload.columns.map((item) => String(item).trim().toUpperCase());
+    if (labels.length > 0 && labels.every((label) => /^S\d+$/.test(label))) {
+      return "repeatability";
+    }
+    if (labels.join(",") === "I,II,III,IV") return "reproducibility";
+    if (labels.some((label) => label.includes("°"))) {
+      if (fallbackSectionId === "outputDrive" || fallbackSectionId === "driveInterface") {
+        return fallbackSectionId;
+      }
+      throw new Error(
+        "This angle-based JSON can be used for Output Drive or Drive Interface. Choose the target section from the dropdown first."
+      );
+    }
+  }
+
+  return fallbackSectionId;
+};
+
+const convertSectionPayload = (
+  sectionId: string,
+  payloadValue: unknown,
+  availableRows: number
+): AppliedReadingRow[] => {
+  if (!isJsonObject(payloadValue)) {
+    throw new Error(`${SECTION_CONFIGS.find((section) => section.id === sectionId)?.label ?? sectionId} must be a JSON object.`);
+  }
+  const payload = payloadValue;
+  const label = SECTION_CONFIGS.find((section) => section.id === sectionId)?.label ?? sectionId;
+
+  if (sectionId === "repeatability") {
+    validateOptionalColumns(payload, 5, label);
+    const matrix = readNumericMatrix(payload.data, 5, `${label}.data`);
+    if (matrix.length > availableRows) {
+      throw new Error(`${label} contains ${matrix.length} data rows but only ${availableRows} table rows are available.`);
+    }
+    return matrix.map((readings, rowIndex) => ({ rowIndex, readings }));
+  }
+
+  if (sectionId === "reproducibility") {
+    validateOptionalColumns(payload, 4, label);
+    // Input rows are reading rounds; columns are sequences I, II, III and IV.
+    const matrix = readNumericMatrix(payload.data, 4, `${label}.data`, 5);
+    if (availableRows < 4) {
+      throw new Error(`${label} needs four sequence rows, but only ${availableRows} table rows are available.`);
+    }
+    return transposeMatrix(matrix).map((readings, rowIndex) => ({ rowIndex, readings }));
+  }
+
+  if (sectionId === "outputDrive" || sectionId === "driveInterface") {
+    validateOptionalColumns(payload, 4, label);
+    // Input rows are the 10 reading rounds; columns are the four angles.
+    const matrix = readNumericMatrix(payload.data, 4, `${label}.data`, 10);
+    if (availableRows < 4) {
+      throw new Error(`${label} needs four angle rows, but only ${availableRows} table rows are available.`);
+    }
+    return transposeMatrix(matrix).map((readings, rowIndex) => ({ rowIndex, readings }));
+  }
+
+  if (sectionId === "loadingPoint") {
+    const positions = payload.positions;
+    if (!isJsonObject(positions)) {
+      throw new Error(`${label}.positions must be an object with "-10mm" and "+10mm" keys.`);
+    }
+    validateOptionalColumns(payload, 5, label);
+
+    const positionEntries = Object.entries(positions);
+    const negativeEntry = positionEntries.find(([key]) =>
+      /negative|minus/i.test(key) || Number.parseFloat(key) < 0
+    );
+    const positiveEntry = positionEntries.find(([key]) =>
+      /positive|plus/i.test(key) || Number.parseFloat(key) > 0
+    );
+    if (!negativeEntry || !positiveEntry) {
+      throw new Error(`${label}.positions must include a negative position (e.g. "-10mm") and a positive position (e.g. "+10mm").`);
+    }
+    if (availableRows < 2) {
+      throw new Error(`${label} needs two position rows, but only ${availableRows} table rows are available.`);
+    }
+
+    const toTenReadings = (raw: unknown, positionLabel: string): string[] => {
+      const flattened = flattenValues(raw);
+      if (flattened.length !== 10) {
+        throw new Error(`${label}.positions["${positionLabel}"] must contain 10 readings (for example, two rows of five).`);
+      }
+      return flattened.map((cell, index) =>
+        numericCellToString(cell, `${label}.positions["${positionLabel}"][${index}]`)
+      );
+    };
+
+    return [
+      { rowIndex: 0, readings: toTenReadings(negativeEntry[1], negativeEntry[0]) },
+      { rowIndex: 1, readings: toTenReadings(positiveEntry[1], positiveEntry[0]) },
+    ];
+  }
+
+  throw new Error(`Unsupported calibration section: ${sectionId}.`);
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOR MAP
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,6 +406,16 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
     driveInterface: true,
     loadingPoint: true,
   });
+  const [jsonInput, setJsonInput] = useState("");
+  const [jsonStatusMsg, setJsonStatusMsg] = useState<string | null>(null);
+  const [jsonTargetSection, setJsonTargetSection] = useState(
+    SECTION_CONFIGS.find((section) => section.stepId === activeStepId)?.id ?? "repeatability"
+  );
+
+  useEffect(() => {
+    const activeSection = SECTION_CONFIGS.find((section) => section.stepId === activeStepId);
+    if (activeSection) setJsonTargetSection(activeSection.id);
+  }, [activeStepId]);
 
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -248,6 +451,82 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
   const readySections = SECTION_CONFIGS.filter(
     (c) => !!sectionRefs[c.id]?.current
   ).length;
+
+
+  // ── JSON Fill ─────────────────────────────────────────────────────────────
+  const handleApplyJson = () => {
+    setJsonStatusMsg(null);
+    if (isFilling) return;
+    if (!jsonInput.trim()) {
+      setJsonStatusMsg("Paste calibration JSON first.");
+      return;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(jsonInput);
+      if (!isJsonObject(parsed)) {
+        throw new Error("The JSON root must be an object.");
+      }
+
+      const combinedEntries = Object.entries(parsed)
+        .map(([key, value]) => ({ sectionId: canonicalSectionId(key), value, key }))
+        .filter((entry): entry is { sectionId: string; value: unknown; key: string } => !!entry.sectionId);
+
+      const requested: Array<{ sectionId: string; payload: unknown }> =
+        combinedEntries.length > 0
+          ? combinedEntries.map((entry) => ({ sectionId: entry.sectionId, payload: entry.value }))
+          : [{
+              sectionId: inferSingleSection(parsed, jsonTargetSection),
+              payload: parsed,
+            }];
+
+      const seenSections = new Set<string>();
+      for (const item of requested) {
+        if (seenSections.has(item.sectionId)) {
+          throw new Error(`The JSON contains more than one key for ${item.sectionId}. Keep one section key only.`);
+        }
+        seenSections.add(item.sectionId);
+      }
+
+      // Preflight every section before updating any cells, so invalid JSON or a
+      // section that is not mounted cannot cause a half-applied multi-section fill.
+      const prepared: Array<{
+        sectionId: string;
+        label: string;
+        ref: SectionBotHandle;
+        rows: AppliedReadingRow[];
+      }> = requested.map((item) => {
+        const section = SECTION_CONFIGS.find((candidate) => candidate.id === item.sectionId);
+        if (!section) throw new Error(`Unknown section "${item.sectionId}".`);
+        const ref = sectionRefs[item.sectionId]?.current;
+        if (!ref) {
+          throw new Error(
+            `${section.label} is not mounted right now. No cells were changed. Open/mount that section (or keep all five section components mounted in CalibrationPage) and try again.`
+          );
+        }
+        return {
+          sectionId: item.sectionId,
+          label: section.label,
+          ref,
+          rows: convertSectionPayload(item.sectionId, item.payload, ref.getRows().length),
+        };
+      });
+
+      let filledCells = 0;
+      prepared.forEach((item) => {
+        item.ref.applyReadings(item.rows);
+        filledCells += item.rows.reduce((sum, row) => sum + row.readings.length, 0);
+      });
+
+      const sectionNames = prepared.map((item) => item.label).join(", ");
+      setJsonStatusMsg(
+        `✅ Filled ${filledCells} cells across ${prepared.length} section(s): ${sectionNames}. Existing calculations and auto-save are preserved.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to parse calibration JSON.";
+      setJsonStatusMsg(`❌ ${message}`);
+    }
+  };
 
   // Hide in production / when invisible
   if (import.meta.env.PROD) return null;
@@ -511,7 +790,86 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-            {/* Profile Selection */}
+            {/* JSON Input / Direct Cell Fill */}
+            <section className="rounded-lg border border-violet-200 bg-violet-50/70 p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold text-violet-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Copy className="w-3 h-3" /> JSON Cell Fill
+                </p>
+                <span className="text-[8px] font-semibold text-violet-700 bg-white px-1.5 py-0.5 rounded border border-violet-100">
+                  5 sections
+                </span>
+              </div>
+
+              <label className="block text-[9px] font-semibold text-gray-600" htmlFor="calbot-json-target">
+                Target for a single-section JSON
+              </label>
+              <select
+                id="calbot-json-target"
+                value={jsonTargetSection}
+                onChange={(event) => setJsonTargetSection(event.target.value)}
+                className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-[10px] text-gray-800 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-300"
+              >
+                {SECTION_CONFIGS.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.label}
+                  </option>
+                ))}
+              </select>
+
+              <textarea
+                value={jsonInput}
+                onChange={(event) => {
+                  setJsonInput(event.target.value);
+                  setJsonStatusMsg(null);
+                }}
+                rows={7}
+                spellCheck={false}
+                placeholder={'Paste a single section object, or a combined object like:\n{\n  "repeatability": { "unit": "Nm", "columns": ["S1", "S2", "S3", "S4", "S5"], "data": [[4000, 4005, 4003, 4008, 4010]] },\n  "loadingPoint": { "unit": "Nm", "columns": ["1", "2", "3", "4", "5"], "positions": { "-10mm": [[4008, 4007, 4005, 4010, 4007], [4006, 4010, 4003, 4003, 4007]], "+10mm": [[4007, 4004, 4009, 4009, 4010], [4003, 4000, 4009, 4001, 4001]] } }\n}'}
+                className="w-full resize-y rounded-md border border-gray-300 bg-white p-2 font-mono text-[9px] leading-4 text-gray-800 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-300"
+              />
+
+              <p className="text-[9px] leading-4 text-gray-600">
+                Paste one section's JSON, or wrap multiple payloads in keys: <code>repeatability</code>, <code>reproducibility</code>, <code>outputDrive</code>, <code>driveInterface</code>, and <code>loadingPoint</code>. Matrices are oriented for the matching table automatically.
+              </p>
+
+              <div className="flex gap-1.5">
+                <button
+                  onClick={handleApplyJson}
+                  disabled={isFilling || !jsonInput.trim()}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-md bg-violet-600 px-2 py-2 text-[10px] font-bold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                >
+                  <Play className="w-3 h-3" />
+                  Apply JSON to Cells
+                </button>
+                <button
+                  onClick={() => {
+                    setJsonInput("");
+                    setJsonStatusMsg(null);
+                  }}
+                  disabled={isFilling || !jsonInput}
+                  className="rounded-md border border-gray-300 bg-white px-2.5 py-2 text-[10px] font-semibold text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              </div>
+
+              {jsonStatusMsg && (
+                <div
+                  role="status"
+                  className={`rounded-md border px-2 py-1.5 text-[9px] leading-4 font-medium break-words ${
+                    jsonStatusMsg.startsWith("✅")
+                      ? "border-green-200 bg-green-50 text-green-800"
+                      : "border-red-200 bg-red-50 text-red-700"
+                  }`}
+                >
+                  {jsonStatusMsg}
+                </div>
+              )}
+            </section>
+
+            {/* Generated Reading Profiles (existing functionality) */}
+            <div className="border-t border-gray-200 pt-2">
             <div>
               <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                 Reading Profile
@@ -557,6 +915,7 @@ const CalibrationAIBot: React.FC<CalibrationAIBotProps> = ({
                   );
                 })}
               </div>
+            </div>
             </div>
 
             {/* Advanced Options */}

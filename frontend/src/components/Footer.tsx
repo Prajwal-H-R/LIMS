@@ -1,5 +1,5 @@
 import React from "react";
-import { Phone, Mail, MapPin,Linkedin  } from "lucide-react";
+import { Phone, Mail, MapPin} from "lucide-react";
 
 const Footer: React.FC = () => {
   return (
@@ -17,13 +17,20 @@ const Footer: React.FC = () => {
           </p>
           <div className="flex space-x-3 mt-4">
             <a
-              href="https://www.linkedin.com/company/nextageengineering"
+              href="https://www.linkedin.com/company/nextage-engineering-pvt-ltd"
               target="_blank"
               rel="noopener noreferrer"
               className="bg-blue-600 p-2 rounded-full hover:opacity-80"
             >
-              <Linkedin className="h-5 w-5 text-white" />
-            </a>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 24 24"
+  fill="currentColor"
+  className="w-5 h-5 text-white"
+  aria-hidden="true"
+>
+  <path d="M19 0h-14C2.239 0 0 2.239 0 5v14c0 2.761 2.239 5 5 5h14c2.761 0 5-2.239 5-5V5c0-2.761-2.239-5-5-5ZM8 19H5V9h3v10ZM6.5 7.732a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5ZM20 19h-3v-5.1c0-3.06-4-2.83-4 0V19h-3V9h3v1.561c1.396-2.586 7-2.777 7 2.476V19Z" />
+</svg>            </a>
             {/* Pure SVG WhatsApp Icon instead of an Image */}
             <a
               href="https://wa.me/919880392277"

@@ -77,6 +77,7 @@ interface SrfDetail {
   ref_iso_is_doc?: boolean | null;
   ref_manufacturer_manual?: boolean | null;
   ref_customer_requirement?: boolean | null;
+  resources_capability_reviewed_cal?: boolean | null;
   turnaround_time?: string | null;
   remarks?: string | null;
 }
@@ -367,12 +368,15 @@ const generatePDF = useCallback(async () => {
     const soc = !!srfData.statement_of_conformity;
     const asPerStandard = frequencyValue.toLowerCase() === "as per standard";
     const checkboxText = (checked: boolean) => (checked ? "[X]" : "[ ]");
+    // Reflect the saved engineer-only checkbox value in the downloaded PDF.
+    // Only an explicit true value should render as checked; null/undefined render unchecked.
+    const resourcesCapabilityReviewed = srfData.resources_capability_reviewed_cal === true;
     
     const officeLinesRaw = [
       "FOR OUR OFFICE USE ONLY",
       `1. Calibration by ${checkboxText(true)} NEPL(In-House(Torque Lab)) / ${checkboxText(false)} NEPL (on-site) / ${checkboxText(true)} outsource`,
       `2. Date received: ${srfData.date || "-"} | 3. Nextage Unique ID: ${srfData.srf_no || "-"}`,
-      `4. Resources reviewed: ${checkboxText(true)} Meets requirement | 5. Contract Ref: ${srfData.inward?.customer_dc_no || "-"}`,
+      `4. Resources reviewed: ${checkboxText(resourcesCapabilityReviewed)} Meets requirement | 5. Contract Ref: ${srfData.inward?.customer_dc_no || "-"}`,
     ];
     const instructionLinesRaw = [
       "Customer Instructions for Calibration",
@@ -540,6 +544,7 @@ const generatePDF = useCallback(async () => {
           ref_iso_is_doc: data.ref_iso_is_doc ?? false,
           ref_manufacturer_manual: data.ref_manufacturer_manual ?? false,
           ref_customer_requirement: data.ref_customer_requirement ?? false,
+          resources_capability_reviewed_cal: data.resources_capability_reviewed_cal ?? false,
           turnaround_time: data.turnaround_time !== null ? String(data.turnaround_time) : "",
           remarks: data.remarks ?? "",
           company_name: companyName,
@@ -620,6 +625,7 @@ const generatePDF = useCallback(async () => {
             ref_iso_is_doc: false,
             ref_manufacturer_manual: false,
             ref_customer_requirement: false,
+            resources_capability_reviewed_cal: false,
             turnaround_time: "",
             remarks: "",
           };
@@ -710,6 +716,7 @@ const generatePDF = useCallback(async () => {
           ref_iso_is_doc: srfData.ref_iso_is_doc ?? false,
           ref_manufacturer_manual: srfData.ref_manufacturer_manual ?? false,
           ref_customer_requirement: srfData.ref_customer_requirement ?? false,
+          resources_capability_reviewed_cal: srfData.resources_capability_reviewed_cal ?? false,
           turnaround_time: normalizedTurnaroundTime,
           remarks: srfData.remarks?.trim() ? srfData.remarks.trim() : undefined,
           equipments: srfData.inward?.equipments.map((eq) => ({
@@ -1119,6 +1126,46 @@ const generatePDF = useCallback(async () => {
             </div>
           </fieldset>
          
+          {/* Office Use Only: available exclusively to engineers. */}
+          {isEngineer && (
+            <fieldset className="border border-indigo-200 rounded-2xl p-6 mb-10 bg-indigo-50/40 shadow-sm">
+              <legend className="px-3 text-lg font-semibold text-gray-800 bg-white rounded-md shadow-sm border border-indigo-100">
+                Office Use Only
+              </legend>
+
+              <div className="mt-2 rounded-xl border border-gray-200 bg-white p-4">
+                <label
+                  htmlFor="resources-capability-reviewed-cal"
+                  className={`flex items-start gap-3 ${canEdit ? "cursor-pointer" : "cursor-not-allowed"}`}
+                >
+                  <input
+                    id="resources-capability-reviewed-cal"
+                    type="checkbox"
+                    checked={!!srfData.resources_capability_reviewed_cal}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      handleSrfChange("resources_capability_reviewed_cal", e.target.checked)
+                    }
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-gray-800">
+                      Resources capability reviewed for calibration
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-gray-500">
+                      Confirm that the required resources and capability have been reviewed for this calibration request.
+                    </span>
+                  </span>
+                </label>
+                {!canEdit && (
+                  <p className="mt-3 pl-7 text-xs text-gray-500">
+                    Read-only while this SRF is locked or cannot be edited.
+                  </p>
+                )}
+              </div>
+            </fieldset>
+          )}
+
           {showSpecialInstructions && (
             <fieldset className="mb-10 border border-gray-300 rounded-2xl bg-gray-50 p-6">
               <legend className="flex items-center gap-2 px-3 py-1.5 text-lg font-semibold text-gray-800 bg-white rounded-md shadow-sm">
