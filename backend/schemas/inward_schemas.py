@@ -161,7 +161,7 @@ class InwardCreate(BaseModel):
     srf_no: Optional[str] = None
     received_date: Optional[datetime.date] = None
     material_inward_date: datetime.date = Field(default_factory=datetime.date.today)
-    customer_dc_date: Optional[str] = "" 
+    customer_dc_date: Optional[datetime.date] = None
     
     customer_dc_no: str
     customer_id: int
@@ -183,6 +183,13 @@ class InwardCreate(BaseModel):
             try: return json.loads(v)
             except json.JSONDecodeError: raise ValueError("equipment_list contains invalid JSON")
         return v
+    
+    @field_validator('customer_dc_date', mode='before')
+    @classmethod
+    def parse_customer_dc_date(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
 
 class InwardUpdate(InwardCreate):
     srf_no: str
@@ -193,7 +200,7 @@ class InwardResponse(BaseModel):
     received_date: Optional[datetime.date] = None
     material_inward_date: datetime.date = Field(alias='material_inward_date')
     customer_dc_no: Optional[str] = None
-    customer_dc_date: Optional[str] = None
+    customer_dc_date: Optional[datetime.date] = None
     customer_id: Optional[int] = None
     customer_details: Optional[str] = None
     status: str

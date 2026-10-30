@@ -1,7 +1,7 @@
 # backend/services/deviation_service.py
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone,date
 from pathlib import Path
 import uuid
 from typing import Dict, List, Optional
@@ -190,7 +190,7 @@ def _row_to_customer_item(
 ) -> CustomerDeviationItem:
     return CustomerDeviationItem(
         deviation_id=d.id, inward_id=inward_id, inward_eqp_id=d.inward_eqp_id, srf_no=srf_no,
-        customer_dc_no=customer_dc_no, customer_dc_date=customer_dc_date, nepl_id=eq.nepl_id,
+        customer_dc_no=customer_dc_no,customer_dc_date=str(customer_dc_date) if customer_dc_date else None,nepl_id=eq.nepl_id,
         make=eq.make, model=eq.model, serial_no=eq.serial_no, job_id=job_id,
         step_percent=float(rep.step_percent) if rep and rep.step_percent is not None else None,
         deviation_percent=float(rep.deviation_percent) if rep and rep.deviation_percent is not None else None,
@@ -201,7 +201,7 @@ def _row_to_customer_item(
     )
 
 def _external_row_to_customer_item(
-    d: ExternalDeviation, eq: InwardEquipment, srf_no: Optional[str], customer_dc_no: Optional[str], customer_dc_date: Optional[str],
+    d: ExternalDeviation, eq: InwardEquipment, srf_no: Optional[str], customer_dc_no: Optional[str], customer_dc_date: Optional[date],
     inward_id: int,
 ) -> CustomerDeviationItem:
     deviation_type = "MANUAL" if d.deviation_type == "NC" else "OOT"
@@ -211,7 +211,7 @@ def _external_row_to_customer_item(
     step_percent = step_data.get("step_percent"); deviation_percent = step_data.get("deviation_percent")
     return CustomerDeviationItem(
         deviation_id=-d.id, inward_id=inward_id, inward_eqp_id=d.inward_eqp_id, srf_no=srf_no,
-        customer_dc_no=customer_dc_no, customer_dc_date=customer_dc_date, nepl_id=eq.nepl_id,
+        customer_dc_no=customer_dc_no,customer_dc_date=str(customer_dc_date) if customer_dc_date else None,nepl_id=eq.nepl_id,
         make=eq.make, model=eq.model, serial_no=eq.serial_no, job_id=None,
         step_percent=float(step_percent) if step_percent is not None else None,
         deviation_percent=float(deviation_percent) if deviation_percent is not None else None,
@@ -418,7 +418,7 @@ def update_customer_decision(db: Session, deviation_id: int, customer_id: int, d
         d, eq, inward = row
         stripped = decision.strip(); d.customer_decision = stripped if stripped else None; d.updated_at = datetime.now(timezone.utc)
         db.commit(); db.refresh(d)
-        return _external_row_to_customer_item(d, eq, inward.srf_no, inward.customer_dc_no, str(inward.customer_dc_date), inward.inward_id)
+        return _external_row_to_customer_item(d, eq, inward.srf_no, inward.customer_dc_no,str(inward.customer_dc_date) if inward.customer_dc_date else None,inward.inward_id)
     row = db.query(Deviation, InwardEquipment, Inward.srf_no, Inward.customer_dc_no, Inward.customer_dc_date, Inward.inward_id,).join(InwardEquipment, InwardEquipment.inward_eqp_id == Deviation.inward_eqp_id).join(Inward, Inward.inward_id == InwardEquipment.inward_id).filter(Deviation.id == deviation_id, Inward.customer_id == customer_id).first()
     if not row: return None
     d, eq, srf_no, customer_dc_no, customer_dc_date, inward_id = row

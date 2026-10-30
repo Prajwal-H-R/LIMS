@@ -478,7 +478,7 @@ export const CustomerRemarksPortal: React.FC<Props> = ({ directAccess = false, a
               )
             )}
  
-            {/* Main Table */}''
+            {/* Main Table */}
             <main className={`p-6 sm:p-8 ${isRecordLocked ? 'opacity-80 pointer-events-none' : ''}`}>
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="min-w-full divide-y divide-slate-200">
@@ -493,7 +493,7 @@ export const CustomerRemarksPortal: React.FC<Props> = ({ directAccess = false, a
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[100px]">Serial No</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-16">Qty</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider w-24">Status</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[180px]">Accessories Included</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[260px] w-[260px]">Accessories Included</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[250px]">Remarks / Action</th>
                     </tr>
                   </thead>
@@ -562,7 +562,7 @@ export const CustomerRemarksPortal: React.FC<Props> = ({ directAccess = false, a
                             )}
                           </td>
 
-                          <td className="px-4 py-4 text-sm text-slate-700 align-top min-w-[180px]">
+                          <td className="px-4 py-4 text-sm text-slate-700 align-top min-w-[260px] w-[260px]">
                             <div className="whitespace-pre-wrap break-words">
                               {eq.accessories_included?.trim() || '-'}
                             </div>

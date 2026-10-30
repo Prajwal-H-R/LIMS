@@ -368,8 +368,6 @@ const generatePDF = useCallback(async () => {
     const soc = !!srfData.statement_of_conformity;
     const asPerStandard = frequencyValue.toLowerCase() === "as per standard";
     const checkboxText = (checked: boolean) => (checked ? "[X]" : "[ ]");
-    // Reflect the saved engineer-only checkbox value in the downloaded PDF.
-    // Only an explicit true value should render as checked; null/undefined render unchecked.
     const resourcesCapabilityReviewed = srfData.resources_capability_reviewed_cal === true;
     
     const officeLinesRaw = [
@@ -445,7 +443,7 @@ const generatePDF = useCallback(async () => {
     doc.text(noteLines, marginX, y + 4);
     y += 12;
 
-    // --- THE EQUIPMENT TABLE (CORRECTED) ---
+    // --- THE EQUIPMENT TABLE ---
     ensureSpace(20);
     doc.setFontSize(font.section);
     doc.setFont("helvetica", "bold");
@@ -457,7 +455,7 @@ const generatePDF = useCallback(async () => {
       head: [tableColumns],
       body: getTableRows(equipmentRows),
       theme: "grid",
-      margin: { left: marginX, right: marginX, top: 40 }, // Top margin for subsequent pages
+      margin: { left: marginX, right: marginX, top: 40 },
       styles: {
         fontSize: 7.6,
         lineColor: [120, 120, 120],
@@ -478,10 +476,7 @@ const generatePDF = useCallback(async () => {
         8: { halign: "center" },
       },
       didDrawPage: (data) => {
-        // Draw footer on every page
         drawFooter();
-        
-        // If the table spills to a new page, draw the header and Annexure title
         if (data.pageNumber > 1) {
           drawHeader(false, marginTop);
           doc.setFontSize(font.section);
@@ -493,12 +488,12 @@ const generatePDF = useCallback(async () => {
 
     doc.save(`SRF_${refNo.replace(/[\\/:*?"<>|]/g, "_")}.pdf`);
   }, [srfData]);
+
   const loadSrfData = useCallback(
     async (id: number, signal: AbortSignal) => {
       setLoading(true);
       setError(null);
       try {
-        // High Performance: Fetch SRF data and Equipment Flow Config in parallel
         const [srfResponse, configSet] = await Promise.all([
             api.get<SrfDetail>(`${ENDPOINTS.SRFS}${id}`, { signal }),
             fetchConfiguredEquipmentTypes()
@@ -530,7 +525,9 @@ const generatePDF = useCallback(async () => {
         const billTo = rawData.address || data.bill_to_address || data.inward?.customer?.bill_to_address || "";
         const shipTo = data.ship_to_address || data.inward?.customer?.ship_to_address || "";
         const displaySrfNo = data.nepl_srf_no || generateNeplSrfNo(data.srf_no);
-        const certAddress = rawData.certificate_issue_adress || data.certificate_issue_adress || "";
+        
+        // Auto-fill with Bill To Address if certificate issue address is not already present
+        const certAddress = rawData.certificate_issue_adress || data.certificate_issue_adress || billTo;
  
         const sanitizedData: SrfDetail = {
           ...data,
@@ -617,7 +614,8 @@ const generatePDF = useCallback(async () => {
             contact_person: inward.customer?.contact_person || "",
             email: inward.customer?.email || "",
             certificate_issue_name: inward.customer?.customer_details || inward.customer_details || "",
-            certificate_issue_adress: "",
+            // Direct prefill with Bill To address
+            certificate_issue_adress: billTo,
             status: "draft",
             inward: inward,
             calibration_frequency: "As per Standard",
@@ -729,12 +727,10 @@ const generatePDF = useCallback(async () => {
         };
  
         if (activeSrfId || (srfData.srf_id && srfData.srf_id > 0)) {
-          // Update existing
           const targetId = activeSrfId || srfData.srf_id;
           await api.put(`${ENDPOINTS.SRFS}${targetId}`, payload);
           setSrfData((prev) => (prev ? { ...prev, status: newStatus } : prev));
         } else {
-          // Create new
           const res = await api.post(`${ENDPOINTS.SRFS}`, payload);
           const newId = res.data.srf_id;
          
@@ -744,8 +740,6 @@ const generatePDF = useCallback(async () => {
           setActiveSrfId(newId);
           setSrfData((prev) => (prev ? { ...prev, srf_id: newId, status: newStatus } : prev));
          
-          // Redirect to the edit URL of the newly created SRF
-          // This ensures the "INWARD" lock releases and "SRF" lock is acquired
           navigate(`/engineer/srfs/${newId}`, { replace: true, state: { activeTab: previousTab } });
         }
  
@@ -797,10 +791,10 @@ const generatePDF = useCallback(async () => {
   const isRejected = srfData.status === "rejected";
   const showSpecialInstructions = isApproved || isRejected;
 
-  // Disable interaction if locked
   const formOpacity = isLocked ? "opacity-70 pointer-events-none select-none" : "opacity-100";
 
-  // Count empty editable fields so we can both highlight and warn the user.
+  // Count empty editable fields so we can highlight and warn the user.
+  // Note: Certificate Issue Address is no longer checked as mandatory here.
   const emptyFieldCount = (() => {
     if (!canEdit) return 0;
     let count = 0;
@@ -809,13 +803,11 @@ const generatePDF = useCallback(async () => {
     if (isEmpty(srfData.phone)) count += 1;
     if (isEmpty(srfData.email)) count += 1;
     if (isEmpty(srfData.certificate_issue_name)) count += 1;
-    if (isEmpty(srfData.certificate_issue_adress)) count += 1;
 
     for (const eq of srfData.inward?.equipments || []) {
       const isConfigured = configuredTypes.has(
         (eq.material_description || "").toLowerCase().trim()
       );
-      // Unit is auto-filled when configured, so skip it then.
       if (!isConfigured && isEmpty(eq.srf_equipment?.unit ?? eq.unit)) count += 1;
       if (isEmpty(eq.srf_equipment?.no_of_calibration_points)) count += 1;
       if (isEmpty(eq.srf_equipment?.mode_of_calibration)) count += 1;
@@ -862,7 +854,6 @@ const generatePDF = useCallback(async () => {
               <h1 className="text-3xl font-bold text-gray-900">SRF Details</h1>
               <p className="text-lg text-blue-600 font-mono mt-1">{srfData.nepl_srf_no}</p>
             </div>
-            {/* Action buttons are kept clickable (pointer-events-auto) so user can leave */}
             <div className="flex gap-3 pointer-events-auto">
               <button
                 onClick={generatePDF}
@@ -1101,11 +1092,11 @@ const generatePDF = useCallback(async () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                    Certificate Issue Address <span className="text-red-500 ml-1">*</span>
+                    Certificate Issue Address
                   </label>
                   <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 pt-2.5 flex items-start pointer-events-none">
-                        <Home size={16} className={canEdit && isEmpty(srfData.certificate_issue_adress) ? "text-amber-500" : "text-indigo-500"}/>
+                        <Home size={16} className="text-indigo-500" />
                       </div>
                       <textarea
                           rows={2}
@@ -1114,12 +1105,9 @@ const generatePDF = useCallback(async () => {
                           onChange={(e) => handleSrfChange("certificate_issue_adress", e.target.value)}
                           className={`block w-full pl-10 rounded-lg border text-sm ${
                             canEdit
-                              ? isEmpty(srfData.certificate_issue_adress)
-                                ? EMPTY_FIELD_CLASS
-                                : "bg-white border-gray-300"
+                              ? "bg-white border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               : "bg-gray-50 border-gray-300 cursor-not-allowed"
                           }`}
-                          placeholder="Same as Bill To if empty"
                       />
                   </div>
                 </div>
@@ -1297,16 +1285,13 @@ const generatePDF = useCallback(async () => {
                 </thead>
                 <tbody>
                   {srfData.inward?.equipments.map((eq) => {
-                    // Logic check: if the material_description is in our configuration set
                     const isConfigured = configuredTypes.has(eq.material_description.toLowerCase().trim());
-                    // Unit is Read Only if: User cannot edit OR Tool is configured (System Driven)
                     const isUnitReadOnly = !canEdit || isConfigured;
 
                     const unitValue = eq.srf_equipment?.unit || eq.unit || "";
                     const calibPointsValue = eq.srf_equipment?.no_of_calibration_points ?? "";
                     const modeValue = eq.srf_equipment?.mode_of_calibration || "";
 
-                    // Only highlight unit when user can actually edit it (skip auto-filled rows)
                     const highlightUnit = canEdit && !isConfigured && isEmpty(unitValue);
                     const highlightCalibPoints = canEdit && isEmpty(calibPointsValue);
                     const highlightMode = canEdit && isEmpty(modeValue);

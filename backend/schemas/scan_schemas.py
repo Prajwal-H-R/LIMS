@@ -6,7 +6,7 @@ class DeviceInfo(BaseModel):
     srf_number: Optional[str]
     inward_date: Optional[date]
     dc_number: Optional[str]
-    dc_date: Optional[str]
+    dc_date: Optional[date]
     nepl_id: str
 
 class CustomerInfo(BaseModel):
