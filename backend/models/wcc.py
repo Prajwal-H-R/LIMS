@@ -83,6 +83,8 @@ class WorkCompletionCertificate(Base):
             "]'::jsonb"
         ),
     )
+    tools_dispatched_to = Column(String, nullable=True)
+    tools_received_from = Column(String, nullable=True)
 
     # Remarks
     remarks = Column(Text, nullable=True)

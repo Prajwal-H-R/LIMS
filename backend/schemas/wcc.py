@@ -58,6 +58,8 @@ class WCCFields(BaseModel):
     details_table: list[WorkDetailItem] = Field(
         default_factory=lambda: [WorkDetailItem()]
     )
+    tools_dispatched_to: str | None = None
+    tools_received_from: str | None = None
     remarks: str | None = None
     signature_details: SignatureDetails = Field(default_factory=SignatureDetails)
 

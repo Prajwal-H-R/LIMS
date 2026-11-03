@@ -80,6 +80,7 @@ interface SrfDetail {
   resources_capability_reviewed_cal?: boolean | null;
   turnaround_time?: string | null;
   remarks?: string | null;
+  remark_special_instructions?: string | null;
 }
 
 interface EquipmentFlowConfig {
@@ -1259,7 +1260,7 @@ const generatePDF = useCallback(async () => {
                   <textarea
                     rows={3}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-gray-100 cursor-not-allowed"
-                    value={srfData.remarks || ""}
+                    value={srfData.remark_special_instructions || ""}
                     readOnly={true}
                   />
                 </div>
