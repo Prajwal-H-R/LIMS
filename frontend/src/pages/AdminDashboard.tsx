@@ -34,8 +34,9 @@ import {
   AlertCircle, Settings, Info,
   Bell, Users, UserPlus, UserCog,
   Ruler, Building2, Award, Thermometer,
-  ChevronLeft, Menu,
+  ChevronLeft, ChevronRight, Menu,
   LayoutDashboard,
+  FileText, KeyRound, ShieldCheck, RefreshCw, CalendarDays,
 } from 'lucide-react';
  
 import type { AdminNotificationItem, UnlockNotificationItem } from
@@ -377,6 +378,270 @@ const ProfileUpdatePopup: React.FC<{
 );
  
 // ====================================================================
+// LICENSE & SUBSCRIPTION SETTINGS
+// ====================================================================
+
+interface LicenseSubscriptionManagerProps {
+  status: LicenseStatus | null;
+  validUntil: string;
+  onRefresh: () => Promise<void>;
+  onBack: () => void;
+}
+
+const formatLicenseDate = (value: string): string => {
+  if (!value) return 'Not available';
+
+  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+};
+
+const LicenseSubscriptionManager: React.FC<LicenseSubscriptionManagerProps> = ({
+  status,
+  validUntil,
+  onRefresh,
+  onBack,
+}) => {
+  const [activationKey, setActivationKey] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  const daysRemaining = (() => {
+    if (!validUntil) return null;
+
+    const expiryDate = new Date(`${validUntil.slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(expiryDate.getTime())) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.ceil((expiryDate.getTime() - today.getTime()) / 86_400_000);
+  })();
+
+  const statusLabel =
+    status === 'ACTIVE'
+      ? 'Active'
+      : status === 'EXPIRING_SOON'
+        ? 'Expiring Soon'
+        : status === 'EXPIRED'
+          ? 'Expired'
+          : 'Unavailable';
+
+  const statusClasses =
+    status === 'ACTIVE'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      : status === 'EXPIRING_SOON'
+        ? 'bg-amber-50 text-amber-700 border-amber-200'
+        : status === 'EXPIRED'
+          ? 'bg-red-50 text-red-700 border-red-200'
+          : 'bg-slate-50 text-slate-600 border-slate-200';
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setFeedback(null);
+    try {
+      await onRefresh();
+    } catch {
+      setFeedback({
+        type: 'error',
+        text: 'Unable to refresh license details. Please try again.',
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const key = activationKey.trim();
+    if (!key) {
+      setFeedback({ type: 'error', text: 'Please enter the license key.' });
+      return;
+    }
+
+    setSubmitting(true);
+    setFeedback(null);
+
+    try {
+      const response = await api.post<{
+        message?: string;
+        valid_until?: string;
+      }>('/license/extend', {
+        activation_key: key,
+      });
+
+      setActivationKey('');
+      setFeedback({
+        type: 'success',
+        text: response.data?.message || 'License extended successfully.',
+      });
+
+      // The extension is already committed by the API. Refresh the displayed
+      // database expiry separately so a refresh failure does not misreport it.
+      try {
+        await onRefresh();
+      } catch {
+        setFeedback({
+          type: 'success',
+          text: `${response.data?.message || 'License extended successfully.'} The displayed status could not be refreshed; use Refresh to load it again.`,
+        });
+      }
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      setFeedback({
+        type: 'error',
+        text:
+          typeof detail === 'string'
+            ? detail
+            : 'License extension failed. Verify the key and try again.',
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition hover:text-blue-600"
+          >
+            <ChevronLeft size={16} />
+            Back to Settings
+          </button>
+          <h2 className="text-2xl font-bold text-gray-900">License &amp; Subscription</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            View the current license validity and extend it using a new activation key.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Refreshing...' : 'Refresh status'}
+        </button>
+      </div>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+            <ShieldCheck size={23} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900">Current license</h3>
+            <p className="text-sm text-gray-500">License information retrieved from the database</p>
+          </div>
+          <span className={`ml-auto inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusClasses}`}>
+            {statusLabel}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <CalendarDays size={16} />
+              License valid until
+            </div>
+            <div className="mt-2 text-xl font-bold text-gray-900">
+              {formatLicenseDate(validUntil)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            <div className="text-sm text-gray-500">Validity remaining</div>
+            <div className="mt-2 text-xl font-bold text-gray-900">
+              {daysRemaining === null
+                ? '—'
+                : daysRemaining < 0
+                  ? `${Math.abs(daysRemaining)} day(s) overdue`
+                  : `${daysRemaining} day(s)`}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex items-start gap-3 mb-5">
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700">
+            <KeyRound size={22} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900">Extend license</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Enter the activation key provided for your next license period.
+            </p>
+          </div>
+        </div>
+
+        <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          For Uninterrupted LIMS usage, ensure that the license is extended before the current license expires
+        </div>
+
+        {feedback && (
+          <div
+            role="alert"
+            className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+              feedback.type === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-red-200 bg-red-50 text-red-700'
+            }`}
+          >
+            {feedback.text}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="license-activation-key" className="mb-2 block text-sm font-medium text-gray-700">
+              License activation key
+            </label>
+            <input
+              id="license-activation-key"
+              type="text"
+              value={activationKey}
+              onChange={(event) => setActivationKey(event.target.value)}
+              placeholder="YatharthataLIMS|YYYY-MM-DD|..."
+              autoComplete="off"
+              spellCheck={false}
+              disabled={submitting}
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm text-gray-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+            />
+          </div>
+
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
+            {/* <p className="text-xs text-gray-500">
+              Applying a key updates the license expiry and records the extension in the audit table.
+            </p> */}
+            <button
+              type="submit"
+              disabled={submitting || !activationKey.trim()}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting && <RefreshCw size={16} className="animate-spin" />}
+              {submitting ? 'Applying key...' : 'Extend license'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+};
+
+// ====================================================================
 // MAIN DASHBOARD COMPONENT
 // ====================================================================
  
@@ -389,6 +654,9 @@ const AdminDashboard: React.FC = () => {
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseValidUntil, setLicenseValidUntil] = useState('');
   const [showLicensePopup, setShowLicensePopup] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<
+    'overview' | 'certificate-details' | 'license-subscription'
+  >('overview');
  
   // ── Core state ────────────────────────────────────────────────────
   const [users,          setUsers]          = useState<User[]>([]);
@@ -425,6 +693,20 @@ const AdminDashboard: React.FC = () => {
     setSearchParams({ section });
  
   const handleLogout = () => { if (logout) logout(); };
+
+  // Return to the Settings card menu whenever the user leaves this section.
+  useEffect(() => {
+    if (activeSection !== 'settings') {
+      setSettingsTab('overview');
+    }
+  }, [activeSection]);
+
+  const refreshLicenseStatus = useCallback(async () => {
+    const res = await fetchLicenseStatus();
+    setLicenseStatus(res?.status ?? null);
+    setLicenseValidUntil(res?.valid_until ?? '');
+    setShowLicensePopup(Boolean(res?.show_popup));
+  }, []);
  
   // ── Calibration expiry check ──────────────────────────────────────
   const checkCalibrationExpiry = useCallback(async () => {
@@ -478,48 +760,96 @@ const AdminDashboard: React.FC = () => {
     }
   }, []);
  
-  // ── Profile notifications fetch ───────────────────────────────────
+  // ── Profile notifications ────────────────────────────────────────
+  // Load notifications once when the Admin Dashboard mounts. There is no
+  // interval, focus listener, visibility listener, or section-change fetch.
+  // The in-flight guard also prevents duplicate requests if React re-runs the
+  // mount effect in development StrictMode.
+  const activeSectionRef = useRef(activeSection);
+  activeSectionRef.current = activeSection;
+
+  const profileNotifInFlightRef = useRef(false);
+
   const fetchProfileNotifications = useCallback(async () => {
+    if (profileNotifInFlightRef.current) return;
+
+    profileNotifInFlightRef.current = true;
     setProfileNotifLoading(true);
     setProfileNotifError(null);
+
     try {
-      const res = await api.get<AdminNotificationsResponse>(ENDPOINTS.NOTIFICATIONS);
-      const notifs = res.data.notifications || [];
+      const res = await api.get<AdminNotificationsResponse>(
+        ENDPOINTS.NOTIFICATIONS
+      );
+
+      const notifs = Array.isArray(res.data?.notifications)
+        ? res.data.notifications
+        : [];
+
       setProfileNotifications(notifs);
- 
-      const newestId        = notifs[0]?.id;
+
+      const newestId = notifs[0]?.id;
+
       const lastPopupSeenId = Number(
         localStorage.getItem(PROFILE_UPDATE_LAST_POPUP_SEEN_KEY) || '0'
       );
+
       if (newestId && newestId > lastPopupSeenId) {
         setShowProfileUpdatePopup(true);
-        localStorage.setItem(PROFILE_UPDATE_LAST_POPUP_SEEN_KEY, String(newestId));
+
+        localStorage.setItem(
+          PROFILE_UPDATE_LAST_POPUP_SEEN_KEY,
+          String(newestId)
+        );
       }
- 
+
       const lastReadId = Number(
         localStorage.getItem(PROFILE_UPDATE_LAST_READ_KEY) || '0'
       );
-      if (activeSection === 'notifications') {
-        if (newestId)
-          localStorage.setItem(PROFILE_UPDATE_LAST_READ_KEY, String(newestId));
+
+      if (activeSectionRef.current === 'notifications') {
+        if (newestId) {
+          localStorage.setItem(
+            PROFILE_UPDATE_LAST_READ_KEY,
+            String(newestId)
+          );
+        }
+
         setUnreadProfileCount(0);
       } else {
-        setUnreadProfileCount(notifs.filter((n) => n.id > lastReadId).length);
+        setUnreadProfileCount(
+          notifs.filter((n) => n.id > lastReadId).length
+        );
       }
     } catch (err: unknown) {
       const maybeMsg =
         err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } })
-              .response?.data?.detail
+          ? (err as {
+              response?: { data?: { detail?: string } };
+            }).response?.data?.detail
           : null;
-      setProfileNotifError(maybeMsg || 'Failed to load notifications.');
+
+      setProfileNotifError(
+        maybeMsg || 'Failed to load notifications.'
+      );
     } finally {
+      profileNotifInFlightRef.current = false;
       setProfileNotifLoading(false);
     }
-  }, [activeSection]);
- 
+  }, []);
+
+  // Exactly one initial profile-notifications fetch for this page mount.
+  useEffect(() => {
+    void fetchProfileNotifications();
+  }, [fetchProfileNotifications]);
+
   // ── Unlock requests fetch ─────────────────────────────────────────
+  const unlockRequestsInFlightRef = useRef(false);
+
   const fetchUnlockRequests = useCallback(async () => {
+    if (unlockRequestsInFlightRef.current) return;
+
+    unlockRequestsInFlightRef.current = true;
     setUnlockLoading(true);
     setUnlockError(null);
     try {
@@ -541,6 +871,7 @@ const AdminDashboard: React.FC = () => {
         e?.response?.data?.detail ?? 'Failed to load delete requests.'
       );
     } finally {
+      unlockRequestsInFlightRef.current = false;
       setUnlockLoading(false);
     }
   }, []);
@@ -548,31 +879,17 @@ const AdminDashboard: React.FC = () => {
   // ── Effects ───────────────────────────────────────────────────────
   useEffect(() => { checkCalibrationExpiry(); }, [checkCalibrationExpiry]);
  
-  // Fetch license status once authenticated
+  // Fetch license status once authenticated. The same callback is used by
+  // the Settings page and the existing expiry popup after an extension.
   useEffect(() => {
-    const run = async () => {
-      if (!user) return;
-      const role = (user as any)?.role?.toString().toLowerCase();
-      if (role !== 'admin') return;
- 
-      try {
-        const res = await fetchLicenseStatus();
-        if (res?.show_popup) {
-          setLicenseStatus(res.status);
-          setLicenseValidUntil(res.valid_until);
-          setShowLicensePopup(true);
-        } else {
-          setLicenseStatus(res?.status ?? null);
-          setLicenseValidUntil(res?.valid_until ?? '');
-          setShowLicensePopup(false);
-        }
-      } catch {
-        // keep UI unchanged
-      }
-    };
- 
-    run();
-  }, [user]);
+    if (!user) return;
+    const role = (user as any)?.role?.toString().toLowerCase();
+    if (role !== 'admin') return;
+
+    void refreshLicenseStatus().catch(() => {
+      // Keep the existing UI state unchanged if the status request fails.
+    });
+  }, [user, refreshLicenseStatus]);
  
   useEffect(() => {
     if (['dashboard', 'users', 'invite-users', 'notifications']
@@ -581,16 +898,10 @@ const AdminDashboard: React.FC = () => {
     }
   }, [fetchData, activeSection]);
  
+  // Load unlock requests once when the Admin Dashboard mounts.
+  // Keep the existing manual refresh after an unlock action.
   useEffect(() => {
-    fetchProfileNotifications();
-    const id = setInterval(fetchProfileNotifications, 30_000);
-    return () => clearInterval(id);
-  }, [fetchProfileNotifications]);
- 
-  useEffect(() => {
-    fetchUnlockRequests();
-    const id = setInterval(fetchUnlockRequests, 30_000);
-    return () => clearInterval(id);
+    void fetchUnlockRequests();
   }, [fetchUnlockRequests]);
  
   useEffect(() => {
@@ -800,12 +1111,72 @@ const latestPopupCompany =
                 </div>
               )}
               {activeSection === 'settings' && (
-  <div className="animate-slideUp">
-    <CertificateDetailsManager
-      onBack={() => handleNavigate('dashboard')}
-    />
-  </div>
-)}
+                <div className="animate-slideUp space-y-7">
+                  {settingsTab === 'overview' ? (
+                    <>
+                      <div>
+                        <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
+                          Configuration Options
+                        </h1>
+                        <p className="mt-1.5 text-sm text-gray-500">
+                          Choose a settings area to view or manage your LIMS configuration.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                        <button
+                          type="button"
+                          onClick={() => setSettingsTab('certificate-details')}
+                          className="group flex min-h-[108px] w-full items-center gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                        >
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                            <FileText size={26} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-base font-semibold text-gray-900 transition-colors group-hover:text-blue-600 sm:text-lg">
+                              Certificate Details
+                            </span>
+                            <span className="mt-1 block text-sm leading-5 text-gray-500">
+                              Manage the details displayed on issued certificates.
+                            </span>
+                          </span>
+                          <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition-colors group-hover:text-blue-600" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSettingsTab('license-subscription')}
+                          className="group flex min-h-[108px] w-full items-center gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
+                        >
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+                            <KeyRound size={26} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-base font-semibold text-gray-900 transition-colors group-hover:text-violet-600 sm:text-lg">
+                              License &amp; Subscription
+                            </span>
+                            <span className="mt-1 block text-sm leading-5 text-gray-500">
+                              View license validity and manage your subscription.
+                            </span>
+                          </span>
+                          <ChevronRight className="h-5 w-5 shrink-0 text-gray-300 transition-colors group-hover:text-violet-600" />
+                        </button>
+                      </div>
+                    </>
+                  ) : settingsTab === 'certificate-details' ? (
+                    <CertificateDetailsManager
+                      onBack={() => setSettingsTab('overview')}
+                    />
+                  ) : (
+                    <LicenseSubscriptionManager
+                      status={licenseStatus}
+                      validUntil={licenseValidUntil}
+                      onRefresh={refreshLicenseStatus}
+                      onBack={() => setSettingsTab('overview')}
+                    />
+                  )}
+                </div>
+              )}
             </div>
  
             <footer className="w-full bg-white border-t border-gray-200 mt-auto">
@@ -823,18 +1194,9 @@ const latestPopupCompany =
             status={licenseStatus}
             validUntil={licenseValidUntil}
             onExtended={async () => {
-              // After successful extension, re-fetch to get latest status
+              // After successful extension, re-fetch to get the latest status.
               try {
-                const res = await fetchLicenseStatus();
-                if (res?.show_popup) {
-                  setLicenseStatus(res.status);
-                  setLicenseValidUntil(res.valid_until);
-                  setShowLicensePopup(true);
-                } else {
-                  setLicenseStatus(res?.status ?? null);
-                  setLicenseValidUntil(res?.valid_until ?? '');
-                  setShowLicensePopup(false);
-                }
+                await refreshLicenseStatus();
               } catch {
                 setShowLicensePopup(false);
               }

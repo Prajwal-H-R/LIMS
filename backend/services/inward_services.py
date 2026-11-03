@@ -53,6 +53,30 @@ class InwardService:
         characters = string.ascii_letters + string.digits + "!@#$%^&*"
         return ''.join(secrets.choice(characters) for _ in range(length))
 
+    @staticmethod
+    def _parse_optional_date(value: Any) -> Optional[date]:
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            return value.date()
+
+        if isinstance(value, date):
+            return value
+
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+
+        try:
+            return date.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="Customer DC Date must be in YYYY-MM-DD format."
+            ) from exc
+
     def _sanitize_excel_value(self, value: Any) -> Any:
         if isinstance(value, datetime):
             return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
@@ -354,6 +378,7 @@ class InwardService:
         try:
             current_time = datetime.now(timezone.utc)
             material_date = draft_data.get('material_inward_date') or draft_data.get('date')
+            customer_dc_date = self._parse_optional_date(draft_data.get('customer_dc_date'))
             incoming_srf = draft_data.get('srf_no')
             
             if not incoming_srf or incoming_srf in ['TBD', 'Loading...', 'Error!']:
@@ -374,7 +399,7 @@ class InwardService:
                 draft.customer_id = draft_data.get('customer_id')
                 draft.received_date = draft_data.get('received_date')
                 draft.material_inward_date = material_date or draft.material_inward_date
-                draft.customer_dc_date = draft_data.get('customer_dc_date')
+                draft.customer_dc_date = customer_dc_date
                 draft.customer_dc_no = draft_data.get('customer_dc_no')
                 draft.received_by = draft_data.get('receiver')
                 draft.draft_data = draft_data
@@ -386,7 +411,7 @@ class InwardService:
                     srf_no=srf_to_save,
                     customer_id=draft_data.get('customer_id'),
                     material_inward_date=material_date,
-                    customer_dc_date=draft_data.get('customer_dc_date'),
+                    customer_dc_date=customer_dc_date,
                     customer_dc_no=draft_data.get('customer_dc_no'),
                     received_by=draft_data.get('receiver'),
                     received_date=draft_data.get('received_date'),

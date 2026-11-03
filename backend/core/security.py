@@ -85,26 +85,24 @@ def create_access_token(data: dict) -> str:
 
 def decode_access_token(token: str) -> dict:
     """
-    Decodes and validates a JWT access token, raising InvalidTokenError on failure.
-    Includes leeway for development environment clock skew.
+    Decodes and validates a JWT access token.
+    Converts PyJWT exceptions into the application's custom exception.
     """
     if not SECRET_KEY:
         raise InvalidTokenError("Server misconfiguration: JWT_SECRET missing.")
 
     try:
-        # ⚠️ WARNING: Leeway is a workaround for dev environments with clock skew.
-        # This should NOT be used in production. The correct fix is to sync the system clock.
-        leeway_in_seconds = 3600  # 1 hour
-
         payload = jwt.decode(
-            token, 
-            SECRET_KEY, 
-            algorithms=[ALGORITHM],
-            options={"leeway": leeway_in_seconds}
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
         )
         return payload
-    except InvalidTokenError as e:
-        raise InvalidTokenError(f"Token signature or claims are invalid: {e}")
+
+    except PyJWTInvalidTokenError as e:
+        raise InvalidTokenError(
+            f"Token signature or claims are invalid: {e}"
+        ) from e
 
 # --- Refresh Token Functions ---
 def create_refresh_token(data: dict) -> str:
@@ -138,5 +136,7 @@ def decode_refresh_token(token: str) -> dict:
             options={"leeway": leeway_in_seconds}
         )
         return payload
-    except InvalidTokenError:
-        raise InvalidTokenError("Refresh token signature or claims are invalid.")
+    except PyJWTInvalidTokenError as e:
+        raise InvalidTokenError(
+            "Refresh token signature or claims are invalid."
+        ) from e

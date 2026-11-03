@@ -232,6 +232,7 @@ class Srf(SrfBase):
     ref_customer_requirement: Optional[bool] = None
     turnaround_time: Optional[int] = None
     remarks: Optional[str] = None
+    remark_special_instructions: Optional[str] = None
    
     model_config = ConfigDict(from_attributes=True)
  

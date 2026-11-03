@@ -419,10 +419,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 const getActiveSectionFromPath = (pathname: string): string => {
   // ... existing checks
   if (pathname.includes("/engineer/certificates")) return "certificates";
-  
+
   // --- ADD THIS ---
   if (pathname.includes("/engineer/calibration-bookings")) return "calibration-bookings";
-  
+
   return "dashboard";
 };
     return (
@@ -741,7 +741,7 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
   const [showLicensePopup, setShowLicensePopup] = useState(false);
   const [pendingRoute, setPendingRoute] = useState<string | null>(null);
 
-  
+
   // Prevent auto-open from re-triggering after user-dismiss.
   const autoOpenDoneRef = React.useRef(false);
   const dismissedRef = React.useRef(false);
@@ -763,42 +763,102 @@ const EngineerPortal: React.FC<EngineerPortalProps> = ({ user, onLogout }) => {
   );
 
   // ── Notification state ──
-  const [profileUpdateNotifications, setProfileUpdateNotifications] = useState<EngineerNotificationItem[]>([]);
+
+  // ── Notification state ──
+  const [profileUpdateNotifications, setProfileUpdateNotifications] =
+    useState<EngineerNotificationItem[]>([]);
+
   const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
   const [profileUpdateError, setProfileUpdateError] = useState<string | null>(null);
   const [showProfileUpdatePopup, setShowProfileUpdatePopup] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const latestPopupCompany = extractCompanyFromNotification(profileUpdateNotifications[0]);
+  const latestPopupCompany = extractCompanyFromNotification(
+    profileUpdateNotifications[0]
+  );
 
-  const fetchProfileUpdateNotifications = useCallback(async () => {
-    setProfileUpdateLoading(true);
-    try {
-      const res = await api.get<EngineerNotificationsResponse>(ENDPOINTS.NOTIFICATIONS);
-      const notifications = res.data.notifications || [];
-      setProfileUpdateNotifications(notifications);
-      const newestId = notifications[0]?.id;
-      const lastSeenId = Number(localStorage.getItem("engineer_profile_update_last_seen_id") || "0");
-      if (newestId && newestId > lastSeenId) {
-        setShowProfileUpdatePopup(true);
-        localStorage.setItem("engineer_profile_update_last_seen_id", String(newestId));
+  // Keep the latest route without recreating the API callback.
+  const activeSectionRef = React.useRef(activeSection);
+  activeSectionRef.current = activeSection;
+
+  // Prevent duplicate or overlapping requests.
+  const notificationRequestInFlightRef = React.useRef(false);
+  const lastNotificationFetchAtRef = React.useRef(0);
+
+  const fetchProfileUpdateNotifications = useCallback(
+    async (force = false) => {
+      const now = Date.now();
+
+      // Avoid duplicate requests from simultaneous browser events.
+      if (notificationRequestInFlightRef.current) return;
+
+      // Ignore repeated automatic refresh events within 10 seconds.
+      if (
+        !force &&
+        now - lastNotificationFetchAtRef.current < 10_000
+      ) {
+        return;
       }
-      setUnreadCount(activeSection !== "notifications" ? notifications.filter(n => n.id > lastSeenId).length : 0);
-    } catch (e: unknown) {
-      setProfileUpdateError("Failed to load notifications.");
-    } finally {
-      setProfileUpdateLoading(false);
+
+      notificationRequestInFlightRef.current = true;
+      lastNotificationFetchAtRef.current = now;
+
+      setProfileUpdateLoading(true);
+      setProfileUpdateError(null);
+
+      try {
+        const res = await api.get<EngineerNotificationsResponse>(
+          ENDPOINTS.NOTIFICATIONS
+        );
+
+        const notifications = Array.isArray(res.data?.notifications)
+          ? res.data.notifications
+          : [];
+
+        setProfileUpdateNotifications(notifications);
+
+        const newestId = notifications[0]?.id;
+
+        const lastSeenId = Number(
+          localStorage.getItem("engineer_profile_update_last_seen_id") || "0"
+        );
+
+        if (newestId && newestId > lastSeenId) {
+          setShowProfileUpdatePopup(true);
+
+          localStorage.setItem(
+            "engineer_profile_update_last_seen_id",
+            String(newestId)
+          );
+        }
+
+        setUnreadCount(
+          activeSectionRef.current !== "notifications"
+            ? notifications.filter((n) => n.id > lastSeenId).length
+            : 0
+        );
+      } catch (error: unknown) {
+        console.error("Error fetching profile update notifications:", error);
+        setProfileUpdateError("Failed to load notifications.");
+      } finally {
+        notificationRequestInFlightRef.current = false;
+        setProfileUpdateLoading(false);
+      }
+    },
+    []
+  );
+
+  // Fetch notifications once when the Engineer Portal mounts.
+  useEffect(() => {
+    void fetchProfileUpdateNotifications();
+  }, [fetchProfileUpdateNotifications]);
+
+  // Clear the unread badge when the Engineer opens Notifications, without another API request.
+  useEffect(() => {
+    if (activeSection === "notifications") {
+      setUnreadCount(0);
     }
   }, [activeSection]);
-
-  useEffect(() => {
-    fetchProfileUpdateNotifications();
-    const interval = setInterval(
-      fetchProfileUpdateNotifications,
-      30000
-    );
-    return () => clearInterval(interval);
-  }, [fetchProfileUpdateNotifications]);
 
   // Fetch license status only after auth and only for staff engineer
   useEffect(() => {

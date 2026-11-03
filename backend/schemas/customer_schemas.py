@@ -45,7 +45,7 @@ class EquipmentForCustomer(BaseModel):
     remarks_and_decision: Optional[str] = None
     photos: Optional[List[str]] = None
     status: Optional[str] = None
-
+    accessories_included: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 

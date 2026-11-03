@@ -510,6 +510,7 @@ class CustomerPortalService:
                     "engineer_remarks":        eq.engineer_remarks,
                     "photos":                  self._format_photo_paths(eq.photos),
                     "status":                  eq.status,
+                    "accessories_included": eq.accessories_included,
                 }
                 for eq in sorted_equipments
             ]

@@ -53,6 +53,8 @@ type WCCPayload = {
   work_location_3: string;
   gst_no: string;
   pan_no: string;
+  tools_received_from: string;
+  tools_dispatched_to: string;
   wcc_no: string;
   work_start_date: string | null;
   work_completion_date: string | null;
@@ -99,6 +101,8 @@ const createEmptyWCCPayload = (inwardId: number, customerName = ""): WCCPayload 
   work_location_3: "",
   gst_no: "",
   pan_no: "",
+  tools_received_from: "",
+  tools_dispatched_to: "",
   wcc_no: "",
   work_start_date: null,
   work_completion_date: null,
@@ -108,8 +112,8 @@ const createEmptyWCCPayload = (inwardId: number, customerName = ""): WCCPayload 
   details_table: [{ ...emptyWCCDetail(), po_s_no: 1 }],
   remarks: "",
   signature_details: {
-    representative_and_company_seal_name: "Nextage Engineering Pvt Ltd",
-    vendor_representative_company_seal_name: "",
+    representative_and_company_seal_name: "",
+    vendor_representative_company_seal_name: "Nextage Engineering Pvt Ltd",
   },
 });
 
@@ -125,6 +129,8 @@ const payloadFromWCCRecord = (record: WCCRecord): WCCPayload => ({
   work_location_3: record.work_location_3 ?? "",
   gst_no: record.gst_no ?? "",
   pan_no: record.pan_no ?? "",
+  tools_received_from: record.tools_received_from ?? "",
+  tools_dispatched_to: record.tools_dispatched_to ?? "",
   wcc_no: record.wcc_no ?? "",
   work_start_date: record.work_start_date ? record.work_start_date.slice(0, 10) : null,
   work_completion_date: record.work_completion_date ? record.work_completion_date.slice(0, 10) : null,
@@ -412,6 +418,19 @@ function WCCFormModal({
                 <WCCTextInput label="GST No" value={form.gst_no} onChange={(value) => setField("gst_no", value)} />
                 <WCCTextInput label="PAN No" value={form.pan_no} onChange={(value) => setField("pan_no", value)} />
               </div>
+              {/* These two fields follow the GST/PAN row, matching the WCC PDF layout. */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <WCCTextInput
+                  label="Tools Received From"
+                  value={form.tools_received_from}
+                  onChange={(value) => setField("tools_received_from", value)}
+                />
+                <WCCTextInput
+                  label="Tools Dispatched To"
+                  value={form.tools_dispatched_to}
+                  onChange={(value) => setField("tools_dispatched_to", value)}
+                />
+              </div>
             </section>
 
             <section className="space-y-4">
@@ -476,8 +495,8 @@ function WCCFormModal({
               <h3 className="border-b border-slate-100 pb-2 text-sm font-bold uppercase tracking-wide text-blue-700">Signature Details</h3>
               <p className="text-xs text-slate-500">Authorised Signature, Site Engineer, and Site Incharge are part of template</p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <WCCTextInput label="Name of the Representative and Company Seal" value={form.signature_details.representative_and_company_seal_name} onChange={(value) => setSignature("representative_and_company_seal_name", value)} />
                 <WCCTextInput label="Name of the Vendor Representative, Company Seal" value={form.signature_details.vendor_representative_company_seal_name} onChange={(value) => setSignature("vendor_representative_company_seal_name", value)} />
+                <WCCTextInput label="Name of the Representative and Company Seal" value={form.signature_details.representative_and_company_seal_name} onChange={(value) => setSignature("representative_and_company_seal_name", value)} />
               </div>
             </section>
           </div>
@@ -636,6 +655,34 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setLineWidth(0.16);
   doc.line(leftX, leftY + leftRowH, leftX + leftW, leftY + leftRowH);
 
+  // Tools Received From and Tools Dispatched To sit directly below the GST/PAN row.
+  // Keep them in two equal columns within the left information area so they do not
+  // overlap the right-side date / certificate metadata.
+  const toolsRowY = leftY + leftRowH + 11;
+  // Extend this row through the open space before the right-side metadata.
+  const toolsRowWidth = rightX - leftX - 4;
+  const toolsColumnWidth = toolsRowWidth / 2;
+  const toolsFields: Array<[string, string, number]> = [
+    ["Tools Received From", wccSafe(wcc.tools_received_from), leftX + 0.8],
+    ["Tools Dispatched To", wccSafe(wcc.tools_dispatched_to), leftX + toolsColumnWidth + 0.8],
+  ];
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.0);
+  doc.setTextColor(0, 0, 0);
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.16);
+  toolsFields.forEach(([label, value, labelX], index) => {
+    const columnEndX = leftX + (index + 1) * toolsColumnWidth - 0.8;
+    doc.text(label, labelX, toolsRowY);
+    const valueX = labelX + doc.getTextWidth(label) + 2;
+    if (value) {
+      doc.text(value, valueX, toolsRowY, {
+        maxWidth: Math.max(1, columnEndX - valueX),
+      });
+    }
+    doc.line(valueX, toolsRowY + 1.6, columnEndX, toolsRowY + 1.6);
+  });
+
   // Right-side metadata uses one fixed label column, one fixed value column,
   // uniform row spacing, and lines that all finish at the same right margin.
   let rightY = 51.5;
@@ -752,6 +799,8 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setTextColor(255, 36, 36);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.0);
+  // Preserve the original WCC PDF placement: Vendor Representative on the left,
+  // and Representative and Company Seal on the right.
   doc.text("Name of the Vendor Representative, Company Seal", leftSignatureX, signatureY + 4);
   const vendorRepresentativeSeal = wccSafe(wcc.signature_details?.vendor_representative_company_seal_name) || companyName;
   doc.text(vendorRepresentativeSeal, leftSignatureX, signatureY + 8, { maxWidth: signatureWidth });

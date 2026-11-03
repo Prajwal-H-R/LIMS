@@ -30,7 +30,7 @@ class Inward(Base):
     
     material_inward_date = Column(Date, nullable=False)
     customer_dc_no: Mapped[Optional[str]] = mapped_column(String)
-    customer_dc_date = Column(String(255))
+    customer_dc_date = Column(Date, nullable=True)
     customer_details = Column(String(255))
     received_by = Column(String)
     

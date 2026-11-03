@@ -68,7 +68,16 @@ def license_status(
 def extend_license(
     payload: dict,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
+    # License extensions must be initiated by an authenticated administrator.
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only administrators can extend the license",
+        )
+
     activation_key = payload.get("activation_key")
     if not activation_key:
         raise HTTPException(400, "Activation key required")

@@ -21,7 +21,7 @@ class CustomerDeviationItem(BaseModel):
     inward_eqp_id: int
     srf_no: Optional[str] = None
     customer_dc_no: Optional[str] = None
-    customer_dc_date: Optional[str] = None
+    customer_dc_date: Optional[date] = None
     nepl_id: Optional[str] = None
     make: Optional[str] = None
     model: Optional[str] = None
@@ -71,7 +71,7 @@ class DeviationDetailOut(BaseModel):
     inward_eqp_id: int
     srf_no: Optional[str] = None
     customer_dc_no: Optional[str] = None
-    customer_dc_date: Optional[str] = None
+    customer_dc_date: Optional[date] = None
     customer_details: Optional[str] = None
     nepl_id: Optional[str] = None
     make: Optional[str] = None

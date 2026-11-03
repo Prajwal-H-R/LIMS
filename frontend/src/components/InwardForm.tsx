@@ -73,7 +73,7 @@ interface LoadedDraftData {
   srf_no: string;
   received_date: string;
   material_inward_date: string;
-  customer_dc_date: string;
+  customer_dc_date?: string | null;
   customer_dc_no: string;
   customer_id: number | null;
   customer_details: string;
@@ -1497,8 +1497,29 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                             <td className="p-2"><input placeholder="Out DC" value={(equipment as any).out_dc || ''} onChange={(e) => handleEquipmentChange(index, 'out_dc' as any, e.target.value)} className="w-full px-2 py-1.5 border rounded-md" disabled={isLocked} /></td>
                           </>
                         ) : ( isAnyOutsourced && <td colSpan={3} className="p-2 bg-slate-50"></td> )}
-                        <td className="p-2"><input value={equipment.accessories_included} onChange={e=>handleEquipmentChange(index,'accessories_included',e.target.value)} className="w-full px-2 py-1.5 border rounded-md" placeholder="e.g. Case" disabled={isLocked} /></td>
-                        <td className="p-2"><select value={equipment.inspe_status} onChange={e=>handleEquipmentChange(index,'inspe_status',e.target.value)} className={`w-full px-2 py-1.5 border rounded-md ${equipment.inspe_status === 'Not OK' ? 'bg-red-50 border-red-300' : ''}`} disabled={isLocked}><option value="OK">OK</option><option value="Not OK">Not OK</option></select></td>
+<td className="p-2">
+  <textarea
+    value={equipment.accessories_included ?? ''}
+    onChange={e => {
+      const textarea = e.currentTarget;
+
+      handleEquipmentChange(
+        index,
+        'accessories_included',
+        textarea.value
+      );
+
+      // Automatically expand vertically when content is not visible
+      if (textarea.scrollHeight > textarea.clientHeight) {
+        textarea.style.height = `${textarea.scrollHeight}px`;
+      }
+    }}
+    rows={2}
+    className="w-full min-h-[60px] px-2 py-1.5 border rounded-md resize overflow-auto"
+    placeholder="e.g. Case"
+    disabled={isLocked}
+  />
+</td>                    <td className="p-2"><select value={equipment.inspe_status} onChange={e=>handleEquipmentChange(index,'inspe_status',e.target.value)} className={`w-full px-2 py-1.5 border rounded-md ${equipment.inspe_status === 'Not OK' ? 'bg-red-50 border-red-300' : ''}`} disabled={isLocked}><option value="OK">OK</option><option value="Not OK">Not OK</option></select></td>
                         {showEngineerRemarksColumn && (<td className="p-2 relative group w-[200px]">{equipment.inspe_status === 'Not OK' ? (<><textarea placeholder="Describe issue..." value={equipment.engineer_remarks || ''} onChange={e => handleEquipmentChange(index, 'engineer_remarks', e.target.value)} className="w-full h-10 px-2 py-1.5 border rounded-md text-xs bg-yellow-50 resize-none" disabled={isLocked} /><TruncatedTooltip text={equipment.engineer_remarks || ''} type="input" /></>) : (<div className="text-center pt-2">-</div>)}</td>)}
                         {showCustomerRemarksColumn && (<td className="p-2 relative group w-[200px]">{equipment.remarks_and_decision ? (<div className="w-full h-10 p-2 bg-yellow-50 border rounded text-xs truncate"><div className="flex items-center gap-1.5"><MessageSquare size={12} className="flex-shrink-0" /><span className="truncate">{equipment.remarks_and_decision}</span></div><TruncatedTooltip text={equipment.remarks_and_decision} type="display" /></div>) : (<div className="text-center pt-2">-</div>)}</td>)}
                         <td className="p-2"><div className="flex items-center gap-2"><label htmlFor={`photo-${index}`} className={`cursor-pointer bg-gray-200 px-2 py-1 rounded text-xs flex items-center gap-1 ${isLocked ? 'opacity-50' : ''}`}><Camera size={12}/> Attach</label><input id={`photo-${index}`} type="file" multiple accept="image/*" className="hidden" onChange={e=>handlePhotoChange(index,e)} disabled={isLocked} /></div><div className="flex flex-wrap gap-1 mt-1">{equipment.existingPhotoUrls?.map((url, i) => (<a key={`ex-${i}`} href={resolvePhotoUrl(url)} target="_blank" rel="noreferrer" className="w-8 h-8 border"><img src={resolvePhotoUrl(url)} className="w-full h-full object-cover"/></a>))}{equipment.photoPreviews?.map((url, i) => (<div key={`new-${i}`} className="relative w-8 h-8 border"><img src={url} className="w-full h-full object-cover"/>{!isLocked && <button type="button" onClick={()=>handleRemovePhoto(index,i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={8}/></button>}</div>))}</div></td>
