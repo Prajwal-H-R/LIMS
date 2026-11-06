@@ -77,6 +77,18 @@ jobs:
       # ------------------------------------------------------------
       # Create runtime Docker environment
       # ------------------------------------------------------------
+      - name: Prepare CI storage paths
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "UPLOADS_DIR=${RUNNER_TEMP}/uploads" >> "$GITHUB_ENV"
+          echo "CERTIFICATE_ASSETS_DIR=${RUNNER_TEMP}/certificate_assets" >> "$GITHUB_ENV"
+
+          mkdir -p "${RUNNER_TEMP}/uploads/inward_photos"
+          mkdir -p "${RUNNER_TEMP}/certificate_assets"
+
+          sudo chown -R 10001:10001 "${RUNNER_TEMP}/ylims-data"
       - name: Create .env.docker from GitHub Secrets
         shell: bash
         env:
