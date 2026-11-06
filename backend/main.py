@@ -2,7 +2,6 @@ import asyncio
 import time
 import logging
 import os
-from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
@@ -13,6 +12,7 @@ from sqlalchemy import text
 # --- IMPORT DB COMPONENTS & CORE ---
 from backend.db import Base, engine, SessionLocal
 from backend.core.config import settings
+from backend.core.storage_paths import UPLOADS_DIR, CERTIFICATE_ASSETS_DIR
 from backend.report import report_log
 from backend.report.scheduler import start_scheduler
 from backend.services.expiry_services import ExpiryService
@@ -77,15 +77,15 @@ from backend.calibration_reminders.scheduler import run_daily_calibration_remind
 # --- BACKGROUND TASKS & LIFESPAN ---
 async def automated_daily_maintenance():
     while True:
-        db = SessionLocal() 
-        bg_tasks = BackgroundTasks() 
-        
+        db = SessionLocal()
+        bg_tasks = BackgroundTasks()
+
         try:
             logger.info("Running 12-hour automated background maintenance...")
-            
+
             # Use the new single unified method
             await ExpiryService.process_and_notify_expiries(bg_tasks, db)
-            
+
             # Execute the queued email background tasks
             for task in bg_tasks.tasks:
                 if asyncio.iscoroutinefunction(task.func):
@@ -98,32 +98,33 @@ async def automated_daily_maintenance():
         except Exception as e:
             logger.error(f"Error in automated daily maintenance: {e}", exc_info=True)
         finally:
-            db.close() 
-            
-        await asyncio.sleep(43200) 
+            db.close()
+
+        await asyncio.sleep(43200)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up server, initializing background tasks...")
- 
+
     start_scheduler()
- 
+
     calibration_scheduler = BackgroundScheduler()
- 
+
     # Change: Add next_run_time=datetime.now() to trigger immediately on start
     calibration_scheduler.add_job(
         run_daily_calibration_reminder_job,
         trigger="interval",
         days=1,
-        args=[SessionLocal, 45], # Pass 45 here
+        args=[SessionLocal, 45],  # Pass 45 here
         id="calibration_reminder_job",
         replace_existing=True,
-        next_run_time=datetime.now() # <--- THIS RUNS IT IMMEDIATELY
+        next_run_time=datetime.now()  # <--- THIS RUNS IT IMMEDIATELY
     )
- 
+
     calibration_scheduler.start()
     logger.info("Calibration reminder scheduler started successfully.")
-    
+
     asyncio.create_task(automated_daily_maintenance())
     yield
     calibration_scheduler.shutdown()
@@ -135,13 +136,18 @@ retry_delay = 2
 
 for attempt in range(max_retries):
     try:
-        logger.info(f"Attempting to create database tables (attempt {attempt + 1}/{max_retries})...")
+        logger.info(
+            f"Attempting to create database tables "
+            f"(attempt {attempt + 1}/{max_retries})..."
+        )
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully!")
         break
     except Exception as e:
         if attempt < max_retries - 1:
-            logger.warning(f"Failed to create tables: {e}. Retrying in {retry_delay} seconds...")
+            logger.warning(
+                f"Failed to create tables: {e}. Retrying in {retry_delay} seconds..."
+            )
             time.sleep(retry_delay)
         else:
             logger.error(f"Failed to create tables after {max_retries} attempts: {e}")
@@ -163,22 +169,30 @@ print("Allowed origins for Production:", origins)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"], 
-    allow_headers=["Content-Type", "Authorization", "Accept"], 
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
 )
 
 
-# --- STATIC FILES ---
-BASE_DIR = Path(__file__).resolve().parent   # backend folder
-UPLOAD_DIR = BASE_DIR / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+# --- STATIC FILES / PERSISTENT STORAGE ---
+# These directories are resolved centrally by backend.core.storage_paths.
+# Docker Compose maps environment-specific host folders to the same
+# container paths, so the application code remains identical on Windows
+# Docker Desktop and the Azure Linux VM.
+# storage_paths.py also creates the required upload subdirectories.
+app.mount(
+    "/api/uploads",
+    StaticFiles(directory=str(UPLOADS_DIR)),
+    name="uploads",
+)
 
-CERT_ASSETS_DIR = BASE_DIR / "certificate_assets"
-CERT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/api/certificate-assets", StaticFiles(directory=str(CERT_ASSETS_DIR)), name="certificate-assets")
+app.mount(
+    "/api/certificate-assets",
+    StaticFiles(directory=str(CERTIFICATE_ASSETS_DIR)),
+    name="certificate-assets",
+)
 
 
 # --- ROUTER REGISTRATION ---
@@ -232,6 +246,8 @@ app.include_router(change_password_router, prefix="/api")
 app.include_router(wcc_router, prefix="/api")  # Added WCC router
 
 app.include_router(certificate_config, prefix="/api")
+
+
 # --- ROOT ENDPOINT ---
 @app.get("/")
 def root():

@@ -219,6 +219,10 @@ def admin_update_user_by_id(
             )
         user.email = new_email
 
+    # Administrators may manage the recipient's email-notification preference.
+    if "email_notifications_enabled" in data and data["email_notifications_enabled"] is not None:
+        user.email_notifications_enabled = data["email_notifications_enabled"]
+
     if "username" in data and data["username"] is not None:
         new_username = (data["username"] or "").strip()
         if not new_username:
@@ -269,6 +273,24 @@ def admin_update_user_by_id(
     db.refresh(user)
     if user.customer:
         db.refresh(user.customer)
+    return user
+
+
+def set_user_email_notification_preference(
+    db: Session, user_id: int, email_notifications_enabled: bool
+) -> User:
+    """Update the authenticated user's email-notification preference."""
+    user = get_user_by_id_with_customer(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+
+    user.email_notifications_enabled = email_notifications_enabled
+    user.updated_at = datetime.now(LOCAL_TIMEZONE)
+    db.commit()
+    db.refresh(user)
     return user
 
 

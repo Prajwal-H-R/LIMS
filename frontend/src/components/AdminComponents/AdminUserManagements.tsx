@@ -7,7 +7,8 @@ import {
   Settings, ChevronLeft, AlertCircle, X, Search,
   Filter, Briefcase, Wrench, Building2, Grid, AlignJustify,
   Lock, CheckCircle2, XCircle, ChevronDown, UserCog,
-  Pencil, Thermometer, ArrowRight, AlertTriangle, MapPin, Plus, ChevronRight
+  Pencil, Thermometer, ArrowRight, AlertTriangle, MapPin, Plus, ChevronRight,
+  MoreVertical, Mail
 } from 'lucide-react';
 import { api, ENDPOINTS } from '../../api/config';
 import { UserRole } from '../../types';
@@ -23,6 +24,7 @@ export interface User {
   full_name?: string;
   role: string;
   is_active: boolean;
+  email_notifications_enabled?: boolean;
   customer_id?: number | null;
   company_name?: string;
   location_name?: string;
@@ -260,11 +262,11 @@ export const EditUserModal: React.FC<{
     setUsername(user.username || '');
     setContactPerson(user.contact_person || '');
     setPhone(user.phone || '');
-    
+
     // Bind company and location fields from DB user object
     setCompanyName(user.company_name || user.customer_details || '');
     setLocationName(user.location_name || ''); 
-    
+
     setShipTo(user.ship_to_address || '');
     setBillTo(user.bill_to_address || '');
     setFormError(null);
@@ -282,7 +284,7 @@ export const EditUserModal: React.FC<{
         username:  username.trim(),
         full_name: fullName.trim() || null,
       };
-      
+
       if (isCustomerLinked) {
         payload.contact_person   = contactPerson.trim() || null;
         payload.phone            = phone.trim() || null;
@@ -292,7 +294,7 @@ export const EditUserModal: React.FC<{
         payload.ship_to_address  = shipTo.trim() || null;
         payload.bill_to_address  = billTo.trim() || null;
       }
-      
+
       await api.put(ENDPOINTS.USERS.UPDATE(user.user_id), payload);
       onSaved();
       onClose();
@@ -339,13 +341,13 @@ export const EditUserModal: React.FC<{
             <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
             <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
           </div>
-          
+
           {isCustomerLinked && (
             <div className="border-t border-gray-100 pt-4 space-y-4">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
                 <Building2 size={14}/> Customer Organization
               </p>
-              
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Company / Org</label>
@@ -356,7 +358,7 @@ export const EditUserModal: React.FC<{
                   <input type="text" value={locationName} onChange={(e) => setLocationName(e.target.value)} placeholder="e.g. Main Office" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
@@ -367,7 +369,7 @@ export const EditUserModal: React.FC<{
                   <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ship-to Address</label>
                 <textarea required rows={2} value={shipTo} onChange={(e) => setShipTo(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y min-h-[60px] focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -378,7 +380,7 @@ export const EditUserModal: React.FC<{
               </div>
             </div>
           )}
-          
+
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               Cancel
@@ -468,10 +470,40 @@ export const UserTableRow: React.FC<{
   user: User;
   updatingUserId: number | null;
   onToggleStatus: (userId: number, currentStatus: boolean) => void;
+  onToggleEmailPreference?: (userId: number, currentStatus: boolean) => void;
+  updatingEmailPreferenceUserId?: number | null;
   onEdit: (user: User) => void;
+  onResendInvitation?: (user: User) => void;
+  resendingInvitationUserId?: number | null;
   isGroupInactive?: boolean;
-}> = ({ user, updatingUserId, onToggleStatus, onEdit, isGroupInactive }) => {
+}> = ({
+  user,
+  updatingUserId,
+  onToggleStatus,
+  onToggleEmailPreference,
+  updatingEmailPreferenceUserId,
+  onEdit,
+  onResendInvitation,
+  resendingInvitationUserId,
+  isGroupInactive
+}) => {
   const isActionBlocked = isGroupInactive && !user.is_active;
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+  // Missing values are treated as enabled for backward compatibility with old API payloads.
+  const emailNotificationsEnabled = user.email_notifications_enabled !== false;
+  const isUpdatingEmailPreference = updatingEmailPreferenceUserId === user.user_id;
 
   return (
     <tr
@@ -528,6 +560,37 @@ export const UserTableRow: React.FC<{
           {user.is_active ? 'Active' : 'Inactive'}
         </span>
       </td>
+      <td className="px-4 py-4">
+        <div className="inline-flex items-center gap-2 min-w-[140px]">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={emailNotificationsEnabled}
+            aria-label={`${emailNotificationsEnabled ? 'Disable' : 'Enable'} email notifications for ${user.full_name || user.username}`}
+            title={emailNotificationsEnabled ? 'Email notifications enabled' : 'Email notifications disabled'}
+            onClick={() => onToggleEmailPreference?.(user.user_id, emailNotificationsEnabled)}
+            disabled={!onToggleEmailPreference || isUpdatingEmailPreference}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+              emailNotificationsEnabled ? 'bg-emerald-500' : 'bg-gray-300'
+            }`}
+          >
+            {isUpdatingEmailPreference ? (
+              <Loader2 className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-spin text-white" />
+            ) : (
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  emailNotificationsEnabled ? 'translate-x-4' : 'translate-x-1'
+                }`}
+              />
+            )}
+          </button>
+          <span className={`text-xs font-medium whitespace-nowrap ${
+            emailNotificationsEnabled ? 'text-emerald-700' : 'text-gray-500'
+          }`}>
+            {emailNotificationsEnabled ? 'Enabled' : 'Disabled'}
+          </span>
+        </div>
+      </td>
       <td className="px-6 py-4 text-right">
         <div className="inline-flex items-center gap-2">
           <button
@@ -571,6 +634,46 @@ export const UserTableRow: React.FC<{
               </div>
             )}
           </div>
+
+          {/* Additional row actions */}
+          <div ref={moreMenuRef} className="relative inline-flex">
+            <button
+              type="button"
+              aria-label={`More actions for ${user.full_name || user.username}`}
+              aria-haspopup="menu"
+              aria-expanded={isMoreMenuOpen}
+              title="More options"
+              onClick={() => setIsMoreMenuOpen((open) => !open)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors"
+            >
+              <MoreVertical size={18} />
+            </button>
+
+            {isMoreMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-1 min-w-[190px] rounded-lg border border-gray-200 bg-white py-1 text-left shadow-xl"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={resendingInvitationUserId === user.user_id || !onResendInvitation}
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    onResendInvitation?.(user);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {resendingInvitationUserId === user.user_id ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Mail size={14} />
+                  )}
+                  Resend Invitation
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </td>
     </tr>
@@ -593,13 +696,15 @@ export const UserManagementSystem: React.FC<{
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [updatingCompany, setUpdatingCompany] = useState<string | null>(null);
   const [editingUser,     setEditingUser]     = useState<User | null>(null);
+  const [updatingEmailPreferenceUserId, setUpdatingEmailPreferenceUserId] = useState<number | null>(null);
+  const [resendingInvitationUserId, setResendingInvitationUserId] = useState<number | null>(null);
 
   // Pagination states
   const PAGE_SIZE = 100;
   const [currentPage, setCurrentPage] = useState(1);
   const [localUsers, setLocalUsers] = useState<User[]>(users);
   const [totalCount, setTotalCount] = useState<number>(0);
-  
+
   // Loading states
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [showLoaderOverlay, setShowLoaderOverlay] = useState(false);
@@ -696,6 +801,66 @@ export const UserManagementSystem: React.FC<{
   const handleToggleStatusLocal = (userId: number, currentStatus: boolean) => {
     onToggleStatus(userId, currentStatus); // Database update via parent
     setLocalUsers(prev => prev.map(u => u.user_id === userId ? { ...u, is_active: !currentStatus } : u));
+  };
+
+  const handleToggleEmailPreference = async (userId: number, currentStatus: boolean) => {
+    const nextStatus = !currentStatus;
+    setUpdatingEmailPreferenceUserId(userId);
+
+    // Optimistic update keeps the switch responsive while the API request is in progress.
+    setLocalUsers(prev => prev.map(user =>
+      user.user_id === userId
+        ? { ...user, email_notifications_enabled: nextStatus }
+        : user
+    ));
+
+    try {
+      await api.put(ENDPOINTS.USERS.UPDATE(userId), {
+        email_notifications_enabled: nextStatus,
+      });
+
+      // Refresh the parent-owned default list; custom filtered pages are kept in sync locally.
+      onRefreshData();
+      if (!(currentPage === 1 && debouncedSearch === '' && activeFilter === 'all')) {
+        await fetchPageData(currentPage, debouncedSearch, activeFilter);
+      }
+    } catch (error: any) {
+      setLocalUsers(prev => prev.map(user =>
+        user.user_id === userId
+          ? { ...user, email_notifications_enabled: currentStatus }
+          : user
+      ));
+      const detail = error?.response?.data?.detail;
+      alert(typeof detail === 'string' ? detail : 'Failed to update email notification preference.');
+    } finally {
+      setUpdatingEmailPreferenceUserId(null);
+    }
+  };
+
+  const handleResendInvitation = async (user: User) => {
+    const displayName = user.full_name || user.username || user.email;
+    const confirmed = window.confirm(
+      `Send a new invitation email to ${displayName} (${user.email})?`
+    );
+
+    if (!confirmed) return;
+
+    setResendingInvitationUserId(user.user_id);
+
+    try {
+      // This endpoint must validate that the user still has an unused invitation.
+      // It regenerates the invitation credentials and queues the role-specific email.
+      const response = await api.post<InvitationResponse>(
+        `/invitations/resend/${user.user_id}`
+      );
+
+      alert(response.data?.message || `Invitation email queued for ${user.email}.`);
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      alert(typeof detail === 'string' ? detail : 'Failed to resend invitation email.');
+    } finally {
+      setResendingInvitationUserId(null);
+    }
   };
 
   const handleEditSaved = () => {
@@ -856,6 +1021,7 @@ export const UserManagementSystem: React.FC<{
                             <th className="px-6 py-3">Company / Location</th>
                             <th className="px-6 py-3">Role</th>
                             <th className="px-6 py-3">Status</th>
+                            <th className="px-4 py-3">Email Notifications</th>
                             <th className="px-6 py-3 text-right">Actions</th>
                           </tr>
                         </thead>
@@ -866,7 +1032,11 @@ export const UserManagementSystem: React.FC<{
                               user={u}
                               updatingUserId={updatingUserId}
                               onToggleStatus={handleToggleStatusLocal}
+                              onToggleEmailPreference={handleToggleEmailPreference}
+                              updatingEmailPreferenceUserId={updatingEmailPreferenceUserId}
                               onEdit={(row) => setEditingUser(row)}
+                              onResendInvitation={handleResendInvitation}
+                              resendingInvitationUserId={resendingInvitationUserId}
                               isGroupInactive={isCompanyInactive && companyName !== 'Unassigned / Independent'}
                             />
                           ))}
@@ -885,6 +1055,7 @@ export const UserManagementSystem: React.FC<{
                   <th className="px-6 py-4">Company / Location</th>
                   <th className="px-6 py-4">Role</th>
                   <th className="px-6 py-4">Status</th>
+                  <th className="px-4 py-4">Email Notifications</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -896,12 +1067,16 @@ export const UserManagementSystem: React.FC<{
                       user={u}
                       updatingUserId={updatingUserId}
                       onToggleStatus={handleToggleStatusLocal}
+                      onToggleEmailPreference={handleToggleEmailPreference}
+                      updatingEmailPreferenceUserId={updatingEmailPreferenceUserId}
                       onEdit={(row) => setEditingUser(row)}
+                      onResendInvitation={handleResendInvitation}
+                      resendingInvitationUserId={resendingInvitationUserId}
                     />
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                       <div className="flex flex-col items-center justify-center">
                         <Filter size={24} className="text-gray-400 mb-2" />
                         <p className="font-medium">No users found matching "{searchTerm}"</p>
@@ -958,17 +1133,19 @@ export const InviteUsersSection: React.FC<{
   const [email,         setEmail]         = useState('');
   const [role,          setRole]          = useState<UserRole>('customer');
   const [invitedName,   setInvitedName]   = useState('');
-  
+
   const [companyName,   setCompanyName]   = useState('');
   const [locationName,  setLocationName]  = useState('');
   const [isCustomCompany, setIsCustomCompany] = useState(false); 
-  
+
   const [shipToAddress, setShipToAddress] = useState('');
   const [billToAddress, setBillToAddress] = useState('');
   const [phoneNumber,   setPhoneNumber]   = useState('');
   const [sameAsShip,    setSameAsShip]    = useState(false);
-  
+
   const [isInviting,    setIsInviting]    = useState(false);
+  // Defaults to true so existing invitation behavior remains unchanged.
+  const [sendInvitationEmail, setSendInvitationEmail] = useState(true);
   const [inviteMessage, setInviteMessage] = useState<{ type: 'success' | 'error'; text: string; } | null>(null);
   const [isCompanyModalOpen, setCompanyModalOpen] = useState(false);
   const [modalInitialCompany, setModalInitialCompany] = useState("");
@@ -998,7 +1175,10 @@ export const InviteUsersSection: React.FC<{
     setIsInviting(true);
     try {
       const payload = {
-        email, role, invited_name: invitedName,
+        email,
+        role,
+        invited_name: invitedName,
+        send_invitation_email: sendInvitationEmail,
         ...(isCustomerRole && {
           company_name: companyName.trim(),
           location_name: locationName === "Main Office" ? "" : locationName.trim(),
@@ -1010,6 +1190,7 @@ export const InviteUsersSection: React.FC<{
       const response = await api.post<InvitationResponse>(ENDPOINTS.INVITATIONS.SEND, payload);
       setInviteMessage({ type: 'success', text: response.data.message });
       setEmail(''); setInvitedName(''); handleResetOrg();
+      setSendInvitationEmail(true);
     } catch (error: any) {
       setInviteMessage({ type: 'error', text: error.response?.data?.detail || 'Invitation failed.' });
     } finally { setIsInviting(false); }
@@ -1034,7 +1215,7 @@ export const InviteUsersSection: React.FC<{
 
       <form onSubmit={handleInvite} className="space-y-5">
         {inviteMessage && <div className={`p-4 rounded-xl text-sm font-medium flex items-center gap-2 ${inviteMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}><Info size={18}/> {inviteMessage.text}</div>}
-        
+
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-1">Select User Role</label>
           <select value={role} onChange={(e) => { setRole(e.target.value as UserRole); handleResetOrg(); }} className="w-full border rounded-xl px-4 py-2.5 bg-gray-50 focus:bg-white shadow-sm transition-all outline-none focus:ring-2 focus:ring-blue-500">
@@ -1122,9 +1303,42 @@ export const InviteUsersSection: React.FC<{
           </div>
         </div>
 
+        <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-gray-200 bg-white">
+          <div className="min-w-0">
+            <label htmlFor="send-invitation-email" className="block text-sm font-semibold text-gray-800 cursor-pointer">
+              Send invitation email
+            </label>
+            <p className="mt-1 text-xs text-gray-500">
+              {sendInvitationEmail
+                ? 'An invitation email will be queued and recorded in the notifications table.'
+                : 'The user and invitation record will still be created, but no email or notification record will be generated.'}
+            </p>
+          </div>
+          <button
+            id="send-invitation-email"
+            type="button"
+            role="switch"
+            aria-checked={sendInvitationEmail}
+            onClick={() => setSendInvitationEmail(value => !value)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+              sendInvitationEmail ? 'bg-emerald-500' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                sendInvitationEmail ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
         <button type="submit" disabled={isInviting || (isCustomerRole && (!companyName || !locationName))} className="w-full flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:transform-none">
           {isInviting ? <Loader2 className="animate-spin mr-2" /> : <UserPlus className="mr-2" />}
-          {isInviting ? 'Sending...' : 'Send Invitation'}
+          {isInviting
+            ? 'Creating User...'
+            : sendInvitationEmail
+              ? 'Create User & Send Invitation'
+              : 'Create User Without Email'}
         </button>
       </form>
     </div>

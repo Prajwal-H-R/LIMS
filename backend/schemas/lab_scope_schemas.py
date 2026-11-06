@@ -1,8 +1,9 @@
 # backend/schemas/lab_scope_schemas.py
 
-from pydantic import BaseModel
-from typing import Optional
 from datetime import date, datetime
+from typing import Optional
+
+from pydantic import BaseModel
 
 
 class LabScopeBase(BaseModel):

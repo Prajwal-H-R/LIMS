@@ -7,7 +7,7 @@ from fastapi import UploadFile, HTTPException, status
 from fastapi.concurrency import run_in_threadpool  # <-- Added for async threadpool
 from PIL import Image
 from sqlalchemy.orm import Session
-
+from backend.core.storage_paths import CALIBRATION_BOOKINGS_DIR
 from backend.models.calibration_booking import CalibrationBooking
 from backend.models.customers import Customer
 from backend.schemas.calibration_booking_schemas import (
@@ -19,8 +19,7 @@ from backend.schemas.calibration_booking_schemas import (
     CalibrationBookingUpload,
 )
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-UPLOAD_DIR = BASE_DIR / "uploads" / "calibration_bookings"
+UPLOAD_DIR = CALIBRATION_BOOKINGS_DIR
 
 ALLOWED_MIMES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "text/plain"}
 IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}

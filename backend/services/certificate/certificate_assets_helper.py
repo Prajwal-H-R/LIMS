@@ -1,12 +1,17 @@
-# backend/services/certificate_assets_helper.py
 """Helper for certificate asset URLs (logos, QR code) used in preview and PDF."""
 
 import base64
 import os
 from pathlib import Path
 
-# 1x1 transparent PNG - used when asset file doesn't exist
-_PLACEHOLDER_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+from backend.core.storage_paths import CERTIFICATE_ASSETS_DIR
+
+
+# 1x1 transparent PNG - used when asset file doesn't exist.
+_PLACEHOLDER_DATA_URI = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
 
 ASSET_FILES = {
     "logo_left": "logo_left.png",
@@ -16,46 +21,85 @@ ASSET_FILES = {
 
 
 def _get_assets_dir() -> Path:
-    """Return the certificate_assets directory (sibling of backend)."""
-    return Path(__file__).resolve().parent.parent.parent / "certificate_assets"
+    """
+    Return the configured certificate assets directory.
+
+    The actual path is resolved centrally through storage_paths.py.
+
+    Docker container example:
+        /app/backend/certificate_assets
+    """
+    return CERTIFICATE_ASSETS_DIR
 
 
 def get_asset_data_uri(filename: str) -> str:
     """
-    Read image file and return as data URI. Used for PDF generation (no network needed).
-    Returns placeholder if file doesn't exist.
+    Read an image and return it as a data URI.
+
+    Used by PDF generation, so no network request is required.
+    Returns a transparent placeholder if the asset is missing or unreadable.
     """
     assets_dir = _get_assets_dir()
-    path = assets_dir / filename
-    if not path.exists() or not path.is_file():
-        return _PLACEHOLDER_DATA_URI
+
     try:
-        with open(path, "rb") as f:
-            raw = f.read()
+        path = (assets_dir / filename).resolve()
+        assets_root = assets_dir.resolve()
+
+        # Prevent reading files outside the configured assets directory.
+        if path == assets_root or assets_root not in path.parents:
+            return _PLACEHOLDER_DATA_URI
+
+        if not path.exists() or not path.is_file():
+            return _PLACEHOLDER_DATA_URI
+
+        with path.open("rb") as file:
+            raw = file.read()
+
         ext = path.suffix.lower()
-        mime = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
-        b64 = base64.b64encode(raw).decode("ascii")
-        return f"data:{mime};base64,{b64}"
+
+        mime = (
+            "image/png"
+            if ext == ".png"
+            else "image/jpeg"
+            if ext in (".jpg", ".jpeg")
+            else "image/png"
+        )
+
+        encoded = base64.b64encode(raw).decode("ascii")
+
+        return f"data:{mime};base64,{encoded}"
+
     except Exception:
         return _PLACEHOLDER_DATA_URI
 
 
 def get_asset_url(base_url: str, filename: str) -> str:
     """
-    Return full API URL for an asset. Used for frontend preview.
-    base_url should be e.g. 'http://localhost:8000' (no trailing slash).
+    Return the API URL for an asset used by frontend preview.
+
+    The URL stays relative so it works with local and production
+    frontend API proxy configurations.
     """
     base = (base_url or "").rstrip("/")
+
     if not base:
         return _PLACEHOLDER_DATA_URI
+
     return f"/api/certificate-assets/{filename}"
 
 
-def get_certificate_asset_urls(base_url: str | None = None, use_data_uris: bool = False) -> dict[str, str]:
+def get_certificate_asset_urls(
+    base_url: str | None = None,
+    use_data_uris: bool = False,
+) -> dict[str, str]:
     """
-    Return dict with logo_left, logo_right, qr_code URLs.
-    - use_data_uris=True: for PDF (self-contained, no network)
-    - use_data_uris=False: API URLs for frontend preview (requires base_url)
+    Return URLs for logo_left, logo_right and qr_code.
+
+    use_data_uris=True:
+        Return embedded base64 image data for PDF generation.
+
+    use_data_uris=False:
+        Return API URLs for frontend preview.
     """
     if use_data_uris:
         return {
@@ -63,8 +107,12 @@ def get_certificate_asset_urls(base_url: str | None = None, use_data_uris: bool 
             "logo_right": get_asset_data_uri(ASSET_FILES["logo_right"]),
             "qr_code": get_asset_data_uri(ASSET_FILES["qr_code"]),
         }
-    # API URLs
-    base = base_url or os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
+
+    base = base_url or os.getenv(
+        "BACKEND_BASE_URL",
+        "http://localhost:8000",
+    )
+
     return {
         "logo_left": get_asset_url(base, ASSET_FILES["logo_left"]),
         "logo_right": get_asset_url(base, ASSET_FILES["logo_right"]),

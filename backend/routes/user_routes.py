@@ -28,6 +28,7 @@ from backend.schemas.user_schemas import (
     UserResponse,
     UserProfileUpdateRequest,
     UserStatusUpdateRequest,
+    UserNotificationPreferenceUpdateRequest,
     BatchCustomerUserStatusRequest, 
     UserListPaginatedResponse
 )
@@ -40,6 +41,7 @@ from backend.services.user_services import (
     get_user_by_id,
     get_user_by_id_with_customer,
     set_user_active_status,
+    set_user_email_notification_preference,
     update_own_profile,
     user_orm_to_response,
 )
@@ -132,13 +134,15 @@ def login(
     )
 
     if is_first_login:
-        background_tasks.add_task(
-            send_welcome_email,
-            email=user.email,
-            name=user.full_name or user.username,
-            role=user.role
-        )
-        
+        # Respect the user's email preference without changing first-login bookkeeping.
+        if user.email_notifications_enabled:
+            background_tasks.add_task(
+                send_welcome_email,
+                email=user.email,
+                name=user.full_name or user.username,
+                role=user.role
+            )
+
         user.updated_at = datetime.now(LOCAL_TIMEZONE)
         db.commit()
 
@@ -150,6 +154,7 @@ def login(
         role=user.role,
         customer_id=user.customer_id,
         is_active=user.is_active,
+        email_notifications_enabled=user.email_notifications_enabled,
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=security.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -161,6 +166,21 @@ def read_current_user(current_user: UserResponse = Depends(get_current_user)):
     """Returns currently authenticated user details."""
     current_user.token = None 
     return current_user
+
+
+@router.patch("/me/notification-preference", response_model=UserResponse)
+def update_my_notification_preference(
+    payload: UserNotificationPreferenceUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Enable or disable email notifications for the authenticated user only."""
+    updated_user = set_user_email_notification_preference(
+        db,
+        user_id=current_user.user_id,
+        email_notifications_enabled=payload.email_notifications_enabled,
+    )
+    return user_orm_to_response(updated_user)
 
 
 @router.patch("/me/profile", response_model=UserResponse)

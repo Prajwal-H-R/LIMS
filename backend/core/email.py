@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 from enum import Enum
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 # Import centralized settings
 from backend.core.config import settings
@@ -43,6 +44,59 @@ conf = ConnectionConfig(
     VALIDATE_CERTS=True,
     TEMPLATE_FOLDER=Path(__file__).parent.parent / 'templates' / 'email'
 )
+
+
+
+def _resolve_email_notification_preference(
+    db: Session,
+    recipient_user_id: Optional[int] = None,
+    recipient_email: Optional[str] = None,
+) -> tuple[bool, Optional[int]]:
+    """Return (enabled, resolved_user_id) for a known LIMS user.
+
+    Unknown/external email addresses retain the existing send behavior. If the
+    preference lookup itself fails, fail open so an enabled user's mail flow is
+    not interrupted by a transient lookup problem; the database migration must
+    be applied before deploying this code.
+    """
+    if db is None:
+        return True, recipient_user_id
+
+    try:
+        from backend.models.users import User
+
+        user_row = None
+        if recipient_user_id is not None:
+            user_row = (
+                db.query(User.user_id, User.email_notifications_enabled)
+                .filter(User.user_id == recipient_user_id)
+                .first()
+            )
+
+        if user_row is None and recipient_email:
+            normalized_email = str(recipient_email).strip().lower()
+            user_row = (
+                db.query(User.user_id, User.email_notifications_enabled)
+                .filter(func.lower(User.email) == normalized_email)
+                .first()
+            )
+
+        if user_row is None:
+            return True, recipient_user_id
+
+        return bool(user_row.email_notifications_enabled), int(user_row.user_id)
+
+    except Exception:
+        # Avoid leaving a failed SQLAlchemy transaction attached to the session.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception(
+            "Unable to check email-notification preference for %s; allowing existing email flow.",
+            recipient_email or recipient_user_id,
+        )
+        return True, recipient_user_id
 
 
 def log_notification_to_db(
@@ -97,7 +151,27 @@ async def send_email_with_logging(
     created_by: str = "system",
     body_text_override: Optional[str] = None   # ✅ ADD THIS
 ):
-    """Send email with comprehensive logging to notifications table."""
+    """Send email with comprehensive logging to notifications table.
+
+    A known user's opt-out is checked before inserting a notification row or
+    queuing an email task. Therefore disabled users leave no notification record.
+    """
+    notifications_enabled, resolved_user_id = _resolve_email_notification_preference(
+        db=db,
+        recipient_user_id=recipient_user_id,
+        recipient_email=str(recipient),
+    )
+    if not notifications_enabled:
+        logger.info(
+            "Email notification skipped because user %s has disabled email notifications.",
+            resolved_user_id or recipient_user_id or recipient,
+        )
+        return False
+
+    # Preserve notification-recipient association when the caller supplied only an email.
+    if recipient_user_id is None and resolved_user_id is not None:
+        recipient_user_id = resolved_user_id
+
     notification_id = None
  
     if db:
@@ -297,6 +371,23 @@ async def send_multiple_user_notification_email(
 
         for i, email in enumerate(recipient_emails):
             user_id = recipient_user_ids[i] if recipient_user_ids and i < len(recipient_user_ids) else None
+
+            # Filter here as well because NotificationService.create_notification
+            # may insert a notification row before it delegates to the email sender.
+            notifications_enabled, resolved_user_id = _resolve_email_notification_preference(
+                db=db,
+                recipient_user_id=user_id,
+                recipient_email=email,
+            )
+            if not notifications_enabled:
+                logger.info(
+                    "Skipping notification for %s because email notifications are disabled.",
+                    resolved_user_id or user_id or email,
+                )
+                continue
+
+            if user_id is None and resolved_user_id is not None:
+                user_id = resolved_user_id
 
             success = await notification_service.create_notification(
                 inward_id=inward_id,

@@ -6,7 +6,13 @@ import logging
 from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Optional, List
-
+from urllib.parse import unquote, urlsplit
+from backend.core.storage_paths import (
+    UPLOADS_DIR,
+    MANUAL_CALIBRATION_DIR,
+    MANUAL_CALIBRATION_WORKSHEET_DIR,
+    MANUAL_CALIBRATION_CERTIFICATE_DIR,
+)
 from fastapi import (
     APIRouter,
     Depends,
@@ -31,11 +37,19 @@ from backend.models.inward_equipments import InwardEquipment
 
 logger = logging.getLogger(__name__)
 
-# ── Upload directory ─────────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).resolve().parent.parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# ── Configurable persistent upload directories ──────────────────────
 
+# These paths are resolved centrally through backend.core.storage_paths.
+# The host directory is mounted into the backend container by Docker.
+
+UPLOAD_DIR = UPLOADS_DIR
+
+MANUAL_CALIBRATION_UPLOAD_DIR = MANUAL_CALIBRATION_DIR
+
+WORKSHEET_UPLOAD_DIR = MANUAL_CALIBRATION_WORKSHEET_DIR
+
+# Keep the existing folder spelling for database URL compatibility.
+CERTIFICATE_UPLOAD_DIR = MANUAL_CALIBRATION_CERTIFICATE_DIR
 router = APIRouter(
     tags=["Manual Calibration Uploads"],
     responses={404: {"description": "Not found"}},
@@ -167,14 +181,42 @@ def _check_lock_permission(
 
 
 def _delete_file_from_disk(file_url: Optional[str]) -> None:
+    """Delete an uploaded file using its stored /api/uploads URL.
+
+    Supports both the new nested manual-calibration paths and legacy files
+    that were previously stored directly inside UPLOAD_DIR. The resolved path
+    is checked to ensure it cannot escape the uploads directory.
+    """
     if not file_url:
         return
-    filename = file_url.split("/")[-1]
-    path = UPLOAD_DIR / filename
+
+    path: Optional[Path] = None
     try:
+        url_path = unquote(urlsplit(file_url).path)
+        upload_prefix = "/api/uploads/"
+
+        if upload_prefix not in url_path:
+            logger.warning("Skipping deletion for unexpected upload URL: %s", file_url)
+            return
+
+        relative_file_path = url_path.split(upload_prefix, 1)[1]
+        relative_file_path = relative_file_path.replace("\\", "/")
+        relative_path = Path(relative_file_path)
+
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            logger.warning("Skipping unsafe upload path during deletion: %s", file_url)
+            return
+
+        upload_root = UPLOAD_DIR.resolve()
+        path = (upload_root / relative_path).resolve()
+
+        if path == upload_root or upload_root not in path.parents:
+            logger.warning("Skipping upload path outside UPLOAD_DIR: %s", file_url)
+            return
+
         path.unlink(missing_ok=True)
     except Exception:
-        logger.warning("Could not delete orphaned file: %s", path, exc_info=True)
+        logger.warning("Could not delete uploaded file: %s", path or file_url, exc_info=True)
 
 
 def _resolve_engineer_name(db: Session, user_id: Optional[int]) -> Optional[str]:
@@ -271,9 +313,15 @@ async def handle_document_upload(
     unique_id      = uuid.uuid4().hex
     sanitized_name = os.path.basename(file.filename or "upload")
     saved_filename = f"{unique_id}_{sanitized_name}"
-    file_path      = UPLOAD_DIR / saved_filename
+
+    # "result" is the calibration worksheet; certificates use their own folder.
+    destination_dir = (
+        WORKSHEET_UPLOAD_DIR if doc_type == "result" else CERTIFICATE_UPLOAD_DIR
+    )
+    file_path = destination_dir / saved_filename
 
     try:
+        destination_dir.mkdir(parents=True, exist_ok=True)
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except Exception:
@@ -285,7 +333,8 @@ async def handle_document_upload(
     finally:
         await file.close()
 
-    file_url = f"/api/uploads/{saved_filename}"
+    relative_file_path = file_path.relative_to(UPLOAD_DIR).as_posix()
+    file_url = f"/api/uploads/{relative_file_path}"
 
     # ── 3. Upsert DB record ──────────────────────────────────────────
     # The service handles: file fields, date fields, auto-lock,

@@ -18,6 +18,7 @@ from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
 from backend.models.htw.htw_job import HTWJob
 from backend.models.htw.htw_repeatability import HTWRepeatability
+from backend.core.storage_paths import DEVIATIONS_DIR
 
 # >>>>> KEY CHANGE: The problematic import is REMOVED. <<<<<
 # from backend.services.htw.htw_repeatability_services import sync_oot_deviation_records
@@ -36,8 +37,9 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-BACKEND_BASE_DIR = Path(__file__).resolve().parents[1]
-DEVIATION_UPLOAD_DIR = BACKEND_BASE_DIR / "uploads" / "deviations"
+# Physical storage is resolved centrally from UPLOADS_DIR / APP_UPLOADS_DIR.
+# Database attachment URLs remain stable: /api/uploads/deviations/<filename>.
+DEVIATION_UPLOAD_DIR = DEVIATIONS_DIR
 DEVIATION_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def safe_bytes_encoder(obj: bytes):

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
-from sqlalchemy import ForeignKey, String, Text 
+from sqlalchemy import Boolean, ForeignKey, String, Text, text 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from backend.db import Base 
@@ -36,6 +36,13 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # Email notifications are enabled by default to preserve existing behavior.
+    email_notifications_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=text("true"),
+        nullable=False,
+    )
     
     # --- Timestamps ---
     created_at: Mapped[datetime] = mapped_column(

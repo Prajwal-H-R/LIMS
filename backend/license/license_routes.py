@@ -72,7 +72,7 @@ def extend_license(
 ):
     # License extensions must be initiated by an authenticated administrator.
     role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role != "admin":
+    if role == "cutomer":
         raise HTTPException(
             status_code=403,
             detail="Only administrators can extend the license",

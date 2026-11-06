@@ -8,14 +8,12 @@ from datetime import date, datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
-
 import aiofiles
 import pandas as pd
 from fastapi import BackgroundTasks, HTTPException, UploadFile, status
 from sqlalchemy import desc, func, select, not_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
-
 # Core Service Imports
 from backend.core.config import settings
 from backend.core.email import (
@@ -24,7 +22,6 @@ from backend.core.email import (
     send_multiple_user_notification_email
 )
 from backend.core.security import create_invitation_token, hash_password
-
 # Model and Schema imports
 from backend.models.inward import Inward
 from backend.models.inward_equipments import InwardEquipment
@@ -32,43 +29,76 @@ from backend.models.invitations import Invitation
 from backend.models.users import User
 from backend.models.htw.htw_manufacturer_spec import HTWManufacturerSpec
 from backend.schemas.inward_schemas import DraftResponse, InwardCreate, InwardUpdate, CustomerRemarkEntry
-
 # Service imports
 from backend.services.delayed_email_services import DelayedEmailService
 from backend.services.srf_services import SrfService
-
+from backend.core.storage_paths import INWARD_PHOTOS_DIR
 logger = logging.getLogger(__name__)
-
-BASE_DIR = Path(__file__).resolve().parents[1]  # backend folder
-UPLOAD_DIRECTORY = BASE_DIR / "uploads" / "inward_photos"
-
+BASE_DIR = Path(__file__).resolve().parents[1]
+UPLOAD_DIRECTORY = INWARD_PHOTOS_DIR
 UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
+ 
+# Keep database photo references independent of the physical storage path.
+INWARD_PHOTO_PATH_PREFIX = "uploads/inward_photos"
+
+
+def _build_inward_photo_reference(filename: str) -> str:
+    """
+    Return a stable, frontend-compatible photo reference.
+
+    Physical storage:
+        UPLOAD_DIRECTORY / filename
+
+    Database reference:
+        uploads/inward_photos/filename
+
+    Public URL:
+        /api/uploads/inward_photos/filename
+    """
+    safe_filename = Path(filename).name
+
+    return f"{INWARD_PHOTO_PATH_PREFIX}/{safe_filename}"
+
+
+def _normalize_inward_photo_reference(photo: str) -> str:
+    """
+    Normalize existing photo references, including paths generated
+    by the previous external-storage implementation.
+    """
+    normalized = str(photo).strip().replace("\\", "/")
+
+    marker = f"{INWARD_PHOTO_PATH_PREFIX}/"
+
+    # Handles:
+    # uploads/inward_photos/file.png
+    # ../../../../uploads/inward_photos/file.png
+    # /api/uploads/inward_photos/file.png
+    # http://localhost:8000/api/uploads/inward_photos/file.png
+    marker_index = normalized.rfind(marker)
+
+    if marker_index >= 0:
+        return normalized[marker_index:]
 
 class InwardService:
     def __init__(self, db: Session):
         self.db = db
-
     # === Utility Methods ===
     def generate_temp_password(self, length: int = 12) -> str:
         characters = string.ascii_letters + string.digits + "!@#$%^&*"
         return ''.join(secrets.choice(characters) for _ in range(length))
-
+   
     @staticmethod
     def _parse_optional_date(value: Any) -> Optional[date]:
         if value is None:
             return None
-
         if isinstance(value, datetime):
             return value.date()
-
         if isinstance(value, date):
             return value
-
         if isinstance(value, str):
             value = value.strip()
             if not value:
                 return None
-
         try:
             return date.fromisoformat(value)
         except (TypeError, ValueError) as exc:
@@ -76,23 +106,18 @@ class InwardService:
                 status_code=422,
                 detail="Customer DC Date must be in YYYY-MM-DD format."
             ) from exc
-
     def _sanitize_excel_value(self, value: Any) -> Any:
         if isinstance(value, datetime):
             return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
         return value
-
     def _sanitize_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         return {key: self._sanitize_excel_value(value) for key, value in row.items()}
-
     def _sanitize_sheet_title(self, value: str, fallback: Optional[str] = None) -> str:
-        sanitized = re.sub(r'[\\/*?:\[\]]', '_', value).strip(" _")
+        sanitized = re.sub(r'[\/*?:\[\]]', '_', value).strip(" _")
         return (sanitized or fallback or "Sheet")[:31]
-
     def _make_sheet_label(self, inward: Inward) -> str:
         base = f"SRF_{inward.srf_no}" if inward.srf_no else f"Inward_{inward.inward_id}"
         return self._sanitize_sheet_title(str(base), fallback=f"Inward_{inward.inward_id}")
-
     def _ensure_unique_sheet_name(self, base_name: str, existing_names: Set[str]) -> str:
         candidate = base_name[:31]
         if candidate not in existing_names:
@@ -106,17 +131,14 @@ class InwardService:
                 existing_names.add(candidate)
                 return candidate
         raise HTTPException(status_code=500, detail="Unable to generate a unique sheet name.")
-
     def _bool_to_text(self, value: Optional[bool]) -> Optional[str]:
         if value is True: return "Yes"
         if value is False: return "No"
         return None
-
     def _build_inward_export_rows(self, inward: Inward) -> Tuple[str, List[Dict[str, Any]]]:
         """Build export rows with Inward, InwardEquipment, and SRF data."""
         rows = []
         sheet_label = self._make_sheet_label(inward)
-        
         # Build base row with Inward data
         base_row = {
             "Inward ID": inward.inward_id,
@@ -130,7 +152,6 @@ class InwardService:
             "Inward Created At": inward.created_at,
             "Inward Updated At": inward.updated_at,
         }
-        
         # Add customer data if available
         customer = inward.customer
         if customer:
@@ -153,7 +174,6 @@ class InwardService:
                 "Ship To Address": "",
                 "Bill To Address": "",
             })
-        
         # Add SRF data if available
         srf = inward.srf
         if srf:
@@ -200,7 +220,6 @@ class InwardService:
                 "SRF Created At": "",
                 "SRF Updated At": "",
             })
-        
         # Add equipment rows
         equipments = inward.equipments if inward.equipments else []
         if equipments:
@@ -229,7 +248,6 @@ class InwardService:
                     "Equipment Created At": eq.created_at,
                     "Equipment Updated At": eq.updated_at,
                 }
-                
                 # Add SRF Equipment data if available
                 srf_eq = eq.srf_equipment
                 if srf_eq:
@@ -244,19 +262,15 @@ class InwardService:
                         "No of Calibration Points": "",
                         "Mode of Calibration": "",
                     })
-                
                 rows.append(self._sanitize_row(equipment_row))
         else:
             # If no equipment, add base row only
             rows.append(self._sanitize_row(base_row))
-        
         return sheet_label, rows 
-
     def _build_inward_only_export_rows(self, inward: Inward) -> Tuple[str, List[Dict[str, Any]]]:
         """Build export rows with only Inward and InwardEquipment data (no SRF data)."""
         rows = []
         sheet_label = self._make_sheet_label(inward)
-        
         # Build base row with Inward data
         base_row = {
             "Inward ID": inward.inward_id,
@@ -270,7 +284,6 @@ class InwardService:
             "Created At": inward.created_at,
             "Updated At": inward.updated_at,
         }
-        
         # Add customer data if available
         customer = inward.customer
         if customer:
@@ -293,7 +306,6 @@ class InwardService:
                 "Ship To Address": "",
                 "Bill To Address": "",
             })
-        
         # Add equipment rows
         equipments = inward.equipments if inward.equipments else []
         if equipments:
@@ -325,9 +337,7 @@ class InwardService:
         else:
             # If no equipment, add base row only
             rows.append(self._sanitize_row(base_row))
-        
         return sheet_label, rows
-
     # === Draft Handling ===
     async def get_user_drafts(self, user_id: int) -> List[DraftResponse]:
         drafts = self.db.scalars(
@@ -343,7 +353,6 @@ class InwardService:
                 # Keep drafts endpoint resilient to legacy/corrupt draft payloads.
                 logger.warning("Skipping invalid draft row inward_id=%s", getattr(d, "inward_id", None), exc_info=True)
         return safe_drafts
-
     async def get_draft_by_id(self, draft_id: int, user_id: int) -> DraftResponse:
         draft = self.db.scalars(
             select(Inward).where(
@@ -355,7 +364,6 @@ class InwardService:
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found or access denied")
         return DraftResponse.model_validate(draft)
-
     async def save_draft_files(self, files_by_index: Dict[int, List[UploadFile]]) -> Dict[int, List[str]]:
         saved_paths: Dict[int, List[str]] = {}
         for index, files in files_by_index.items():
@@ -368,19 +376,17 @@ class InwardService:
                 await file.seek(0)
                 async with aiofiles.open(str(file_path), 'wb') as out_file:
                     await out_file.write(await file.read())
-                relative_path = os.path.relpath(file_path, BASE_DIR).replace("\\", "/")
-                paths_for_index.append(relative_path)
+                photo_reference = _build_inward_photo_reference(unique_filename)
+                paths_for_index.append(photo_reference)
             if paths_for_index:
                 saved_paths[index] = paths_for_index
         return saved_paths
-
     async def update_draft(self, user_id: int, inward_id: Optional[int], draft_data: Dict[str, Any]) -> DraftResponse:
         try:
             current_time = datetime.now(timezone.utc)
             material_date = draft_data.get('material_inward_date') or draft_data.get('date')
             customer_dc_date = self._parse_optional_date(draft_data.get('customer_dc_date'))
             incoming_srf = draft_data.get('srf_no')
-            
             if not incoming_srf or incoming_srf in ['TBD', 'Loading...', 'Error!']:
                 if inward_id:
                     existing_draft = self.db.get(Inward, inward_id)
@@ -389,12 +395,10 @@ class InwardService:
                     srf_to_save = f"DRAFT-{uuid.uuid4().hex[:8]}"
             else:
                 srf_to_save = incoming_srf
-
             if inward_id:
                 draft = self.db.get(Inward, inward_id)
                 if not draft or draft.created_by != user_id or not draft.is_draft:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found or access denied")
-                
                 draft.srf_no = srf_to_save
                 draft.customer_id = draft_data.get('customer_id')
                 draft.received_date = draft_data.get('received_date')
@@ -417,7 +421,6 @@ class InwardService:
                     received_date=draft_data.get('received_date'),
                 )
                 self.db.add(draft)
-
             self.db.commit()
             self.db.refresh(draft)
             return DraftResponse.model_validate(draft)
@@ -435,14 +438,12 @@ class InwardService:
             self.db.rollback()
             logger.error(f"Failed to save draft due to an unexpected error: {e}", exc_info=True)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal server error occurred while saving the draft.")
-
     async def delete_draft(self, draft_id: int, user_id: int) -> bool:
         draft = self.db.scalars(select(Inward).where(Inward.inward_id == draft_id, Inward.created_by == user_id, Inward.is_draft == True)).first()
         if not draft: return False
         self.db.delete(draft)
         self.db.commit()
         return True
-
     # === Core Inward Logic ===
     async def submit_inward(
         self,
@@ -455,13 +456,11 @@ class InwardService:
         authoritative_srf_no = SrfService(self.db).generate_next_srf_no()
         try:
             customer_details = getattr(inward_data, "customer_details", customer_details_value)
-            
             if draft_inward_id:
                 self.db.query(InwardEquipment).filter(InwardEquipment.inward_id == draft_inward_id).delete(synchronize_session=False)
                 db_inward = self.db.get(Inward, draft_inward_id)
                 if not db_inward or db_inward.created_by != user_id or not db_inward.is_draft:
                     raise HTTPException(status_code=404, detail="Draft not found or access denied.")
-                
                 db_inward.srf_no = authoritative_srf_no
                 db_inward.material_inward_date = inward_data.material_inward_date
                 db_inward.received_date = inward_data.received_date
@@ -490,7 +489,6 @@ class InwardService:
                 )
                 self.db.add(db_inward)
                 self.db.flush()
-
             await self._process_equipment_list(db_inward.inward_id, inward_data.equipment_list, files_by_index)
             db_inward.status = 'created'
             self.db.commit()
@@ -507,14 +505,12 @@ class InwardService:
             self.db.rollback()
             logger.error(f"Error in submit_inward: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="An unexpected error occurred during submission.")
-
     async def update_inward_with_files(self, inward_id: int, inward_data: InwardUpdate, files_by_index: Dict[int, List[UploadFile]], updater_id: int) -> Inward:
         print(f"\n[DEBUG] --- STARTING INWARD UPDATE FOR ID: {inward_id} ---")
         try:
             db_inward = self.db.get(Inward, inward_id)
             if not db_inward: 
                 raise HTTPException(status_code=404, detail="Inward record not found.")
-
             # 1. Update Basic Inward Info
             db_inward.received_date = inward_data.received_date
             db_inward.material_inward_date = inward_data.material_inward_date
@@ -525,23 +521,18 @@ class InwardService:
             db_inward.received_by = inward_data.receiver
             db_inward.updated_by = updater_id
             db_inward.updated_at = datetime.now(timezone.utc)
-            
             if db_inward.status == 'reviewed': 
                 db_inward.status = 'updated'
-
             # 2. FETCH EXISTING EQUIPMENT
             existing_equipments = self.db.query(InwardEquipment).filter(
                 InwardEquipment.inward_id == inward_id
             ).all()
-            
             existing_eq_map = {eq.inward_eqp_id: eq for eq in existing_equipments}
-            
             # Get list of IDs present in the incoming payload
             incoming_ids = set()
             for eqp_model in inward_data.equipment_list:
                 if getattr(eqp_model, "inward_eqp_id", None):
                     incoming_ids.add(eqp_model.inward_eqp_id)
-
             # ---------------------------------------------------------
             # PHASE 1: DELETE REMOVED ITEMS
             # ---------------------------------------------------------
@@ -552,13 +543,11 @@ class InwardService:
                     print(f"[DEBUG] Deleting removed item ID: {existing_id}")
                     self.db.delete(existing_obj)
                     ids_to_delete.append(existing_id)
-            
             if ids_to_delete:
                 self.db.flush() # Commit delete to free up space
                 for d_id in ids_to_delete:
                     if d_id in existing_eq_map:
                         del existing_eq_map[d_id]
-
             # ---------------------------------------------------------
             # PHASE 2: CALCULATE NEXT ID SUFFIX
             # ---------------------------------------------------------
@@ -574,18 +563,18 @@ class InwardService:
                             max_suffix = suffix
                 except ValueError:
                     continue # Ignore if ID format is weird
-            
             current_next_suffix = max_suffix + 1
-
             # ---------------------------------------------------------
             # PHASE 3: PROCESS UPDATES AND CREATES
             # ---------------------------------------------------------
             for index, eqp_model in enumerate(inward_data.equipment_list):
-                
                 # --- A. Handle Files ---
                 existing_photos = getattr(eqp_model, "existing_photo_urls", []) or []
-                photo_paths = [str(p).replace("\\", "/") for p in existing_photos if isinstance(p, str) and p.strip()]
-                
+                photo_paths = [
+                    _normalize_inward_photo_reference(p)
+                    for p in existing_photos
+                    if isinstance(p, str) and p.strip()
+                ]
                 if index in files_by_index:
                     for file in files_by_index[index]:
                         if file and file.filename:
@@ -594,20 +583,17 @@ class InwardService:
                             await file.seek(0)
                             async with aiofiles.open(str(file_path), 'wb') as out_file:
                                 await out_file.write(await file.read())
-                            photo_paths.append(os.path.relpath(file_path, BASE_DIR).replace("\\", "/"))
-                
-                # --- B. Update vs Create ---
+                                photo_paths.append(
+                                    _build_inward_photo_reference(unique_filename)
+                                )                # --- B. Update vs Create ---
                 eq_id = getattr(eqp_model, "inward_eqp_id", None)
                 incoming_status = getattr(eqp_model, "status", None)
-
                 if eq_id and eq_id in existing_eq_map:
                     # === UPDATE EXISTING ===
                     db_eq = existing_eq_map[eq_id]
-
                     # CRITICAL FIX: We DO NOT update db_eq.nepl_id. 
                     # We keep the existing ID associated with this row.
                     # This prevents the UniqueViolation error.
-                    
                     db_eq.material_description = eqp_model.material_desc
                     db_eq.make = eqp_model.make
                     db_eq.model = eqp_model.model
@@ -626,17 +612,13 @@ class InwardService:
                     db_eq.barcode = eqp_model.barcode
                     db_eq.engineer_remarks = eqp_model.engineer_remarks
                     db_eq.photos = photo_paths
-                    
-
                     if incoming_status:
                         db_eq.status = incoming_status
-
                 else:
                     # === CREATE NEW ===
                     # Use the calculated next available suffix
                     new_nepl_id = f"{db_inward.srf_no}-{current_next_suffix}"
                     current_next_suffix += 1
-
                     db_equipment = InwardEquipment(
                         inward_id=inward_id,
                         nepl_id=new_nepl_id, 
@@ -656,37 +638,34 @@ class InwardService:
                         status=incoming_status or 'created' 
                     )
                     self.db.add(db_equipment)
-
             self.db.commit()
             self.db.refresh(db_inward)
             print("[DEBUG] --- UPDATE COMPLETE ---\n")
             return db_inward
-
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error updating inward {inward_id}: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Error while updating: {str(e)}")
-
     # =====================================================
     # FIX ENDS HERE
     # =====================================================
-
     # ... rest of the class (_process_equipment_list, etc.) ...
-    
     # NOTE: _process_equipment_list is still needed for 'submit_inward' (Create New),
     # but 'update_inward_with_files' now handles its own logic to allow ID mapping.
     async def _process_equipment_list(self, inward_id: int, equipment_list: List, files_by_index: Dict[int, List[UploadFile]]):
         inward_record = self.db.get(Inward, inward_id)
         if not inward_record:
             raise Exception(f"Inward record with ID {inward_id} not found.")
-        
         authoritative_srf_no = inward_record.srf_no
-        
         equipment_models = []
         for index, eqp_model in enumerate(equipment_list):
             existing_photos = getattr(eqp_model, "existing_photo_urls", []) or []
-            photo_paths = [str(p).replace("\\", "/") for p in existing_photos if isinstance(p, str) and p.strip()]
-            
+
+            photo_paths = [
+                _normalize_inward_photo_reference(p)
+                for p in existing_photos
+                if isinstance(p, str) and p.strip()
+            ]
             if index in files_by_index:
                 for file in files_by_index[index]:
                     if file and file.filename:
@@ -695,10 +674,8 @@ class InwardService:
                         await file.seek(0)
                         async with aiofiles.open(str(file_path), 'wb') as out_file:
                             await out_file.write(await file.read())
-                        photo_paths.append(os.path.relpath(file_path, BASE_DIR).replace("\\", "/"))
-
+                        photo_paths.append(_build_inward_photo_reference(unique_filename))
             authoritative_nepl_id = f"{authoritative_srf_no}-{index + 1}"
-
             db_equipment = InwardEquipment(
                 inward_id=inward_id,
                 nepl_id=authoritative_nepl_id,
@@ -720,11 +697,9 @@ class InwardService:
             equipment_models.append(db_equipment)
         if equipment_models:
             self.db.add_all(equipment_models)
-
     # =========================================================
     # Manufacturer Spec Lookup (Dropdown Support)
     # =========================================================
-
     def get_all_makes(self) -> List[str]:
         """Get all distinct makes from HTWManufacturerSpec where is_active is True."""
         rows = (
@@ -735,7 +710,6 @@ class InwardService:
             .all()
         )
         return [r[0] for r in rows if r[0]]
-
     def get_models_by_make(self, make: str) -> List[str]:
         """Get all distinct models for a given make where is_active is True."""
         rows = (
@@ -749,7 +723,6 @@ class InwardService:
             .all()
         )
         return [r[0] for r in rows if r[0]]
-
     def get_range_by_make_model(self, make: str, model: str) -> Optional[Dict[str, any]]:
         """Get range_min, range_max, and unit for a given make and model combination."""
         spec = (
@@ -761,25 +734,20 @@ class InwardService:
             )
             .first()
         )
-
         if not spec:
             return None
-
         # Determine unit: prefer torque_unit, fallback to pressure_unit
         unit = None
         if spec.torque_unit:
             unit = spec.torque_unit
         elif spec.pressure_unit:
             unit = spec.pressure_unit
-
         return {
             "range_min": float(spec.range_min) if spec.range_min is not None else None,
             "range_max": float(spec.range_max) if spec.range_max is not None else None,
             "unit": unit
         }
-
     # === Customer Portal Logic ===
-    
     async def save_customer_remarks(self, inward_id: int, remarks: List[CustomerRemarkEntry]):
         """
         Updates customer remarks for specific equipment and sets their status to 'reviewed'.
@@ -788,7 +756,6 @@ class InwardService:
         inward = self.db.get(Inward, inward_id)
         if not inward:
             raise HTTPException(status_code=404, detail="Inward record not found.")
-            
         updated_count = 0
         for remark_entry in remarks:
             # Fetch specific equipment
@@ -798,30 +765,24 @@ class InwardService:
                     InwardEquipment.inward_id == inward_id
                 )
             ).first()
-            
             if eqp:
                 eqp.customer_remarks = remark_entry.customer_remark
                 eqp.status = 'reviewed' # Update equipment status to reviewed
                 updated_count += 1
-        
         # Requirement: "and inward table status - reviewed"
         if updated_count > 0:
              inward.status = 'reviewed'
              inward.updated_at = datetime.now(timezone.utc)
-        
         self.db.commit()
         return updated_count
-
     async def update_inward_status(self, inward_id: int, status_value: str):
         inward = self.db.get(Inward, inward_id)
         if not inward:
             raise HTTPException(status_code=404, detail="Inward record not found.")
-        
         inward.status = status_value
         inward.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         return inward
-
     # === Retrieval Methods ===
     async def get_all_inwards(
         self, 
@@ -837,7 +798,6 @@ class InwardService:
         if end_date:
             query = query.filter(func.date(Inward.material_inward_date) <= end_date)
         return query.order_by(Inward.created_at.desc()).all()
-
     async def get_reviewed_inwards_filtered(self) -> List[Inward]:
         """
         Retrieves inwards with status 'reviewed'.
@@ -853,15 +813,12 @@ class InwardService:
             Inward.status == 'reviewed',
             Inward.is_draft.is_(False)
         ).order_by(Inward.updated_at.desc()).all()
-
         # Manually filter the equipments list for each inward object
         # Only show equipments that the customer has reviewed
         for inward in inwards:
             if inward.equipments:
                 inward.equipments = [eq for eq in inward.equipments if eq.status == 'reviewed']
-        
         return inwards
-
     async def get_inward_by_id(self, inward_id: int) -> Inward:
         db_inward = self.db.query(Inward).options(
             joinedload(Inward.customer), 
@@ -870,7 +827,6 @@ class InwardService:
         ).filter(Inward.inward_id == inward_id).first()
         if not db_inward or db_inward.is_draft: raise HTTPException(status_code=404, detail="Inward record not found.")
         return db_inward
-
     # ... (Rest of methods like get_material_history, get_inwards_for_export, etc. remain unchanged)
     async def get_material_history(self) -> List[str]:
         try:
@@ -886,7 +842,6 @@ class InwardService:
         except Exception as e:
             logger.error(f"Error fetching material history: {e}", exc_info=True)
             return []
-            
     # ... (Other methods omitted for brevity, assume they exist as per previous code)
     async def get_inwards_for_export(self, start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[Dict[str, Any]]:
         try:
@@ -914,11 +869,9 @@ class InwardService:
         except Exception as e:
             logger.error(f"Error fetching inwards for export: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to retrieve inwards for export.")
-
     async def get_updated_inwards(self, start_date: Optional[date] = None, end_date: Optional[date] = None):
         try:
             from backend.models.srfs import Srf
-
             stmt = (
                 select(Inward)
                 .options(
@@ -930,37 +883,27 @@ class InwardService:
                     Inward.is_draft.is_(False)
                 )
             )
-
             # Exclude inwards that already have an SRF
             exists_subquery = select(Srf.inward_id).where(Srf.inward_id == Inward.inward_id).exists()
             stmt = stmt.where(not_(exists_subquery))
-
             if start_date:
                 stmt = stmt.where(func.date(Inward.updated_at) >= start_date)
             if end_date:
                 stmt = stmt.where(func.date(Inward.updated_at) <= end_date)
-
             stmt = stmt.order_by(desc(Inward.updated_at))
-
             inwards = self.db.scalars(stmt).all()
-
             # ✅ ✅ ✅ FINAL BUSINESS RULE ENFORCEMENT
             valid_inwards = []
-
             for inward in inwards:
                 equipments = inward.equipments or []
-
                 # ❌ Reject if no equipments at all
                 if not equipments:
                     continue
-
                 # ❌ Reject if ANY equipment is NOT updated
                 if any(eq.status != "updated" for eq in equipments):
                     continue
-
                 # ✅ Only fully valid records reach here
                 valid_inwards.append(inward)
-
             return [
                 {
                     "inward_id": i.inward_id,
@@ -980,12 +923,9 @@ class InwardService:
                 }
                 for i in valid_inwards
             ]
-
         except Exception as e:
             logger.error(f"Error fetching updated inwards (excluding those with SRF): {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to retrieve updated inwards.")
-
-
     async def generate_inward_export(self, inward_id: int) -> BytesIO:
         inward = await self.get_inward_by_id(inward_id)
         _, rows = self._build_inward_export_rows(inward)
@@ -999,11 +939,9 @@ class InwardService:
         except Exception as exc:
             logger.error(f"Failed to generate Excel for inward {inward_id}: {exc}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to generate export.")
-
     async def generate_multiple_inwards_export(self, inward_ids: List[int]) -> BytesIO:
         unique_ids = [i for i in sorted(list(set(i for i in inward_ids if i is not None)))]
         if not unique_ids: raise HTTPException(status_code=400, detail="Select at least one inward to export.")
-        
         output = BytesIO()
         try:
             has_content = False
@@ -1017,27 +955,22 @@ class InwardService:
                     pd.DataFrame(rows).to_excel(writer, index=False, sheet_name=unique_sheet_name)
                     all_rows.extend(rows)
                     has_content = True
-                    
                 if all_rows:
                     summary_title = self._sanitize_sheet_title("Selected Inwards", fallback="Selected")
                     summary_sheet_name = self._ensure_unique_sheet_name(summary_title, sheet_names)
                     pd.DataFrame(all_rows).to_excel(writer, index=False, sheet_name=summary_sheet_name)
-                
                 # Safety check to ensure at least one sheet is visible to prevent crashes
                 if not has_content:
                     pd.DataFrame(["No Data Found"]).to_excel(writer, index=False, sheet_name="Error")
-                    
             output.seek(0)
             return output
         except Exception as exc:
             logger.error(f"Failed to generate batch export for inwards {unique_ids}: {exc}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to generate export.")
-
     async def generate_multiple_inwards_export_inward_only(self, inward_ids: List[int]) -> BytesIO:
         """Generate export with only Inward and InwardEquipment data (no SRF data)."""
         unique_ids = [i for i in sorted(list(set(i for i in inward_ids if i is not None)))]
         if not unique_ids: raise HTTPException(status_code=400, detail="Select at least one inward to export.")
-        
         # Load inwards without SRF relationships for better performance
         inwards = []
         for inward_id in unique_ids:
@@ -1047,10 +980,8 @@ class InwardService:
             ).filter(Inward.inward_id == inward_id, Inward.is_draft.is_(False)).first()
             if db_inward:
                 inwards.append(db_inward)
-        
         if not inwards:
             raise HTTPException(status_code=404, detail="No valid inward records found.")
-        
         output = BytesIO()
         try:
             has_content = False
@@ -1063,103 +994,117 @@ class InwardService:
                     pd.DataFrame(rows).to_excel(writer, index=False, sheet_name=unique_sheet_name)
                     all_rows.extend(rows)
                     has_content = True
-                    
                 if all_rows:
                     summary_title = self._sanitize_sheet_title("Selected Inwards", fallback="Selected")
                     summary_sheet_name = self._ensure_unique_sheet_name(summary_title, sheet_names)
                     pd.DataFrame(all_rows).to_excel(writer, index=False, sheet_name=summary_sheet_name)
-                
                 # Safety check to ensure at least one sheet is visible to prevent crashes
                 if not has_content:
                     pd.DataFrame(["No Data Found"]).to_excel(writer, index=False, sheet_name="Error")
-                    
             output.seek(0)
             return output
         except Exception as exc:
             logger.error(f"Failed to generate inward-only batch export for inwards {unique_ids}: {exc}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to generate export.")
-
     # === Customer Notification Methods ===
     async def process_customer_notification(self, inward_id: int, creator_id: int, background_tasks: BackgroundTasks, customer_emails: Optional[Union[List[str], str]] = None, send_later: bool = False):
         db_inward = await self.get_inward_by_id(inward_id)
         if not db_inward.customer: raise HTTPException(status_code=400, detail="Inward is not linked to a valid customer.")
         creator = self.db.get(User, creator_id)
         created_by_name = creator.username if creator else f"user_{creator_id}"
-
         if send_later:
             # For scheduled emails, use the primary customer email
             primary_email = db_inward.customer.email if db_inward.customer else None
             await DelayedEmailService(self.db).schedule_delayed_email(inward_id=inward_id, recipient_email=primary_email, creator_id=creator_id, delay_minutes=settings.DELAYED_EMAIL_DELAY_MINUTES)
             self.db.commit()
             return {"message": f"FIR for SRF {db_inward.srf_no} is scheduled."}
-
         # Handle multiple email addresses
         if customer_emails is None:
             customer_emails = []
-        
         # FIX: If a single string is passed (e.g. from delayed email service), wrap it in a list
         if isinstance(customer_emails, str):
             customer_emails = [customer_emails]
-
         if not customer_emails and db_inward.customer and db_inward.customer.email:
             customer_emails = [db_inward.customer.email]
-        
         if not customer_emails:
             raise HTTPException(status_code=422, detail="At least one customer email is required.")
-
-        # Send to multiple recipients
+        # Send to multiple recipients. An opted-out customer is counted separately
+        # because skipping an email by preference is not a notification failure.
         success_count = 0
+        skipped_count = 0
         errors = []
-        
         # Remove duplicates and empty strings
         unique_emails = list(set(email.strip() for email in customer_emails if email and email.strip()))
-
         for email in unique_emails:
             try:
                 existing_user = self.db.scalars(select(User).where(User.email == email)).first()
                 if existing_user:
-                    await self._notify_existing_customer(db_inward, existing_user, background_tasks, created_by_name)
-                    success_count += 1
+                    email_queued = await self._notify_existing_customer(db_inward, existing_user, background_tasks, created_by_name)
+                    if email_queued:
+                        success_count += 1
+                    else:
+                        # False means the recipient explicitly disabled email notifications.
+                        # This is an intentional skip, not a failed recipient.
+                        skipped_count += 1
                 else:
                     await self._invite_new_customer(db_inward, email, creator_id, background_tasks, created_by_name)
                     success_count += 1
             except Exception as e:
                 logger.error(f"Failed to send notification to {email}: {e}")
                 errors.append(f"Failed to send to {email}: {str(e)}")
-
         if success_count > 0:
             message = f"FIR for SRF {db_inward.srf_no} sent to {success_count} recipient(s)."
+            if skipped_count > 0:
+                message += f" {skipped_count} recipient(s) skipped because email notifications are disabled."
             if errors:
                 message += f" {len(errors)} failed: {'; '.join(errors)}"
             return {"message": message}
+        elif skipped_count > 0 and not errors:
+            # All selected existing customer accounts opted out. Return normally
+            # (HTTP 200) so the UI does not treat a valid preference-based skip as
+            # a failed Send Report operation.
+            return {
+                "message": (
+                    f"FIR for SRF {db_inward.srf_no} was not emailed because "
+                    f"email notifications are disabled for {skipped_count} recipient(s)."
+                )
+            }
         else:
             raise HTTPException(status_code=500, detail=f"Failed to send to any recipients: {'; '.join(errors)}")
-
-    async def _notify_existing_customer(self, db_inward, existing_user, background_tasks, created_by_name):
+    async def _notify_existing_customer(self, db_inward, existing_user, background_tasks, created_by_name) -> bool:
+        """Queue an existing customer's FIR email.
+        Returns False only when the customer's email-notification preference is
+        disabled. Genuine queue failures and invalid recipient roles continue to
+        raise HTTPException so the existing error handling remains effective.
+        """
         if existing_user.role.lower() != 'customer': raise HTTPException(status_code=400, detail="An internal staff account exists with this email.")
         if not db_inward.customer_id and existing_user.customer_id:
             db_inward.customer_id = existing_user.customer_id
             self.db.commit()
-
         ok = await send_existing_user_notification_email(background_tasks=background_tasks, recipient_email=existing_user.email, inward_id=db_inward.inward_id, srf_no=db_inward.srf_no, db=self.db, created_by=created_by_name, recipient_user_id=existing_user.user_id)
-        if not ok: raise HTTPException(status_code=500, detail="Failed to queue notification email.")
-
+        if ok:
+            return True
+        # email.py returns False both for a deliberate opt-out and for a genuine
+        # queue failure. Re-read the persisted preference to distinguish them.
+        # This also handles a preference changed while the request was running.
+        notifications_enabled = self.db.scalar(
+            select(User.email_notifications_enabled).where(User.user_id == existing_user.user_id)
+        )
+        if notifications_enabled is False:
+            return False
+        raise HTTPException(status_code=500, detail="Failed to queue notification email.")
     async def _invite_new_customer(self, db_inward, customer_email, creator_id, background_tasks, created_by_name):
         if not db_inward.customer: raise HTTPException(status_code=400, detail="Inward has no customer to invite.")
         if self.db.scalars(select(User).where(User.email == customer_email)).first(): raise HTTPException(status_code=400, detail="A user account already exists with this email.")
-
         temp_password = self.generate_temp_password()
         new_user = User(email=customer_email, username=customer_email, password_hash=hash_password(temp_password), role='customer', is_active=True, customer_id=db_inward.customer_id, full_name=db_inward.customer.contact_person)
         self.db.add(new_user)
-
         new_invitation = Invitation(email=customer_email, token=create_invitation_token(), customer_id=db_inward.customer_id, created_by=creator_id, user_role='customer', invited_name=db_inward.customer.contact_person)
         self.db.add(new_invitation)
         self.db.commit()
         self.db.refresh(new_user)
-
         ok = await send_new_user_invitation_email(background_tasks=background_tasks, recipient_email=customer_email, token=new_invitation.token, srf_no=db_inward.srf_no, temp_password=temp_password, db=self.db, inward_id=db_inward.inward_id, created_by=created_by_name, recipient_user_id=new_user.user_id)
         if not ok: raise HTTPException(status_code=500, detail="Failed to queue invitation email.")
-
     async def send_scheduled_report_now(self, task_id: int, customer_emails: List[str], background_tasks: BackgroundTasks) -> dict:
         try:
             task = await DelayedEmailService(self.db).get_task_by_id(task_id)
