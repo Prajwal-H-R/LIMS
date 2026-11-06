@@ -88,7 +88,11 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/uploads/inward_photos"
           mkdir -p "${RUNNER_TEMP}/certificate_assets"
 
-          sudo chown -R 10001:10001 "${RUNNER_TEMP}/ylims-data"
+          sudo chown -R 10001:10001 \
+            "${RUNNER_TEMP}/uploads" \
+            "${RUNNER_TEMP}/certificate_assets"
+
+          echo "CI storage directories prepared successfully."
       - name: Create .env.docker from GitHub Secrets
         shell: bash
         env:
