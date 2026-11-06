@@ -554,26 +554,30 @@ function downloadWCCPdf(wcc: WCCRecord) {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 4;
+  // The frame sits 12 mm from the paper edge. Keep every certificate element
+  // another 4 mm inside that frame so the content has an even white buffer.
+  const frameMargin = 12;
+  const contentInset = 4;
+  const margin = frameMargin + contentInset;
 
   // Explicit white page background keeps the certificate readable in PDF
   // previews/exporters that otherwise render transparent page areas as black.
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidth, pageHeight, "F");
 
-  // Keep the blue title bar strictly inside the thin black page frame.
+  // The title band uses the same 4 mm inset as the rest of the content.
   // The frame is drawn again at the end so its black outline stays crisp.
   doc.setFillColor(8, 8, 110);
-  doc.rect(1.3, 1.3, pageWidth - 2.6, 7.5, "F");
+  doc.rect(margin, margin, pageWidth - 2 * margin, 7.5, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10.8);
-  doc.text("WORK COMPLETION CERTIFICATE", pageWidth / 2, 5.9, { align: "center" });
+  doc.text("WORK COMPLETION CERTIFICATE", pageWidth / 2, margin + 5.1, { align: "center" });
 
   const vendorLines = wccSafe(wcc.vendor_company_details).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const companyName = vendorLines[0] || "Nextage Engineering Pvt Ltd";
   doc.setTextColor(47, 128, 237);
-  let vendorY = 15.5;
+  let vendorY = margin + 12;
   vendorLines.forEach((line, index) => {
     // Make the company name and address slightly larger to match the reference.
     doc.setFont("helvetica", index === 0 ? "bold" : "normal");
@@ -586,7 +590,7 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setTextColor(255, 0, 0);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.7);
-  doc.text(`TAX REGISTRATION DETAILS: ${wccSafe(wcc.tax_registration_details)}`, pageWidth / 2, Math.max(vendorY + 4.2, 34), { align: "center" });
+  doc.text(`TAX REGISTRATION DETAILS: ${wccSafe(wcc.tax_registration_details)}`, pageWidth / 2, Math.max(vendorY + 4.2, margin + 28), { align: "center" });
 
   const leftX = margin;
   const leftW = 140;
@@ -716,7 +720,7 @@ function downloadWCCPdf(wcc: WCCRecord) {
     rightY += 5.5;
   });
 
-  const tableStartY = Math.max(leftY + leftRowH + 1.5, rightY + 7, 93);
+  const tableStartY = Math.max(leftY + leftRowH + 1.5, rightY + 7, margin + 80);
   const detailRows = (wcc.details_table ?? []).map((row) => [
     row.po_s_no === null || row.po_s_no === undefined ? "" : String(row.po_s_no),
     wccSafe(row.description_of_work),
@@ -730,7 +734,7 @@ function downloadWCCPdf(wcc: WCCRecord) {
     head: [["PO S.NO", "DESCRIPTION OF WORK", "UOM", "QUANTITY\nCOMPLETED", "SAC NO", "STATUS OF WORK\nCOMPLETED"]],
     body: detailRows.length ? detailRows : [["", "", "", "", "", ""]],
     theme: "grid",
-    margin: { left: margin, right: margin },
+    margin: { left: margin, right: margin, top: margin + 4, bottom: margin + 4 },
     tableWidth: "auto",
     styles: {
       font: "helvetica",
@@ -751,9 +755,9 @@ function downloadWCCPdf(wcc: WCCRecord) {
       }
     },
     columnStyles: {
-      // Total 289 mm = A4 landscape width minus the 4 mm side margins.
+      // Total 265 mm = A4 landscape width minus the 16 mm content margins.
       0: { cellWidth: 13, halign: "center" },
-      1: { cellWidth: 152 },
+      1: { cellWidth: 128 },
       2: { cellWidth: 20, halign: "center" },
       3: { cellWidth: 24, halign: "center" },
       4: { cellWidth: 28, halign: "center" },
@@ -762,11 +766,11 @@ function downloadWCCPdf(wcc: WCCRecord) {
   });
 
   let nextY = ((doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? tableStartY + 18) + 4;
-  if (nextY > pageHeight - 48) {
+  if (nextY > pageHeight - frameMargin - contentInset - 42) {
     doc.addPage("a4", "landscape");
     doc.setFillColor(255, 255, 255);
     doc.rect(0, 0, pageWidth, pageHeight, "F");
-    nextY = 14;
+    nextY = margin + 4;
   }
   doc.setTextColor(17, 17, 17);
   doc.setFont("helvetica", "bold");
@@ -782,16 +786,20 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.line(margin, remarkBottom + 3, pageWidth - margin, remarkBottom + 3);
   doc.line(margin, remarkBottom + 7, pageWidth - margin, remarkBottom + 7);
 
-  let signatureY = Math.max(remarkBottom + 17, 165);
-  if (signatureY > pageHeight - 34) {
+  // Reserve enough room below the signature block for the Encls footer and
+  // the 4 mm inner padding. Move the signature block to a fresh page if needed.
+  let signatureY = Math.max(remarkBottom + 10, 158);
+  const maxSignatureY = pageHeight - frameMargin - contentInset - 32;
+  if (signatureY > maxSignatureY) {
     doc.addPage("a4", "landscape");
     doc.setFillColor(255, 255, 255);
     doc.rect(0, 0, pageWidth, pageHeight, "F");
     signatureY = 150;
   }
-  const leftSignatureX = margin + 0.5;
-  const rightSignatureX = pageWidth / 2 + 4;
-  const signatureWidth = 135;
+  const leftSignatureX = margin;
+  const signatureGap = 8;
+  const signatureWidth = (pageWidth - 2 * margin - signatureGap) / 2;
+  const rightSignatureX = leftSignatureX + signatureWidth + signatureGap;
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.18);
   doc.line(leftSignatureX, signatureY, leftSignatureX + signatureWidth, signatureY);
@@ -827,7 +835,7 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(6.8);
   doc.setTextColor(17, 17, 17);
-  doc.text("Encls: Other related documents of work", margin, pageHeight - 2.1);
+  doc.text("Encls: Other related documents of work", margin + 0.5, pageHeight - frameMargin - contentInset - 1.6);
 
   // Draw a thin black frame around every page, after content has been placed.
   const totalPages = doc.getNumberOfPages();
@@ -835,7 +843,7 @@ function downloadWCCPdf(wcc: WCCRecord) {
     doc.setPage(pageNumber);
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.2);
-    doc.rect(1.2, 1.2, pageWidth - 2.4, pageHeight - 2.4, "S");
+    doc.rect(frameMargin, frameMargin, pageWidth - 2 * frameMargin, pageHeight - 2 * frameMargin, "S");
   }
   const safeNumber = wccSafe(wcc.wcc_no).replace(/[^a-zA-Z0-9_-]+/g, "-") || `inward-${wcc.inward_id ?? "record"}`;
   doc.save(`WCC-${safeNumber}.pdf`);
@@ -935,19 +943,20 @@ function downloadFinalInspectionPdf(report: any): void {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 6;
+  const frameMargin = 6;
+  const margin = 8;
 
   // White page and the same navy/blue visual style used by the WCC certificate.
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidth, pageHeight, "F");
   doc.setFillColor(8, 8, 110);
-  doc.rect(margin, margin, pageWidth - margin * 2, 15, "F");
+  doc.rect(frameMargin + 1.3, frameMargin + 1.3, pageWidth - 2 * (frameMargin + 1.3), 15, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text("FINAL INSPECTION REPORT", margin + 4, 15.5);
+  doc.text("FINAL INSPECTION REPORT", margin + 4, frameMargin + 9.5);
   doc.setFontSize(9);
-  doc.text(`SRF: ${wccSafe(report?.srf_no) || "N/A"}`, pageWidth - margin - 4, 15.5, { align: "right" });
+  doc.text(`SRF: ${wccSafe(report?.srf_no) || "N/A"}`, pageWidth - margin - 4, frameMargin + 9.5, { align: "right" });
 
   const leftX = margin + 1;
   const rightX = pageWidth / 2 + 2;
@@ -1050,11 +1059,11 @@ function downloadFinalInspectionPdf(report: any): void {
     doc.setPage(pageNo);
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.2);
-    doc.rect(1.2, 1.2, pageWidth - 2.4, pageHeight - 2.4, "S");
+    doc.rect(frameMargin, frameMargin, pageWidth - 2 * frameMargin, pageHeight - 2 * frameMargin, "S");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Page ${pageNo} of ${pageCount}`, pageWidth - margin, pageHeight - 3, { align: "right" });
+    doc.text(`Page ${pageNo} of ${pageCount}`, pageWidth - margin, pageHeight - frameMargin - 2, { align: "right" });
   }
 
   const safeSrf = wccSafe(report?.srf_no).replace(/[^a-zA-Z0-9_-]+/g, "-") || "inspection-report";

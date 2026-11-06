@@ -288,7 +288,12 @@ def create_srf(srf_data: SrfCreate, db: Session = Depends(get_db)):
 # PUT: Update SRF
 # =====================================================================
 @router.put("/{srf_id}", response_model=Srf)
-def update_srf(srf_id: int, srf_update_data: SrfDetailUpdate, db: Session = Depends(get_db)):
+def update_srf(
+    srf_id: int,
+    srf_update_data: SrfDetailUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(check_staff_role),
+):
     print(f"[INFO] Received update request for SRF ID: {srf_id}")
     
     srf_to_update = get_srf_with_full_details(srf_id, db)

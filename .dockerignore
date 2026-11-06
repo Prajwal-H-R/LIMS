@@ -20,7 +20,8 @@ backend/.pytest_cache
 backend/logs
 backend/.mypy_cache
 backend/.ruff_cache
-
+# Runtime-persisted files: supplied to the backend through host bind mounts.
+backend/certificate_assets/
 # Don't ship local venv
 venv/
 env/

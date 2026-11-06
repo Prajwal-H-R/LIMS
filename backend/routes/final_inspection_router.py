@@ -81,7 +81,11 @@ def read_inspections(search: Optional[str] = None, skip: int = 0, limit: int = 1
             "customer_name": getattr(inward, 'customer_name', 'N/A'),
             "created_at": inward.created_at.isoformat() if getattr(inward, 'created_at', None) else None,
             "inspection_status": inspection.status if inspection else "PENDING",
-            "report_sent": inspection.report_sent if inspection else False
+            "report_sent": inspection.report_sent if inspection else False,
+            "report_sent_at": inspection.report_sent_at.isoformat() if inspection and inspection.report_sent_at else None,
+            "customer_decision": inspection.customer_decision if inspection else None,
+            "customer_remarks": inspection.customer_remarks if inspection else None,
+            "final_inspection_id": inspection.id if inspection else None
         })
     
     return {
@@ -364,8 +368,12 @@ def submit_customer_decision(
     if inspection is None:
         raise HTTPException(status_code=404, detail="Inspection report not found")
     
-    if current_user.role.lower() == "customer" and inspection.customer_id != current_user.customer_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    current_role = str(getattr(current_user, "role", "")).lower()
+    if current_role == "customer":
+        if inspection.customer_id != current_user.customer_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    elif current_role not in {"admin", "engineer"}:
+        raise HTTPException(status_code=403, detail="You are not authorized to submit this inspection decision")
 
     updated_inspection = FinalInspectionService.update_decision(
         db=db, 

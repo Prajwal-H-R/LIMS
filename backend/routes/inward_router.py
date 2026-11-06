@@ -52,7 +52,7 @@ from backend.schemas.inward_schemas import (
  
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-ALLOWED_ROLES = ["staff", "admin", "engineer"]
+ALLOWED_ROLES = [ "admin", "engineer"]
 router = APIRouter(prefix="/staff/inwards", tags=["Inwards"])
  
 # =========================================================
@@ -226,8 +226,22 @@ async def get_fir_details(inward_id: int, db: Session = Depends(get_db)):
 async def save_customer_remarks(
     inward_id: int,
     request: CustomerRemarkRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserSchema = Depends(get_current_user)
 ):
+    # This endpoint is shared by customer FIR finalization and delegated admin
+    # approval. Customers may update only their own inward record.
+    current_role = str(getattr(current_user, "role", "")).lower()
+    inward = db.query(Inward).filter(Inward.inward_id == inward_id).first()
+    if inward is None:
+        raise HTTPException(status_code=404, detail="Inward record not found")
+
+    if current_role == "customer":
+        if inward.customer_id != getattr(current_user, "customer_id", None):
+            raise HTTPException(status_code=403, detail="Access denied to this inward record")
+    elif current_role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="You are not authorized to update FIR remarks")
+
     inward_service = InwardService(db)
     count = await inward_service.save_customer_remarks(inward_id, request.remarks)
     return {"message": f"Updated {count} remarks successfully."}
@@ -236,8 +250,25 @@ async def save_customer_remarks(
 async def update_fir_status(
     inward_id: int,
     status_update: InwardStatusUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserSchema = Depends(get_current_user)
 ):
+    # This endpoint is shared by the customer portal and delegated admin approval.
+    # Customers may update only their own inward record; staff/admin/engineer users
+    # may perform the delegated approval from the admin portal.
+    current_role = str(getattr(current_user, "role", "")).lower()
+    inward = db.query(Inward).filter(Inward.inward_id == inward_id).first()
+    if inward is None:
+        raise HTTPException(status_code=404, detail="Inward record not found")
+
+    if current_role == "customer":
+        if inward.customer_id != getattr(current_user, "customer_id", None):
+            raise HTTPException(status_code=403, detail="Access denied to this inward record")
+        if str(status_update.status).lower() != "reviewed":
+            raise HTTPException(status_code=403, detail="Customers may only submit FIR remarks for review")
+    elif current_role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="You are not authorized to update this FIR status")
+
     inward_service = InwardService(db)
     updated_inward = await inward_service.update_inward_status(inward_id, status_update.status)
     return {"message": "Status updated successfully", "status": updated_inward.status}

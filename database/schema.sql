@@ -10,16 +10,17 @@ CREATE TABLE IF NOT EXISTS public.alembic_version
     CONSTRAINT alembic_version_pkey PRIMARY KEY (version_num)
 );
 
-CREATE TABLE IF NOT EXISTS public.certificate_details
-(
-    certificate_details_id bigint NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 MAXVALUE 9223372036854775807 CACHE 1 ),
-    calibration_procedure text COLLATE pg_catalog."default",
-    statement_below_signature jsonb,
-    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT certificate_details_pkey PRIMARY KEY (certificate_details_id)
-);
+CREATE TABLE IF NOT EXISTS public.certificate_details (
+    certificate_details_id SERIAL PRIMARY KEY,
 
+    calibration_procedure TEXT NULL,
+
+    statement_below_signature JSONB NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS public.customers
 (
     customer_id serial NOT NULL,
@@ -266,12 +267,11 @@ CREATE TABLE IF NOT EXISTS public.record_locks
     CONSTRAINT record_locks_pkey PRIMARY KEY (id)
 );
 
-CREATE TABLE IF NOT EXISTS public.report_log
-(
-    id serial NOT NULL,
-    report_type character varying(20) COLLATE pg_catalog."default" NOT NULL,
-    last_sent_date date NOT NULL,
-    created_at timestamp with time zone DEFAULT now(),
+CREATE TABLE IF NOT EXISTS public.report_log(
+    id SERIAL NOT NULL,
+    report_type CHARACTER VARYING(20) NOT NULL,
+    last_sent_date DATE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT report_log_pkey PRIMARY KEY (id)
 );
 
@@ -371,6 +371,7 @@ CREATE TABLE IF NOT EXISTS public.users
     password_hash text COLLATE pg_catalog."default" NOT NULL,
     full_name character varying(255) COLLATE pg_catalog."default",
     role character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    email_notifications_enabled boolean NOT NULL DEFAULT false,
     is_active boolean NOT NULL,
     created_at timestamp without time zone NOT NULL DEFAULT now(),
     updated_at timestamp without time zone,
@@ -438,7 +439,7 @@ CREATE TABLE IF NOT EXISTS public.lab_scope
     updated_by integer,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone,
-    document_data bytea,
+    document_storage_name character varying(255) COLLATE pg_catalog."default",
     document_filename character varying(255) COLLATE pg_catalog."default",
     document_content_type character varying(128) COLLATE pg_catalog."default",
     CONSTRAINT lab_scope_pkey PRIMARY KEY (id),
@@ -645,6 +646,7 @@ CREATE TABLE IF NOT EXISTS public.external_deviation_attachments
     CONSTRAINT external_deviation_attachments_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES public.users (user_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE SET NULL
 );
 
+
 CREATE TABLE IF NOT EXISTS public.htw_job
 (
     job_id serial NOT NULL,
@@ -657,20 +659,68 @@ CREATE TABLE IF NOT EXISTS public.htw_job
     range_min numeric(14, 4),
     range_max numeric(14, 4),
     date date,
-    type text COLLATE pg_catalog."default" DEFAULT 'indicating'::text,
-    classification text COLLATE pg_catalog."default" DEFAULT 'Type I Class C'::text,
+
+    type text COLLATE pg_catalog."default"
+        DEFAULT 'indicating'::text,
+
+    classification text COLLATE pg_catalog."default"
+        DEFAULT 'Type I Class C'::text,
+
     job_status text COLLATE pg_catalog."default",
-    created_at timestamp with time zone DEFAULT now(),
-    calibration_mode character varying(50) COLLATE pg_catalog."default",
-    res_pressure_unit character varying(50) COLLATE pg_catalog."default",
-    range_unit character varying(50) COLLATE pg_catalog."default",
-    CONSTRAINT htw_job_pkey PRIMARY KEY (job_id),
-    CONSTRAINT htw_job_inward_eqp_id_key UNIQUE (inward_eqp_id),
-    CONSTRAINT htw_job_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id) REFERENCES public.inward_equipments (inward_eqp_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
-    CONSTRAINT htw_job_inward_id_fkey FOREIGN KEY (inward_id) REFERENCES public.inward (inward_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
-    CONSTRAINT htw_job_pressure_gauge_ref_id_fkey FOREIGN KEY (pressure_gauge_ref_id) REFERENCES public.htw_pressure_gauge_resolution (id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
-    CONSTRAINT htw_job_srf_eqp_id_fkey FOREIGN KEY (srf_eqp_id) REFERENCES public.srf_equipments (srf_eqp_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
-    CONSTRAINT htw_job_srf_id_fkey FOREIGN KEY (srf_id) REFERENCES public.srfs (srf_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION
+
+    created_at timestamp with time zone
+        DEFAULT now(),
+
+    calibration_mode character varying(50)
+        COLLATE pg_catalog."default",
+
+    res_pressure_unit character varying(50)
+        COLLATE pg_catalog."default",
+
+    range_unit character varying(50)
+        COLLATE pg_catalog."default",
+
+    CONSTRAINT htw_job_pkey
+        PRIMARY KEY (job_id),
+
+    -- Retain uniqueness for inward equipment.
+    CONSTRAINT htw_job_inward_eqp_id_key
+        UNIQUE (inward_eqp_id),
+
+    CONSTRAINT htw_job_inward_eqp_id_fkey
+        FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id)
+        MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+
+    CONSTRAINT htw_job_inward_id_fkey
+        FOREIGN KEY (inward_id)
+        REFERENCES public.inward (inward_id)
+        MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+
+    CONSTRAINT htw_job_pressure_gauge_ref_id_fkey
+        FOREIGN KEY (pressure_gauge_ref_id)
+        REFERENCES public.htw_pressure_gauge_resolution (id)
+        MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+
+    CONSTRAINT htw_job_srf_eqp_id_fkey
+        FOREIGN KEY (srf_eqp_id)
+        REFERENCES public.srf_equipments (srf_eqp_id)
+        MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION,
+
+    CONSTRAINT htw_job_srf_id_fkey
+        FOREIGN KEY (srf_id)
+        REFERENCES public.srfs (srf_id)
+        MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
 );
 
 CREATE TABLE IF NOT EXISTS public.certificate

@@ -16,6 +16,7 @@ import { CertificateApprovalModule } from '../components/AdminComponents/Certifi
 import { LabScopeModule }          from '../components/AdminComponents/LabScopeModule';
 import { HTWEnvironmentManager }   from '../components/AdminComponents/HTWEnvironmentManager';
 import { CertificateDetailsManager } from '../components/AdminComponents/CertificateDetailsManager';
+import { AdminDelegatedApproval } from '../components/AdminComponents/AdminDelegatedApproval';
  
 import {
   AdminNotificationsPanel,
@@ -185,6 +186,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'notifications', label: 'Notifications',  icon: <Bell size={20} /> },
     { id: 'invite-users',  label: 'Invite User',    icon: <UserPlus size={20} /> },
     { id: 'users',         label: 'User Management',icon: <Users size={20} /> },
+    { id: 'delegated-approval', label: 'Delegated Approval', icon: <ShieldCheck size={20} /> },
   ];
  
   const adminToolItems = [
@@ -544,7 +546,7 @@ const LicenseSubscriptionManager: React.FC<LicenseSubscriptionManagerProps> = ({
           </div>
           <div>
             <h3 className="font-semibold text-gray-900">Current license</h3>
-            <p className="text-sm text-gray-500">License information retrieved from the database</p>
+            <p className="text-sm text-gray-500">View your current license information</p>
           </div>
           <span className={`ml-auto inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusClasses}`}>
             {statusLabel}
@@ -582,7 +584,7 @@ const LicenseSubscriptionManager: React.FC<LicenseSubscriptionManagerProps> = ({
           <div>
             <h3 className="font-semibold text-gray-900">Extend license</h3>
             <p className="mt-1 text-sm text-gray-500">
-              Enter the activation key provided for your next license period.
+              Enter the activation key provided for your next license period
             </p>
           </div>
         </div>
@@ -1051,6 +1053,13 @@ const latestPopupCompany =
                 </div>
               )}
  
+              {/* ── DELEGATED APPROVAL ── */}
+              {activeSection === 'delegated-approval' && (
+                <div className="animate-fadeIn">
+                  <AdminDelegatedApproval onBack={() => handleNavigate('dashboard')} />
+                </div>
+              )}
+
               {/* ── USER MANAGEMENT ── */}
               {activeSection === 'users' && (
                 loading ? (

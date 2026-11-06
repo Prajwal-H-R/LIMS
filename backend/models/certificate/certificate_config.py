@@ -5,19 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Text, func
+from sqlalchemy import Integer, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-class Base(DeclarativeBase):
-    """Base class for SQLAlchemy declarative models."""
+# Import the shared SQLAlchemy Base used by the other application models.
+# Update this import path if your project's Base is located elsewhere.
+from backend.db import Base
 
 
 class CertificateDetails(Base):
-    """Stores certificate-template text that is shared by certificate types.
+    """Stores certificate-template text shared by certificate types.
 
-    ``statement_below_signature`` is stored as a JSON array of objects:
+    statement_below_signature is stored as a JSON array of objects:
 
     [
         {"order": 1, "text": "..."},
@@ -31,7 +31,7 @@ class CertificateDetails(Base):
     __tablename__ = "certificate_details"
 
     certificate_details_id: Mapped[int] = mapped_column(
-        BigInteger,
+        Integer,
         primary_key=True,
         autoincrement=True,
     )

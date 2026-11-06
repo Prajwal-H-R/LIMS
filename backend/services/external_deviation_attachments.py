@@ -4,8 +4,9 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session, joinedload
 from backend.models.external_deviation import ExternalDeviation 
 from backend.models.external_deviation_attachments import ExternalDeviationAttachment
+from backend.core.storage_paths import DEVIATIONS_DIR
 
-UPLOAD_DIR = "backend/uploads/deviations"
+UPLOAD_DIR = DEVIATIONS_DIR
 
 class DeviationAttachmentService:
     @staticmethod

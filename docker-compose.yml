@@ -44,11 +44,34 @@ services:
     restart: unless-stopped
     env_file:
       - .env.docker
+    environment:
+      # These are container paths, not host paths. They are the same locally
+      # and on Azure because the bind mounts use these fixed destinations.
+      APP_UPLOADS_DIR: /app/backend/uploads
+      APP_CERTIFICATE_ASSETS_DIR: /app/backend/certificate_assets
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - ./backend/uploads:/app/backend/uploads
+      # Host paths are configured per environment in the Compose .env file.
+      # Local Windows example:
+      #   UPLOADS_DIR=C:/Users/UserA/Desktop/uploads
+      #   CERTIFICATE_ASSETS_DIR=C:/Users/UserA/Desktop/certificate_assets
+      # Azure example:
+      #   UPLOADS_DIR=/opt/ylims-data/uploads
+      #   CERTIFICATE_ASSETS_DIR=/opt/ylims-data/certificate_assets
+      # The container paths stay identical in both environments.
+      - type: bind
+        source: "${UPLOADS_DIR:?Set UPLOADS_DIR in the Compose environment}"
+        target: /app/backend/uploads
+        bind:
+          create_host_path: false
+
+      - type: bind
+        source: "${CERTIFICATE_ASSETS_DIR:?Set CERTIFICATE_ASSETS_DIR in the Compose environment}"
+        target: /app/backend/certificate_assets
+        bind:
+          create_host_path: false
     ports:
       - "8000:8000"
     networks:

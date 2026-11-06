@@ -11,7 +11,6 @@ class HTWJob(Base):
     # Define Unique Constraints matching your SQL exactly
     __table_args__ = (
         UniqueConstraint("inward_eqp_id", name="htw_job_inward_eqp_id_key"),
-        UniqueConstraint("inward_id", name="htw_job_inward_id_key"),
     )
 
     job_id = Column(Integer, primary_key=True, autoincrement=True)
