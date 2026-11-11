@@ -35,6 +35,7 @@ import {
   X,
   Calendar,
   Building2,
+  Search,
 } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -186,6 +187,8 @@ const getActiveSectionFromPath = (
     return "barcode-scanner";
   if (pathname.includes("/engineer/certificates"))
     return "certificates";
+  if (pathname.includes("/engineer/calibration-reminders"))
+    return "calibration-explorer";
   return "dashboard";
 };
 
@@ -258,6 +261,12 @@ const quickActionItems: QuickActionItem[] = [
     label: "Calibration Bookings",
     icon: <Calendar size={18} />,
     route: "/engineer/calibration-bookings",
+  },
+  {
+    id: "calibration-explorer",
+    label: "Calibration Explorer",
+    icon: <Search size={18} />,
+    route: "/engineer/calibration-reminders/0",
   },
 ];
 

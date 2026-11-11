@@ -1,8 +1,7 @@
 // frontend/src/pages/AdminDashboard.tsx
  
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useAuth } from '../auth/AuthProvider';
+import { useSearchParams, useLocation, useNavigate, Routes, Route } from 'react-router-dom';import { useAuth } from '../auth/AuthProvider';
 import { api, ENDPOINTS } from '../api/config';
 import { fetchLicenseStatus, LicenseStatus } from '../api/license';
 import LicenseModal from '../components/LicenseModal';
@@ -10,6 +9,7 @@ import LicenseModal from '../components/LicenseModal';
 import Header   from '../components/Header';
 import Footer   from '../components/Footer';
 import ProfilePage from '../components/ProfilePage';
+import CalibrationReminderDetailsPage from '../components/CalibrationReminderDetailsPage';
  
 import { MasterStandardModule }    from '../components/AdminComponents/MasterStandardModule';
 import { CertificateApprovalModule } from '../components/AdminComponents/CertificateApprovalModule';
@@ -17,7 +17,7 @@ import { LabScopeModule }          from '../components/AdminComponents/LabScopeM
 import { HTWEnvironmentManager }   from '../components/AdminComponents/HTWEnvironmentManager';
 import { CertificateDetailsManager } from '../components/AdminComponents/CertificateDetailsManager';
 import { AdminDelegatedApproval } from '../components/AdminComponents/AdminDelegatedApproval';
- 
+import ReportsAndAnalytics from '../components/AdminComponents/ReportsAndAnalytics';
 import {
   AdminNotificationsPanel,
   extractCompanyFromNotification,
@@ -37,7 +37,7 @@ import {
   Ruler, Building2, Award, Thermometer,
   ChevronLeft, ChevronRight, Menu,
   LayoutDashboard,
-  FileText, KeyRound, ShieldCheck, RefreshCw, CalendarDays,
+  FileText, KeyRound, ShieldCheck, RefreshCw, CalendarDays,Search,BarChart
 } from 'lucide-react';
  
 import type { AdminNotificationItem, UnlockNotificationItem } from
@@ -187,10 +187,12 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'invite-users',  label: 'Invite User',    icon: <UserPlus size={20} /> },
     { id: 'users',         label: 'User Management',icon: <Users size={20} /> },
     { id: 'delegated-approval', label: 'Delegated Approval', icon: <ShieldCheck size={20} /> },
+    { id: 'calibration-explorer', label: 'Calibration Explorer', icon: <Search size={20} /> },
+    { id: 'reports-analytics', label: 'Reports and Analytics', icon: <BarChart size={20} /> },
+     { id: 'certificate-approval', label: 'Certificate Approval', icon: <Award size={20} /> }, // <-- Add this line
   ];
  
   const adminToolItems = [
-    { id: 'certificate-approval', label: 'Certificate Approval', icon: <Award size={20} /> },
     { id: 'master-standard',      label: 'Master Standards',     icon: <Ruler size={20} /> },
     { id: 'laboratory-scope',     label: 'Laboratory Scope',     icon: <Building2 size={20} /> },
     { id: 'htw-environment',      label: 'Environment Ranges',   icon: <Thermometer size={20} /> },
@@ -650,7 +652,12 @@ const LicenseSubscriptionManager: React.FC<LicenseSubscriptionManagerProps> = ({
 const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeSection = searchParams.get('section') || 'dashboard';
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Override active section if we are inside the path-based Calibration Explorer route
+  const isCalibrationExplorer = location.pathname.includes('/calibration-reminders');
+  const activeSection = isCalibrationExplorer ? 'calibration-explorer' : (searchParams.get('section') || 'dashboard');
  
   // ── License popup state (admin only; never blocks actions) ─────────
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
@@ -691,8 +698,16 @@ const AdminDashboard: React.FC = () => {
   const totalUnreadCount = unreadProfileCount + unreadUnlockCount;
  
   // ── Navigation ────────────────────────────────────────────────────
-  const handleNavigate = (section: string) =>
-    setSearchParams({ section });
+// ── Navigation ────────────────────────────────────────────────────
+  const handleNavigate = (section: string) => {
+    if (section === 'calibration-explorer') {
+      navigate('/admin/calibration-reminders/0'); // Route to Explorer Mode
+    } else if (isCalibrationExplorer) {
+      navigate(`/admin?section=${section}`); // Escape the nested path back to normal admin views
+    } else {
+      setSearchParams({ section });
+    }
+  };
  
   const handleLogout = () => { if (logout) logout(); };
 
@@ -1097,7 +1112,20 @@ const latestPopupCompany =
                   </div>
                 )
               )}
- 
+  {/* ── CALIBRATION EXPLORER ── */}
+                {activeSection === 'calibration-explorer' && (
+                  <div className="animate-fadeIn h-full">
+                    <Routes>
+                      <Route path="calibration-reminders/:customerId" element={<CalibrationReminderDetailsPage />} />
+                    </Routes>
+                  </div>
+                )}
+                {/* ── REPORTS & ANALYTICS ── */}
+              {activeSection === 'reports-analytics' && (
+                <div className="animate-fadeIn h-full">
+                  <ReportsAndAnalytics />
+                </div>
+              )}
               {/* ── TOOL SECTIONS ── */}
               {activeSection === 'certificate-approval' && (
                 <div className="animate-slideUp">
