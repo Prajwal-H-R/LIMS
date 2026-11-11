@@ -20,7 +20,9 @@ COPY backend/requirements.txt ./requirements.txt
 
 # Build wheels for ALL direct and transitive dependencies
 # IMPORTANT: Do not use --no-deps
-RUN pip wheel --wheel-dir=/app/wheels -r requirements.txt
+RUN python -m pip wheel \
+    --wheel-dir=/app/wheels \
+    -r requirements.txt
 
 
 # =========================================================
@@ -37,8 +39,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install PostgreSQL runtime library only
-# libpq-dev and build-essential remain in the builder stage
+
+# =========================================================
+# Install Runtime PostgreSQL Library
+# =========================================================
+
+# Keep build tools and libpq-dev out of the production image
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
@@ -48,23 +54,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python Dependencies (Offline)
 # =========================================================
 
-# Copy pre-built wheels from builder
+# Copy pre-built dependency wheels from builder
 COPY --from=builder /app/wheels /wheels
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-# Install all dependencies without accessing PyPI
-RUN pip install --no-index --find-links=/wheels \
+# Install all direct and transitive dependencies offline
+# Validate Playwright before attempting browser installation
+RUN python -m pip install \
+    --no-index \
+    --find-links=/wheels \
     -r /app/backend/requirements.txt \
+    && python -m pip check \
+    && python -m pip show playwright \
+    && python -m playwright --version \
     && rm -rf /wheels
 
 
 # =========================================================
-# Install Playwright Chromium
+# Install Playwright Chromium and OS Dependencies
 # =========================================================
 
-# Install Chromium and its required system dependencies
+# Install required Linux libraries for Chromium
 RUN mkdir -p /ms-playwright \
-    && playwright install --with-deps chromium \
+    && python -m playwright install-deps chromium \
+    && python -m playwright install chromium \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
