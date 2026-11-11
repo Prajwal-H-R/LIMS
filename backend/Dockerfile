@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy dependency manifest
 COPY backend/requirements.txt ./requirements.txt
 
-# Build wheels for ALL direct and transitive dependencies
-# IMPORTANT: Do not use --no-deps
+# Build wheels for all direct and transitive dependencies
+# Do NOT use --no-deps
 RUN python -m pip wheel \
     --wheel-dir=/app/wheels \
     -r requirements.txt
@@ -41,12 +41,14 @@ WORKDIR /app
 
 
 # =========================================================
-# Install Runtime PostgreSQL Library
+# Install Runtime System Dependencies
 # =========================================================
 
-# Keep build tools and libpq-dev out of the production image
+# libpq5     : PostgreSQL runtime library
+# libatomic1 : Required by Playwright's bundled Node.js driver
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -59,7 +61,6 @@ COPY --from=builder /app/wheels /wheels
 COPY backend/requirements.txt /app/backend/requirements.txt
 
 # Install all direct and transitive dependencies offline
-# Validate Playwright before attempting browser installation
 RUN python -m pip install \
     --no-index \
     --find-links=/wheels \
