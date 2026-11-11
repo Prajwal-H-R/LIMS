@@ -50,8 +50,5 @@ EOF
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 8080
-
-# Run the application as a non-root user
 USER nginx
-
 CMD ["nginx", "-g", "daemon off;"]
