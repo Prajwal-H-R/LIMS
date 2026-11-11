@@ -2,18 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   Bell,
-  CalendarDays,
   Clock3,
-  Filter,
   GripVertical,
-  Search,
   X,
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   ArrowUpRight,
+  CheckCircle2,
+  Mail,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/config";
 
 export interface CalibrationCertificateReminder {
@@ -26,6 +24,8 @@ export interface CalibrationCertificateReminder {
   customer_email: string;
   inward_id: number;
   srf_no: string;
+  customer_dc_no?: string | null;
+  customer_dc_date?: string | null;
   inward_eqp_id: number;
   nepl_id: string;
   serial_no: string;
@@ -36,6 +36,10 @@ export interface CalibrationCertificateReminder {
   unit: string | null;
   status: string;
   issued_at?: string | null;
+  source_type?: "INTERNAL" | "EXTERNAL";
+  already_in_lab?: boolean;
+  renewal_inward_id?: number | null;
+  renewal_srf_no?: string | null;
 }
 
 export interface CalibrationReminderGroup {
@@ -43,12 +47,17 @@ export interface CalibrationReminderGroup {
   customer_name: string;
   customer_email: string;
   due_count: number;
+  overdue_count?: number;
+  already_in_lab_count?: number;
+  last_notified_at?: string | null;
   certificates: CalibrationCertificateReminder[];
 }
 
 export interface CalibrationReminderResponse {
   window_days: number;
+  days_back?: number;
   total_due_count: number;
+  overdue_count?: number;
   customer_count: number;
   groups: CalibrationReminderGroup[];
 }
@@ -68,20 +77,6 @@ interface CalibrationReminderModalProps {
 const LAST_SEEN_KEY = "engineer_calibration_reminder_last_seen_certificate_id";
 const API_ENDPOINT = "/calibration-reminders/engineer";
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-};
-
-const daysLabel = (days: number) => {
-  if (days === 0) return "Due today";
-  if (days === 1) return "1 day left";
-  if (days < 0) return `${Math.abs(days)} day(s) overdue`;
-  return `${days} days left`;
-};
-
 export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> = ({
   open,
   onClose,
@@ -91,7 +86,7 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
   onRefresh,
   onCustomerSelect,
   onOpenExplorer,
-  title = "Calibration Due Reminder",
+  title = "Calibration Due Reminders",
 }) => {
   const totalDue = data?.total_due_count ?? 0;
   const customerCount = data?.customer_count ?? 0;
@@ -112,21 +107,21 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[350] bg-black/45 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-200 flex flex-col">
-        <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50 flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="p-3 rounded-2xl bg-amber-100 text-amber-700 shrink-0">
-              <AlertTriangle className="h-6 w-6" />
+    <div className="fixed inset-0 z-[350] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-slate-200 flex flex-col">
+        <div className="px-6 py-5 border-b border-slate-200 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="p-3 rounded-2xl bg-white/15 text-white shrink-0 backdrop-blur-sm">
+              <Bell className="h-6 w-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-                <span className="inline-flex items-center rounded-full border border-amber-200 bg-white px-2.5 py-1 text-xs font-semibold text-amber-700">
-                  Next {windowDays} day(s)
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h2 className="text-xl font-bold">{title}</h2>
+                <span className="inline-flex items-center rounded-full bg-white/20 px-3 py-0.5 text-xs font-semibold text-white">
+                  Next {windowDays} days
                 </span>
               </div>
-              <p className="mt-1 text-sm text-gray-600">
+              <p className="mt-1 text-sm text-blue-100">
                 {totalDue} certificate(s) due across {customerCount} customer(s).
               </p>
             </div>
@@ -135,17 +130,17 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
           <button
             type="button"
             onClick={dismiss}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25"
             aria-label="Close reminder popup"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 bg-gray-50/60">
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/70">
           {loading && (
-            <div className="flex items-center gap-2 text-sm text-gray-600 py-8">
-              <Clock3 className="h-4 w-4 animate-pulse" />
+            <div className="flex items-center gap-2 text-sm text-slate-600 py-8 justify-center">
+              <Clock3 className="h-4 w-4 animate-pulse text-blue-600" />
               Loading calibration reminders...
             </div>
           )}
@@ -158,21 +153,21 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
 
           {!loading && !error && totalDue === 0 && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-900">
-              <p>No certificates are due in the reminder window.</p>
+              <p className="font-medium">No certificates are due in the reminder window.</p>
               <div className="mt-4">
                 <button
                   type="button"
                   onClick={onOpenExplorer}
-                  className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white"
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
                 >
-                  Open calibration explorer
+                  Open Calibration Explorer
                 </button>
               </div>
             </div>
           )}
 
           {!loading && !error && (data?.groups?.length ?? 0) > 0 && (
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               {data!.groups.map((group) => (
                 <CustomerSummaryCard
                   key={group.customer_id}
@@ -184,16 +179,26 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
           )}
         </div>
 
-        <div className="border-t border-gray-200 bg-white px-6 py-4 flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-500">
-            Reminder window: <span className="font-semibold text-gray-700">{windowDays} days</span>
+        <div className="border-t border-slate-200 bg-white px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs text-slate-500">
+            Active reminder window: <span className="font-semibold text-slate-700">{windowDays} days</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            {onOpenExplorer && (
+              <button
+                type="button"
+                onClick={onOpenExplorer}
+                className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+              >
+                Open Explorer & Calendar
+                <ArrowUpRight className="h-4 w-4" />
+              </button>
+            )}
             {onRefresh && (
               <button
                 type="button"
                 onClick={onRefresh}
-                className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
               >
                 Refresh
               </button>
@@ -201,7 +206,7 @@ export const CalibrationReminderModal: React.FC<CalibrationReminderModalProps> =
             <button
               type="button"
               onClick={dismiss}
-              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-black"
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-black"
             >
               Close
             </button>
@@ -220,25 +225,37 @@ const CustomerSummaryCard: React.FC<{
     <button
       type="button"
       onClick={onOpen}
-      className="w-full rounded-3xl border border-gray-200 bg-white p-5 shadow-sm text-left transition hover:shadow-md hover:border-indigo-300"
+      className="w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm text-left transition hover:shadow-md hover:border-blue-300 group"
     >
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-lg font-bold text-gray-900">{group.customer_name}</h3>
-            <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 border border-indigo-100">
+            <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-600 transition">
+              {group.customer_name}
+            </h3>
+            <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 border border-blue-100">
               {group.due_count} due
             </span>
+            {(group.already_in_lab_count ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                <CheckCircle2 className="h-3 w-3" />
+                {group.already_in_lab_count} in lab
+              </span>
+            )}
           </div>
 
-          <p className="mt-1 text-sm text-gray-500">
-            Customer ID: <span className="font-medium text-gray-700">{group.customer_id}</span>
+          <p className="mt-1 text-xs text-slate-500">
+            Customer ID: <span className="font-medium text-slate-700">{group.customer_id}</span>
           </p>
-          <p className="mt-1 text-sm text-gray-500">{group.customer_email}</p>
+          <p className="mt-0.5 text-xs text-slate-500 flex items-center gap-1.5">
+            <Mail className="h-3.5 w-3.5 text-slate-400" />
+            {group.customer_email || "No email on record"}
+          </p>
         </div>
 
-        <span className="inline-flex items-center rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-indigo-600">
+        <span className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-blue-600 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition">
           Open
+          <ChevronRight className="h-4 w-4" />
         </span>
       </div>
     </button>
@@ -261,7 +278,6 @@ export const CalibrationReminderFloatingButton: React.FC<{
       const stored = Number(rawPosition);
       return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.5;
     } catch {
-      // Storage can be unavailable in private browsing; keep the default position.
       return 0.5;
     }
   });
@@ -283,8 +299,6 @@ export const CalibrationReminderFloatingButton: React.FC<{
       ? `Open calibration reminders (${count} due)`
       : "Open calibration explorer");
 
-  // Store a normalized vertical position so the tab restores sensibly after a resize
-  // or when the same user opens the portal on a screen with a different height.
   const clampPosition = useCallback((ratio: number) => {
     if (typeof window === "undefined" || window.innerHeight <= 0) return ratio;
 
@@ -294,7 +308,6 @@ export const CalibrationReminderFloatingButton: React.FC<{
     const minimum = (widgetHeight / 2 + margin) / viewportHeight;
     const maximum = 1 - minimum;
 
-    // For unusually short viewports, centering is safer than forcing an invalid range.
     if (maximum < minimum) return 0.5;
     return Math.min(maximum, Math.max(minimum, ratio));
   }, []);
@@ -312,11 +325,10 @@ export const CalibrationReminderFloatingButton: React.FC<{
       moved: false,
     };
 
-    // Pointer capture keeps dragging reliable if the pointer briefly leaves the handle.
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
-      // The browser may already have released the pointer; normal pointer events still work.
+      // Ignore if pointer capture is already released
     }
   };
 
@@ -331,8 +343,6 @@ export const CalibrationReminderFloatingButton: React.FC<{
     event.preventDefault();
     drag.lastRatio = clampPosition(drag.startRatio + deltaY / window.innerHeight);
 
-    // Move the existing DOM node directly during the gesture. React state is committed
-    // only on release, avoiding a render for every pointer-move event.
     if (containerRef.current) {
       containerRef.current.style.top = `${drag.lastRatio * 100}%`;
     }
@@ -349,9 +359,8 @@ export const CalibrationReminderFloatingButton: React.FC<{
       try {
         localStorage.setItem(CALIBRATION_REMINDER_POSITION_KEY, String(drag.lastRatio));
       } catch {
-        // Dragging still works for this session if browser storage is unavailable.
+        // Ignore storage failure
       }
-      // Do not leave a stale suppression flag if the browser does not synthesize click.
       window.setTimeout(() => {
         suppressClickRef.current = false;
       }, 0);
@@ -368,7 +377,6 @@ export const CalibrationReminderFloatingButton: React.FC<{
     setExpanded(true);
   };
 
-  // When opening the larger panel or resizing the browser, keep the entire widget on-screen.
   useEffect(() => {
     const keepInBounds = () => {
       const nextPosition = clampPosition(verticalPosition);
@@ -378,7 +386,7 @@ export const CalibrationReminderFloatingButton: React.FC<{
       try {
         localStorage.setItem(CALIBRATION_REMINDER_POSITION_KEY, String(nextPosition));
       } catch {
-        // Position clamping should not depend on storage availability.
+        // Ignore storage failure
       }
     };
 
@@ -402,8 +410,8 @@ export const CalibrationReminderFloatingButton: React.FC<{
       aria-label="Calibration reminder shortcut"
     >
       {expanded ? (
-        <div className="max-h-[calc(100vh-1.5rem)] overflow-hidden rounded-l-2xl border border-r-0 border-indigo-100 bg-white shadow-[0_12px_36px_-12px_rgba(15,23,42,0.35)]">
-          <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-white px-3 py-3">
+        <div className="max-h-[calc(100vh-1.5rem)] overflow-hidden rounded-l-2xl border border-r-0 border-blue-100 bg-white shadow-[0_12px_36px_-12px_rgba(15,23,42,0.35)]">
+          <div className="flex items-center gap-2 bg-gradient-to-r from-blue-50 to-white px-3 py-3">
             <div
               className="group flex min-w-0 flex-1 cursor-grab select-none items-center gap-3 touch-none active:cursor-grabbing"
               onPointerDown={handlePointerDown}
@@ -414,7 +422,7 @@ export const CalibrationReminderFloatingButton: React.FC<{
               aria-label="Drag calibration reminder panel up or down"
             >
               <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-300 opacity-70 transition-colors group-hover:text-slate-400" aria-hidden="true" />
-              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md ring-2 ring-indigo-100">
+              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md ring-2 ring-blue-100">
                 <Bell className="h-5 w-5" />
                 {count > 0 && (
                   <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">
@@ -436,7 +444,7 @@ export const CalibrationReminderFloatingButton: React.FC<{
             <button
               type="button"
               onClick={() => setExpanded(false)}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-400"
               aria-label="Collapse calibration reminders to the right edge"
               title="Collapse"
             >
@@ -448,7 +456,7 @@ export const CalibrationReminderFloatingButton: React.FC<{
             <button
               type="button"
               onClick={onOpen}
-              className="inline-flex w-full items-center justify-between gap-3 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              className="inline-flex w-full items-center justify-between gap-3 rounded-xl bg-blue-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               aria-label={accessibleLabel}
             >
               <span>{actionLabel}</span>
@@ -459,11 +467,11 @@ export const CalibrationReminderFloatingButton: React.FC<{
               <button
                 type="button"
                 onClick={onOpenExplorer}
-                className="group mt-2 inline-flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2"
+                className="group mt-2 inline-flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
                 aria-label="Open reminder explorer to search all calibration reminders"
               >
                 <span>Open Reminder Explorer</span>
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition group-hover:bg-indigo-100 group-hover:text-indigo-700">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition group-hover:bg-blue-100 group-hover:text-blue-700">
                   <ArrowUpRight className="h-4 w-4" />
                 </span>
               </button>
@@ -478,13 +486,13 @@ export const CalibrationReminderFloatingButton: React.FC<{
           onPointerUp={handlePointerEnd}
           onPointerCancel={handlePointerEnd}
           onClick={handleExpandClick}
-          className="relative flex h-28 w-11 touch-none select-none flex-col items-center justify-center gap-2 rounded-l-2xl border border-r-0 border-indigo-200 bg-white/95 text-indigo-700 shadow-lg shadow-slate-900/10 backdrop-blur transition hover:w-12 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 cursor-grab active:cursor-grabbing"
+          className="relative flex h-28 w-11 touch-none select-none flex-col items-center justify-center gap-2 rounded-l-2xl border border-r-0 border-blue-200 bg-white/95 text-blue-700 shadow-lg shadow-slate-900/10 backdrop-blur transition hover:w-12 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 cursor-grab active:cursor-grabbing"
           aria-label={`Expand ${accessibleLabel}`}
           aria-expanded={false}
           title={`${accessibleLabel} — drag up or down to reposition`}
         >
           <GripVertical className="h-3.5 w-3.5 text-slate-300 opacity-70" aria-hidden="true" />
-          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-md ring-2 ring-indigo-100">
+          <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md ring-2 ring-blue-100">
             <Bell className="h-4 w-4" />
             {count > 0 && (
               <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">
@@ -509,10 +517,10 @@ export const useCalibrationReminder = () => {
     setLoading(true);
     setError(null);
     try {
- const res = await api.get<CalibrationReminderResponse>(API_ENDPOINT, {
-        params: { days_ahead: 45 }
+      const res = await api.get<CalibrationReminderResponse>(API_ENDPOINT, {
+        params: { days_ahead: 45 },
       });
-       const payload = res.data || null;
+      const payload = res.data || null;
       setData(payload);
 
       const newestId =
@@ -564,10 +572,17 @@ export const useCalibrationReminder = () => {
 
 export const CalibrationReminderWidget: React.FC<{
   onCustomerSelect?: (customerId: number) => void;
-}> = ({ onCustomerSelect }) => {
+  baseRoutePrefix?: "/engineer" | "/admin";
+}> = ({ onCustomerSelect, baseRoutePrefix }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const reminder = useCalibrationReminder();
   const total = reminder.data?.total_due_count ?? 0;
+
+  const resolvedPrefix = useMemo(() => {
+    if (baseRoutePrefix) return baseRoutePrefix;
+    return location.pathname.startsWith("/admin") ? "/admin" : "/engineer";
+  }, [baseRoutePrefix, location.pathname]);
 
   const handleCustomerSelect = (customerId: number) => {
     reminder.dismiss();
@@ -575,14 +590,14 @@ export const CalibrationReminderWidget: React.FC<{
       if (onCustomerSelect) {
         onCustomerSelect(customerId);
       } else {
-        navigate(`/engineer/calibration-reminders/${customerId}`);
+        navigate(`${resolvedPrefix}/calibration-reminders/${customerId}`);
       }
     }, 0);
   };
 
   const handleOpenExplorer = () => {
     reminder.dismiss();
-    navigate(`/engineer/calibration-reminders/0`);
+    navigate(`${resolvedPrefix}/calibration-reminders/0`);
   };
 
   return (
@@ -605,229 +620,5 @@ export const CalibrationReminderWidget: React.FC<{
     </>
   );
 };
-
-export const CalibrationReminderDetailsPage: React.FC = () => {
-  const navigate = useNavigate();
-  const { customerId } = useParams<{ customerId: string }>();
-
-  const [data, setData] = useState<CalibrationReminderResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [search, setSearch] = useState("");
-  const [lotFilter, setLotFilter] = useState("");
-  const [sortBy, setSortBy] = useState<"due_asc" | "due_desc" | "cert_asc" | "nepl_asc">("due_asc");
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        const res = await api.get<CalibrationReminderResponse>(API_ENDPOINT);
-        setData(res.data);
-      } catch (e: unknown) {
-        const msg =
-          e && typeof e === "object" && "response" in e
-            ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
-            : null;
-        setError(msg || "Failed to load reminder details.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-  }, []);
-
-  const group = useMemo<CalibrationReminderGroup | undefined>(() => {
-    const id = Number(customerId);
-    return data?.groups.find((g) => g.customer_id === id);
-  }, [data, customerId]);
-
-  const certificates = group?.certificates ?? [];
-
-  const filteredCertificates = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const lot = lotFilter.trim().toLowerCase();
-
-    const items = certificates.filter((cert) => {
-      const haystack = [
-        cert.certificate_no,
-        cert.nepl_id,
-        cert.serial_no,
-        cert.srf_no,
-        cert.material_description,
-        cert.make,
-        cert.model,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      const lotHaystack = [cert.nepl_id, cert.certificate_no, cert.srf_no]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      const matchesSearch = !q || haystack.includes(q);
-      const matchesLot = !lot || lotHaystack.includes(lot);
-
-      return matchesSearch && matchesLot;
-    });
-
-    items.sort((a, b) => {
-      switch (sortBy) {
-        case "due_desc":
-          return b.days_until_due - a.days_until_due;
-        case "cert_asc":
-          return (a.certificate_no || "").localeCompare(b.certificate_no || "", undefined, {
-            numeric: true,
-            sensitivity: "base",
-          });
-        case "nepl_asc":
-          return (a.nepl_id || "").localeCompare(b.nepl_id || "", undefined, {
-            numeric: true,
-            sensitivity: "base",
-          });
-        case "due_asc":
-        default:
-          return a.days_until_due - b.days_until_due;
-      }
-    });
-
-    return items;
-  }, [certificates, search, lotFilter, sortBy]);
-
-  return (
-    <div className="p-6 md:p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
-      <div className="flex items-center justify-between gap-3 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Calibration due details</h2>
-          <p className="text-sm text-slate-600 mt-1">
-            {group?.customer_name || "Customer"} · {group?.customer_email || "—"}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </button>
-      </div>
-
-      {loading && <div className="text-sm text-slate-500">Loading...</div>}
-
-      {!loading && error && (
-        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
-          {error}
-        </div>
-      )}
-
-      {!loading && !error && !group && (
-        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm">
-          No customer group found.
-        </div>
-      )}
-
-      {!loading && group && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <InfoCard label="Customer ID" value={String(group.customer_id)} />
-            <InfoCard label="Due count" value={String(group.due_count)} />
-            <InfoCard label="Email" value={group.customer_email || "—"} />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-2">
-              <Search className="h-4 w-4 text-gray-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full outline-none text-sm"
-                placeholder="Search certificate, NEPL, serial, SRF..."
-              />
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-2">
-              <Filter className="h-4 w-4 text-gray-400" />
-              <input
-                value={lotFilter}
-                onChange={(e) => setLotFilter(e.target.value)}
-                className="w-full outline-none text-sm"
-                placeholder="Lot filter e.g. 26001-1"
-              />
-            </div>
-
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none"
-            >
-              <option value="due_asc">Sort: Due date (earliest)</option>
-              <option value="due_desc">Sort: Due date (latest)</option>
-              <option value="cert_asc">Sort: Certificate no</option>
-              <option value="nepl_asc">Sort: NEPL ID</option>
-            </select>
-          </div>
-
-          <div className="mb-4 text-sm text-slate-600">
-            Showing <span className="font-semibold">{filteredCertificates.length}</span> of{" "}
-            <span className="font-semibold">{certificates.length}</span> certificate(s)
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border border-gray-200 rounded-xl overflow-hidden">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr className="text-left text-slate-600">
-                  <th className="px-3 py-2">Certificate</th>
-                  <th className="px-3 py-2">NEPL</th>
-                  <th className="px-3 py-2">Serial No</th>
-                  <th className="px-3 py-2">Due Date</th>
-                  <th className="px-3 py-2">Days Left</th>
-                  <th className="px-3 py-2">Issued</th>
-                  <th className="px-3 py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCertificates.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
-                      No matching certificates found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredCertificates.map((cert) => (
-                    <tr key={cert.certificate_id} className="border-t border-slate-100">
-                      <td className="px-3 py-3 font-medium text-slate-900">{cert.certificate_no}</td>
-                      <td className="px-3 py-3 text-slate-700">{cert.nepl_id || "—"}</td>
-                      <td className="px-3 py-3 text-slate-700">{cert.serial_no || "—"}</td>
-                      <td className="px-3 py-3 text-slate-700">{formatDate(cert.recommended_cal_due_date)}</td>
-                      <td className="px-3 py-3 text-slate-700">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 border border-amber-100">
-                          <CalendarDays className="h-3.5 w-3.5" />
-                          {cert.days_until_due}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-slate-700">{formatDate(cert.issued_at)}</td>
-                      <td className="px-3 py-3 text-slate-700">{cert.status || "—"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
-const InfoCard: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-    <div className="text-xs uppercase tracking-wide text-gray-500 font-semibold">{label}</div>
-    <div className="mt-1 text-sm font-semibold text-gray-900 break-words">{value}</div>
-  </div>
-);
 
 export default CalibrationReminderWidget;

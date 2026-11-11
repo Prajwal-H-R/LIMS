@@ -71,7 +71,7 @@ from backend.routes.calibration_booking_router import router as calibration_book
 from backend.routes.change_password_router import router as change_password_router
 
 from backend.routes.wcc import router as wcc_router
-
+from backend.routes.analytics import router as analytics
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.calibration_reminders.scheduler import run_daily_calibration_reminder_job
 # --- BACKGROUND TASKS & LIFESPAN ---
@@ -247,7 +247,7 @@ app.include_router(wcc_router, prefix="/api")  # Added WCC router
 
 app.include_router(certificate_config, prefix="/api")
 
-
+app.include_router(analytics)  # Added Analytics router
 # --- ROOT ENDPOINT ---
 @app.get("/")
 def root():
