@@ -19,9 +19,16 @@ COPY backend/requirements.txt /app/backend/requirements.txt
 RUN python -m pip install --upgrade "pip" "setuptools==78.1.1" "wheel" \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 
-# Install browser binaries into a shared path.
+# Install browser binaries and required system dependencies.
 RUN mkdir -p /ms-playwright \
     && python -m playwright install --with-deps chromium \
+    \
+    # Apply Debian security updates for installed OS packages.
+    && apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    \
+    # Remove package metadata to reduce image size.
+    && rm -rf /var/lib/apt/lists/* \
     && chmod -R 755 /ms-playwright
 
 # Copy application source code.
