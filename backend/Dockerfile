@@ -1,3 +1,18 @@
+# --- Stage 1: Build Dependencies ---
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+ENV PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt .
+RUN pip wheel --no-deps --wheel-dir /app/wheels -r requirements.txt
+
+# --- Stage 2: Runtime ---
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,36 +23,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Install runtime PostgreSQL library only (much smaller than libpq-dev)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    curl \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy pre-built Python packages from builder
+COPY --from=builder /app/wheels /wheels
 COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-index --find-links=/wheels -r /app/backend/requirements.txt \
+    && rm -rf /wheels
 
-RUN python -m pip install --upgrade "pip" "setuptools==78.1.1" "wheel" \
-    && pip install --no-cache-dir -r /app/backend/requirements.txt
-
-# Install browser binaries and required system dependencies.
+# Install Playwright and clean apt cache in the same layer
 RUN mkdir -p /ms-playwright \
-    && python -m playwright install --with-deps chromium \
-    \
-    # Apply Debian security updates for installed OS packages.
-    && apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
-    \
-    # Remove package metadata to reduce image size.
+    && playwright install --with-deps chromium \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && chmod -R 755 /ms-playwright
 
-# Copy application source code.
-# Runtime upload directories are persisted through Docker Compose
-# bind mounts and are stored outside the project directory on the host.
 COPY backend /app/backend
 
-# Create the expected storage directories inside the image.
-# These are mount points only; actual files will be stored on the host.
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/backend/uploads/inward_photos \
                 /app/backend/certificate_assets \
@@ -46,9 +51,6 @@ RUN useradd --create-home --uid 10001 appuser \
                 /app/backend/uploads/inward_photos \
                 /app/backend/certificate_assets
 
-# Run the application as a non-root user.
 USER appuser
-
 EXPOSE 8000
-
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -68,13 +68,13 @@ def get_current_user(
  
 def check_staff_role(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     """
-    Dependency that ensures the current user has staff, engineer, or admin role.
+    Dependency that ensures the current user has customer or admin role.
     """
-    allowed_roles = ["staff", "engineer", "admin"]
+    allowed_roles = ["customer", "admin"]
     if current_user.role.lower() not in allowed_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation forbidden: Insufficient privileges. Staff, engineer, or admin role required."
+            detail="Operation forbidden: Insufficient privileges. customer or admin role required."
         )
     return current_user
  
