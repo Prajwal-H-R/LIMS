@@ -1,7 +1,21 @@
-# --- Final Stage ---
-# Switch from bookworm to alpine
+# --- Stage 1: Build ---
+FROM node:22-bookworm-slim AS build
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+COPY frontend /app
+
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+RUN npm run build
+
+# --- Stage 2: Final Nginx Image ---
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 
+# Temporarily use root for OS package updates and Nginx configuration
 USER root
 
 # Alpine uses apk instead of apt-get
@@ -36,5 +50,8 @@ EOF
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 8080
+
+# Run the application as a non-root user
 USER nginx
+
 CMD ["nginx", "-g", "daemon off;"]
