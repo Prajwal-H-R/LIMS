@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python Dependencies (Offline)
 # =========================================================
 
-# Copy pre-built wheels from builder
+# Copy pre-built dependency wheels from builder
 COPY --from=builder /app/wheels /wheels
 COPY backend/requirements.txt /app/backend/requirements.txt
 
