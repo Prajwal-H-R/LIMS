@@ -19,7 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt ./requirements.txt
 
 # Build wheels for all direct and transitive dependencies
-# Do NOT use --no-deps
 RUN python -m pip wheel \
     --wheel-dir=/app/wheels \
     -r requirements.txt
@@ -41,14 +40,21 @@ WORKDIR /app
 
 
 # =========================================================
-# Install Runtime System Dependencies
+# Update OS Packages and Install Runtime Libraries
 # =========================================================
 
-# libpq5     : PostgreSQL runtime library
-# libatomic1 : Required by Playwright's bundled Node.js driver
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    libatomic1 \
+# Upgrade existing Debian packages to receive security fixes.
+# Install required PostgreSQL and Playwright runtime libraries.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+        libpq5 \
+        libatomic1 \
+    && zlib_version="$(dpkg-query -W -f='${Version}' zlib1g)" \
+    && echo "Installed zlib1g version: ${zlib_version}" \
+    && dpkg --compare-versions "$zlib_version" ge \
+        "1:1.3.dfsg+really1.3.1-1+deb13u1" \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -56,11 +62,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python Dependencies (Offline)
 # =========================================================
 
-# Copy pre-built dependency wheels from builder
 COPY --from=builder /app/wheels /wheels
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-# Install all direct and transitive dependencies offline
 RUN python -m pip install \
     --no-index \
     --find-links=/wheels \
@@ -75,7 +79,6 @@ RUN python -m pip install \
 # Install Playwright Chromium and OS Dependencies
 # =========================================================
 
-# Install required Linux libraries for Chromium
 RUN mkdir -p /ms-playwright \
     && python -m playwright install-deps chromium \
     && python -m playwright install chromium \
