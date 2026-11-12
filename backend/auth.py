@@ -70,7 +70,7 @@ def check_staff_role(current_user: UserResponse = Depends(get_current_user)) -> 
     """
     Dependency that ensures the current user has customer or admin role.
     """
-    allowed_roles = ["customer", "admin"]
+    allowed_roles = ["engineer", "customer", "admin"]
     if current_user.role.lower() not in allowed_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

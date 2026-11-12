@@ -408,7 +408,7 @@ CREATE TABLE IF NOT EXISTS public.inward
     srf_no character varying(100) COLLATE pg_catalog."default" NOT NULL,
     material_inward_date date NOT NULL,
     customer_dc_no character varying(255) COLLATE pg_catalog."default",
-    customer_dc_date date NOT NULL,
+    customer_dc_date date ,
     customer_details character varying(255) COLLATE pg_catalog."default",
     received_by character varying COLLATE pg_catalog."default",
     created_by integer,
