@@ -19,9 +19,13 @@ interface FirForReview {
 }
 
 interface FinalReport {
+  id?: number;
   inward_id: number;
+  dispatch_id?: number | null;
   srf_no: string;
   report_sent_at?: string;
+  status?: string;
+  customer_decision?: string | null;
 }
 
 const formatSafeDate = (dateStr?: string | null) => {
@@ -157,19 +161,26 @@ export const CustomerFirListView: React.FC<CustomerFirListViewProps> = ({ firs, 
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200">
-                                    {finals.length > 0 ? (finals.map((report) => (
-                                        <tr key={report.inward_id} className="hover:bg-slate-50 transition-colors">
-                                            <td className="p-4 font-medium text-slate-800">{report.srf_no}</td>
-                                            <td className="p-4 text-slate-600">
-                                                {formatSafeDate(report.report_sent_at)}
-                                            </td>
-                                            <td className="p-4">
-                                                <Link to={`/customer/final-report/${report.inward_id}`} className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 text-sm transition-colors shadow-sm">
-                                                    <Eye className="h-4 w-4" /> View
-                                                </Link>
-                                            </td>
-                                        </tr>
-                                    ))) : (
+                                    {finals.length > 0 ? (finals.map((report) => {
+                                        const reportUrl = report.dispatch_id
+                                            ? `/customer/final-report/${report.inward_id}?dispatch_id=${report.dispatch_id}`
+                                            : `/customer/final-report/${report.inward_id}`;
+                                        const rowKey = report.id ?? `${report.inward_id}-${report.dispatch_id ?? "legacy"}`;
+
+                                        return (
+                                            <tr key={rowKey} className="hover:bg-slate-50 transition-colors">
+                                                <td className="p-4 font-medium text-slate-800">{report.srf_no}</td>
+                                                <td className="p-4 text-slate-600">
+                                                    {formatSafeDate(report.report_sent_at)}
+                                                </td>
+                                                <td className="p-4">
+                                                    <Link to={reportUrl} className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 text-sm transition-colors shadow-sm">
+                                                        <Eye className="h-4 w-4" /> View
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })) : (
                                         <tr>
                                             <td colSpan={4} className="p-20 text-slate-500 text-center">
                                                 <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-20" />

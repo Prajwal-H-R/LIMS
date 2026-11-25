@@ -5,12 +5,15 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    ForeignKey,
+    Integer,
     String,
     Text,
     func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 
 from backend.db import Base
 
@@ -37,11 +40,30 @@ class WorkCompletionCertificate(Base):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    inward_id = Column(BigInteger, nullable=True, unique=True)
+    inward_id = Column(
+        Integer,
+        ForeignKey("inward.inward_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    dispatch_id = Column(
+        Integer,
+        ForeignKey("dispatch_batches.dispatch_id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    dispatched_to_customer_id = Column(
+        Integer,
+        ForeignKey("customers.customer_id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
     # Vendor details
     vendor_company_details = Column(String, nullable=True)
     tax_registration_details = Column(String, nullable=True)
-    #New field added for Nextage Dispatch DC No and Date
+    # New field added for Nextage Dispatch DC No and Date
     nextage_dispatch_dc_no = Column(String, nullable=True)
     date = Column(Date, nullable=True)
 
@@ -89,7 +111,6 @@ class WorkCompletionCertificate(Base):
     # Remarks
     remarks = Column(Text, nullable=True)
 
-    
     # Signature details: JSONB object
     signature_details = Column(
         JSONB,
@@ -117,3 +138,5 @@ class WorkCompletionCertificate(Base):
         server_default=func.current_timestamp(),
         onupdate=func.current_timestamp(),
     )
+
+    dispatch_batch = relationship("DispatchBatch", back_populates="wcc")

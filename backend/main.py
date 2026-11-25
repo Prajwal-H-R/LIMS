@@ -74,6 +74,7 @@ from backend.routes.wcc import router as wcc_router
 from backend.routes.analytics import router as analytics
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.calibration_reminders.scheduler import run_daily_calibration_reminder_job
+from backend.routes.dispatch_batch import router as dispatch_batch_router
 # --- BACKGROUND TASKS & LIFESPAN ---
 async def automated_daily_maintenance():
     while True:
@@ -248,6 +249,7 @@ app.include_router(wcc_router, prefix="/api")  # Added WCC router
 app.include_router(certificate_config, prefix="/api")
 
 app.include_router(analytics)  # Added Analytics router
+app.include_router(dispatch_batch_router, prefix="/api")  # Added Dispatch Batch router
 # --- ROOT ENDPOINT ---
 @app.get("/")
 def root():

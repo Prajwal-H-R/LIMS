@@ -1,4 +1,3 @@
-
 import React, {
   useCallback,
   useEffect,
@@ -176,6 +175,129 @@ const getCustomerName = (item: AnyRecord): string => {
   return normalizeText(value) || "—";
 };
 
+/**
+ * Final Inspection reports are dispatched per dispatch batch, so the report
+ * destination can differ from the inward's originating customer.
+ * Both the list response and the dispatch details response describe the
+ * destination under slightly different key names; normalise them all here.
+ */
+const extractCustomerLabel = (value: any): string => {
+  if (value === null || value === undefined) return "";
+
+  // Numeric values are customer IDs, never display labels.
+  if (typeof value === "number") return "";
+
+  if (typeof value !== "object") {
+    const text = normalizeText(value);
+
+    // The dispatch endpoints fall back to literal "N/A" / "None" strings.
+    if (/^(n\/a|none|null|nan|-)$/i.test(text)) return "";
+
+    return text;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => extractCustomerLabel(entry))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  const text = normalizeText(
+    value.customer_details ??
+      value.customer_name ??
+      value.name ??
+      value.location_name ??
+      value.label ??
+      ""
+  );
+
+  return /^(n\/a|none|null|nan|-)$/i.test(text) ? "" : text;
+};
+
+const DISPATCHED_TO_NAME_KEYS = [
+  "dispatched_to_name",
+  "dispatched_to_customer_name",
+  "dispatched_to_customer_details",
+  "dispatched_to_customer",
+  "dispatched_to",
+  "dispatched_to_label",
+  "destination_customer_name",
+  "destination_customer_details",
+  "destination_customer",
+  "dest_customer_name",
+];
+
+const DISPATCHED_TO_LOCATION_KEYS = [
+  "dispatched_to_location",
+  "dispatched_to_branch",
+  "destination_location",
+  "dest_location",
+];
+
+const getDispatchedTo = (item: AnyRecord | null | undefined): string => {
+  if (!item) return "—";
+
+  let name = "";
+  let location = "";
+
+  for (const key of DISPATCHED_TO_NAME_KEYS) {
+    const raw = item[key];
+    const value = extractCustomerLabel(raw);
+
+    if (!value) continue;
+
+    name = value;
+
+    // A destination customer object can also carry its own location.
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      location =
+        extractCustomerLabel(raw.location_name) ||
+        extractCustomerLabel(raw.location) ||
+        "";
+    }
+
+    break;
+  }
+
+  if (!location) {
+    for (const key of DISPATCHED_TO_LOCATION_KEYS) {
+      const value = extractCustomerLabel(item[key]);
+
+      if (value) {
+        location = value;
+        break;
+      }
+    }
+  }
+
+  if (!name && !location) return "—";
+  if (!name) return location;
+  if (!location) return name;
+
+  return `${name} · ${location}`;
+};
+
+const getDispatchId = (item: AnyRecord | null | undefined): number | null => {
+  const raw =
+    item?.dispatch_id ?? item?.dispatch_batch_id ?? item?.__dispatchId;
+
+  if (raw === null || raw === undefined || raw === "") return null;
+
+  const parsed = Number(raw);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const appendQueryParam = (
+  url: string,
+  key: string,
+  value: string | number
+): string =>
+  `${url}${url.includes("?") ? "&" : "?"}${encodeURIComponent(
+    key
+  )}=${encodeURIComponent(value)}`;
+
 const formatDate = (value?: string | null): string => {
   if (!value) return "—";
 
@@ -273,10 +395,7 @@ const fetchAllPages = async (
 };
 
 /**
- * Keep final-report decision lookups bounded.
- * The supplied final-inspection list endpoint does not return
- * customer_decision, so use the existing customer-view endpoint
- * to hydrate dispatched reports.
+ * Keep final-report lookups bounded.
  */
 const mapInBatches = async <T, R>(
   rows: T[],
@@ -293,6 +412,43 @@ const mapInBatches = async <T, R>(
   }
 
   return results;
+};
+
+/**
+ * Resolve the dispatch destination of a Final Inspection report.
+ *
+ * `GET /final-inspections/inward/{inward_id}/details` is the only existing
+ * endpoint that exposes the dispatch batch destination
+ * (`dispatched_to_customer_id` -> customer name / `dispatched_to_location`).
+ * It is used only when the list row does not already carry the destination.
+ */
+const fetchFinalDispatchMeta = async (
+  inwardId: number,
+  dispatchId: number | null
+): Promise<AnyRecord> => {
+  const url = dispatchId
+    ? appendQueryParam(
+        `/final-inspections/inward/${inwardId}/details`,
+        "dispatch_id",
+        dispatchId
+      )
+    : `/final-inspections/inward/${inwardId}/details`;
+
+  const response = await api.get(url);
+  const details = response.data || {};
+
+  return {
+    dispatched_to:
+      details.dispatched_to ??
+      details.dispatched_to_name ??
+      details.dispatched_to_customer_name ??
+      details.dispatched_to_customer_details ??
+      details.customer_name ??
+      null,
+    dispatched_to_location: details.dispatched_to_location ?? null,
+    batch_no: details.batch_no ?? null,
+    origin_customer_name: details.origin_customer_name ?? null,
+  };
 };
 
 const getApprovalTabs = (type: ApprovalType): ApprovalTabConfig[] => {
@@ -319,6 +475,15 @@ const getApprovalTabs = (type: ApprovalType): ApprovalTabConfig[] => {
 };
 
 const getDefaultTab = (_type: ApprovalType): ApprovalTab => "pending";
+
+const getDecisionState = (decision: unknown): ApprovalState => {
+  const value = normalizeText(decision).toUpperCase();
+
+  if (value === "APPROVED") return "approved";
+  if (value === "REJECTED") return "rejected";
+
+  return "pending";
+};
 
 const getApprovalState = (
   type: ApprovalType,
@@ -371,16 +536,9 @@ const getApprovalState = (
     return "pending";
   }
 
-  const decision = normalizeText(
-    record?.customer_decision ||
-    record?.decision ||
-    record?.status
-  ).toUpperCase();
-
-  if (decision === "APPROVED") return "approved";
-  if (decision === "REJECTED") return "rejected";
-
-  return "pending";
+  return getDecisionState(
+    record?.customer_decision || record?.decision || record?.status
+  );
 };
 
 const getStatusPresentation = (
@@ -1230,9 +1388,10 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
   // ============================================================
 
   const loadFinalRows = useCallback(async (): Promise<AnyRecord[]> => {
-    // The existing GET /final-inspections/ list returns dispatched state.
-    // The supplied router does not return customer_decision in each list row.
-    // Use the existing customer-view endpoint to retrieve the actual decision.
+    // The existing GET /final-inspections/ list returns dispatched state and
+    // the customer decision, but it does not describe the dispatch batch
+    // destination. Hydrate only the missing "dispatched to" value from the
+    // existing dispatch-details endpoint (batch destination customer).
 
     const allRows = await fetchAllPages(
       "/final-inspections/",
@@ -1254,50 +1413,69 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
         };
       }
 
-      // Some deployed router revisions may already return this field.
-      // Avoid an additional request when it is present.
+      const dispatchId = getDispatchId(row);
+      const stateFromList = getDecisionState(row?.customer_decision);
+      const hasDestination = getDispatchedTo(row) !== "—";
 
-      if (row?.customer_decision !== undefined) {
-        const decision = normalizeText(
-          row.customer_decision
-        ).toUpperCase();
+      // `null` means "awaiting decision"; only an absent key means the list
+      // response comes from an older router that needs the decision hydrated.
+      const hasDecision = row?.customer_decision !== undefined;
 
-        const state: ApprovalState =
-          decision === "APPROVED"
-            ? "approved"
-            : decision === "REJECTED"
-              ? "rejected"
-              : "pending";
+      const hydrated: AnyRecord = {
+        ...row,
+        __approvalState: stateFromList,
+      };
 
-        return {
-          ...row,
-          __approvalState: state,
-        };
+      // Fast path: the list already carries everything the table renders.
+      if (hasDestination && hasDecision) return hydrated;
+
+      // Older list responses omit the decision; fall back to the existing
+      // customer-view endpoint so the tab assignment stays correct.
+      if (!hasDecision) {
+        try {
+          const decisionUrl = dispatchId
+            ? appendQueryParam(
+                ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(inwardId),
+                "dispatch_id",
+                dispatchId
+              )
+            : ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(inwardId);
+
+          const decisionResponse = await api.get(decisionUrl);
+          const inspection = decisionResponse.data || {};
+
+          hydrated.__approvalState = getDecisionState(
+            inspection?.customer_decision
+          );
+        } catch (error) {
+          console.warn(
+            `Unable to load the customer decision for final report ${inwardId}:`,
+            error
+          );
+        }
       }
 
-      const response = await api.get(
-        ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(inwardId)
-      );
+      if (!hasDestination) {
+        try {
+          const meta = await fetchFinalDispatchMeta(inwardId, dispatchId);
 
-      const inspection = response.data || {};
+          hydrated.dispatched_to =
+            meta.dispatched_to ?? hydrated.dispatched_to;
+          hydrated.dispatched_to_location =
+            meta.dispatched_to_location ?? hydrated.dispatched_to_location;
+          hydrated.batch_no = meta.batch_no ?? hydrated.batch_no;
+          hydrated.origin_customer_name =
+            meta.origin_customer_name ?? hydrated.origin_customer_name;
+        } catch (error) {
+          // A missing destination must never hide the report from the list.
+          console.warn(
+            `Unable to load the dispatch destination for final report ${inwardId}:`,
+            error
+          );
+        }
+      }
 
-      const decision = normalizeText(
-        inspection?.customer_decision
-      ).toUpperCase();
-
-      const state: ApprovalState =
-        decision === "APPROVED"
-          ? "approved"
-          : decision === "REJECTED"
-            ? "rejected"
-            : "pending";
-
-      return {
-        ...row,
-        ...inspection,
-        inward_id: inwardId,
-        __approvalState: state,
-      };
+      return hydrated;
     });
   }, []);
 
@@ -1411,14 +1589,45 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
           // Match CustomerFinalReportView exactly: this endpoint returns the
           // full customer-facing final report, including its equipment rows,
           // customer decision, remarks and report dispatch metadata.
-          response = await api.get(
-            ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(id)
-          );
+          const dispatchId = getDispatchId(item);
 
-          setDetail({
+          const customerViewUrl = dispatchId
+            ? appendQueryParam(
+                ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(id),
+                "dispatch_id",
+                dispatchId
+              )
+            : ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(id);
+
+          response = await api.get(customerViewUrl);
+
+          const report: AnyRecord = {
             ...item,
             ...(response.data || {}),
-          });
+          };
+
+          // Keep the dispatch destination visible even when the list response
+          // did not carry it (older list responses omit the destination).
+          if (getDispatchedTo(report) === "—") {
+            try {
+              const meta = await fetchFinalDispatchMeta(id, dispatchId);
+
+              report.dispatched_to =
+                meta.dispatched_to ?? report.dispatched_to;
+              report.dispatched_to_location =
+                meta.dispatched_to_location ?? report.dispatched_to_location;
+              report.batch_no = meta.batch_no ?? report.batch_no;
+              report.origin_customer_name =
+                meta.origin_customer_name ?? report.origin_customer_name;
+            } catch (dispatchError) {
+              console.warn(
+                `Unable to load the dispatch destination for final report ${id}:`,
+                dispatchError
+              );
+            }
+          }
+
+          setDetail(report);
 
           // WCC is linked to the same inward_id. A missing WCC (404) is valid
           // and must not block the final inspection report from opening.
@@ -1778,13 +1987,21 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
           ? `${previousRemarks}\n\n[Delegated approval] ${delegatedNote}`
           : `[Delegated approval] ${delegatedNote}`;
 
-        await api.post(
-          ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(id),
-          {
-            decision: "APPROVED",
-            remarks: note,
-          }
-        );
+        // Split dispatches share one inward_id, so scope the decision to the
+        // exact dispatch batch that was opened from the list.
+        const dispatchId = getDispatchId(selectedItem);
+        const decisionUrl = dispatchId
+          ? appendQueryParam(
+              ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(id),
+              "dispatch_id",
+              dispatchId
+            )
+          : ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(id);
+
+        await api.post(decisionUrl, {
+          decision: "APPROVED",
+          remarks: note,
+        });
 
         setDetail((current) =>
           current
@@ -1877,13 +2094,19 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
     try {
       const note = `[Delegated approval - rejection] ${rejectionRemarks.trim()}`;
 
-      await api.post(
-        ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(id),
-        {
-          decision: "REJECTED",
-          remarks: note,
-        }
-      );
+      const dispatchId = getDispatchId(selectedItem);
+      const decisionUrl = dispatchId
+        ? appendQueryParam(
+            ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(id),
+            "dispatch_id",
+            dispatchId
+          )
+        : ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(id);
+
+      await api.post(decisionUrl, {
+        decision: "REJECTED",
+        remarks: note,
+      });
 
       const updatedReport = {
         ...detail,
@@ -1968,6 +2191,7 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
       return [
         getSrfNumber(item),
         getCustomerName(item),
+        getDispatchedTo(item),
         item?.customer_dc_no,
         item?.status,
         item?.inspection_status,
@@ -2020,6 +2244,10 @@ export const AdminDelegatedApproval: React.FC<AdminDelegatedApprovalProps> = ({
   );
 
   const detailSrfNo = getSrfNumber(
+    detail || selectedItem || {}
+  );
+
+  const detailDispatchedTo = getDispatchedTo(
     detail || selectedItem || {}
   );
 
@@ -2281,6 +2509,12 @@ Manage pending customer actions and complete the required approvals across inspe
                   <div className="flex border-b border-slate-50 pb-2">
                     <span className="font-bold text-slate-500 w-32">DC Number:</span>
                     <span className="text-slate-900 font-mono">{detail.customer_dc_no || "N/A"}</span>
+                  </div>
+                  <div className="flex border-b border-slate-50 pb-2">
+                    <span className="font-bold text-slate-500 w-32">Dispatched To:</span>
+                    <span className="min-w-0 break-words text-slate-900">
+                      {detailDispatchedTo}
+                    </span>
                   </div>
                 </div>
 
@@ -2587,6 +2821,13 @@ Manage pending customer actions and complete the required approvals across inspe
               label="Customer"
               value={detailCustomer}
             />
+
+            {isFinal && (
+              <DetailField
+                label="Dispatched To"
+                value={detailDispatchedTo}
+              />
+            )}
 
             <DetailField
               label={isFinal ? "Report Sent" : "Inward Date"}
@@ -3132,6 +3373,12 @@ Manage pending customer actions and complete the required approvals across inspe
                     Customer
                   </th>
 
+                  {activeType === "final" && (
+                    <th className="px-5 py-4 font-semibold">
+                      Dispatched To
+                    </th>
+                  )}
+
                   <th className="px-5 py-4 font-semibold">
                     Inward Date
                   </th>
@@ -3156,6 +3403,7 @@ Manage pending customer actions and complete the required approvals across inspe
                 {filteredItems.map((item, index) => {
                   const id = getRecordId(activeType, item);
                   const state = getApprovalState(activeType, item);
+                  const dispatchId = getDispatchId(item);
 
                   const status = getStatusPresentation(
                     activeType,
@@ -3172,10 +3420,13 @@ Manage pending customer actions and complete the required approvals across inspe
                   ).length;
 
                   const isReadOnly = state !== "pending";
+                  const dispatchedTo = getDispatchedTo(item);
 
                   return (
                     <tr
-                      key={`${activeType}-${id}-${index}`}
+                      key={`${activeType}-${id}-${
+                        dispatchId ?? "na"
+                      }-${index}`}
                       className="transition hover:bg-slate-50/80"
                     >
                       <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">
@@ -3185,6 +3436,17 @@ Manage pending customer actions and complete the required approvals across inspe
                       <td className="min-w-[190px] px-5 py-4 text-slate-700">
                         {getCustomerName(item)}
                       </td>
+
+                      {activeType === "final" && (
+                        <td className="px-5 py-4 text-slate-600">
+                          <div
+                            className="max-w-[300px] truncate"
+                            title={dispatchedTo}
+                          >
+                            {dispatchedTo}
+                          </div>
+                        </td>
+                      )}
 
                       <td className="whitespace-nowrap px-5 py-4 text-slate-500">
                         <span className="inline-flex items-center gap-1.5">

@@ -1,19 +1,24 @@
 """FastAPI routes for Work Completion Certificates (WCC)."""
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.auth import check_staff_role, get_current_user
 from backend.db import get_db
+from backend.schemas.user_schemas import UserResponse
 from backend.schemas.wcc import WCCCreate, WCCResponse, WCCUpdate
 from backend.services.wcc import (
     create_wcc,
     delete_wcc,
     get_wcc,
+    get_wcc_by_dispatch_id,
     get_wcc_by_inward_id,
     list_wccs,
+    list_wccs_by_inward_id,
     update_wcc,
 )
 
@@ -23,6 +28,18 @@ router = APIRouter(
     prefix="/work-completion-certificates",
     tags=["Work Completion Certificates"],
 )
+
+
+def _resolve_customer_filter(current_user: UserResponse) -> Optional[int]:
+    """Return customer_id when logged-in user is a customer, else None for staff."""
+    if str(getattr(current_user, "role", "")).lower() == "customer":
+        if current_user.customer_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Customer account is not linked to a customer ID.",
+            )
+        return current_user.customer_id
+    return None
 
 
 def _raise_database_http_error(db: Session, exc: SQLAlchemyError) -> None:
@@ -35,9 +52,9 @@ def _raise_database_http_error(db: Session, exc: SQLAlchemyError) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "The WCC conflicts with an existing record. Verify that this inward "
+                "The WCC conflicts with an existing record. Verify that this dispatch batch "
                 "does not already have a WCC and that the WCC No is unique. "
-                "For an existing inward record, update its saved WCC instead of creating another."
+                "For an existing batch, update its saved WCC instead of creating another."
             ),
         ) from exc
 
@@ -56,9 +73,15 @@ def _raise_database_http_error(db: Session, exc: SQLAlchemyError) -> None:
 def create_work_completion_certificate(
     payload: WCCCreate,
     db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(check_staff_role),
 ) -> WCCResponse:
     try:
         return create_wcc(db, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except SQLAlchemyError as exc:
         _raise_database_http_error(db, exc)
 
@@ -69,12 +92,68 @@ def create_work_completion_certificate(
     summary="List work completion certificates",
 )
 def read_work_completion_certificates(
+    inward_id: Optional[int] = Query(default=None),
+    dispatch_id: Optional[int] = Query(default=None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
 ) -> list[WCCResponse]:
+    customer_filter = _resolve_customer_filter(current_user)
     try:
-        return list_wccs(db, skip=skip, limit=limit)
+        return list_wccs(
+            db,
+            skip=skip,
+            limit=limit,
+            inward_id=inward_id,
+            dispatch_id=dispatch_id,
+            customer_id_filter=customer_filter,
+        )
+    except SQLAlchemyError as exc:
+        _raise_database_http_error(db, exc)
+
+
+@router.get(
+    "/by-dispatch/{dispatch_id}",
+    response_model=WCCResponse,
+    summary="Get the WCC for a specific dispatch batch",
+)
+def read_wcc_by_dispatch_id(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
+) -> WCCResponse:
+    customer_filter = _resolve_customer_filter(current_user)
+    try:
+        record = get_wcc_by_dispatch_id(
+            db, dispatch_id, customer_id_filter=customer_filter
+        )
+    except SQLAlchemyError as exc:
+        _raise_database_http_error(db, exc)
+
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No WCC exists for dispatch batch {dispatch_id}.",
+        )
+    return record
+
+
+@router.get(
+    "/inward/{inward_id}/all",
+    response_model=list[WCCResponse],
+    summary="List all WCCs for an inward record (branch-isolated for customers)",
+)
+def read_all_wccs_by_inward_id(
+    inward_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
+) -> list[WCCResponse]:
+    customer_filter = _resolve_customer_filter(current_user)
+    try:
+        return list_wccs_by_inward_id(
+            db, inward_id, customer_id_filter=customer_filter
+        )
     except SQLAlchemyError as exc:
         _raise_database_http_error(db, exc)
 
@@ -82,14 +161,22 @@ def read_work_completion_certificates(
 @router.get(
     "/by-inward/{inward_id}",
     response_model=WCCResponse,
-    summary="Get the WCC for a Final Inspection inward record",
+    summary="Get the WCC for a Final Inspection inward record (legacy / optional dispatch_id)",
 )
 def read_wcc_by_inward_id(
     inward_id: int,
+    dispatch_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
 ) -> WCCResponse:
+    customer_filter = _resolve_customer_filter(current_user)
     try:
-        record = get_wcc_by_inward_id(db, inward_id)
+        record = get_wcc_by_inward_id(
+            db,
+            inward_id,
+            dispatch_id=dispatch_id,
+            customer_id_filter=customer_filter,
+        )
     except SQLAlchemyError as exc:
         _raise_database_http_error(db, exc)
 
@@ -109,9 +196,11 @@ def read_wcc_by_inward_id(
 def read_work_completion_certificate(
     wcc_id: int,
     db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user),
 ) -> WCCResponse:
+    customer_filter = _resolve_customer_filter(current_user)
     try:
-        record = get_wcc(db, wcc_id)
+        record = get_wcc(db, wcc_id, customer_id_filter=customer_filter)
     except SQLAlchemyError as exc:
         _raise_database_http_error(db, exc)
 
@@ -139,6 +228,7 @@ def update_work_completion_certificate(
     wcc_id: int,
     payload: WCCUpdate,
     db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(check_staff_role),
 ) -> WCCResponse:
     try:
         record = update_wcc(db, wcc_id, payload)
@@ -167,9 +257,15 @@ def update_work_completion_certificate(
 def remove_work_completion_certificate(
     wcc_id: int,
     db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(check_staff_role),
 ) -> Response:
     try:
         deleted = delete_wcc(db, wcc_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except SQLAlchemyError as exc:
         _raise_database_http_error(db, exc)
 

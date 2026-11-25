@@ -27,8 +27,10 @@ class SignatureDetails(BaseModel):
 
 
 class WCCFields(BaseModel):
-    # Link to the Final Inspection inward record
+    # Link to the Final Inspection inward record and split dispatch batch
     inward_id: int | None = None
+    dispatch_id: int | None = None
+    dispatched_to_customer_id: int | None = None
 
     # Vendor details (vendor_code has been removed)
     vendor_company_details: str | None = None
@@ -89,8 +91,9 @@ class WCCResponse(WCCFields):
     created_at: datetime
     updated_at: datetime
 
-    # Derived from the linked inward record; these are not WCC table columns.
+    # Derived from the linked inward / dispatch batch; these are not WCC table columns.
     srf_no: str | None = None
     customer_dc_no: str | None = None
+    batch_no: int | None = None
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")

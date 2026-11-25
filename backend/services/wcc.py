@@ -1,12 +1,13 @@
 """Service layer for Work Completion Certificates (WCC)."""
-
+# backend/services/wcc.py
 import logging
 from typing import Any
 
-from sqlalchemy import MetaData, Table, desc, select
+from sqlalchemy import MetaData, Table, desc, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.models.dispatch_batch import DispatchBatch
 from backend.models.wcc import WorkCompletionCertificate
 from backend.schemas.wcc import WCCCreate, WCCResponse, WCCUpdate
 
@@ -92,10 +93,44 @@ def _get_inward_summary(db: Session, inward_id: int) -> dict[str, Any] | None:
         return None
 
 
+def _get_batch_no(db: Session, dispatch_id: int) -> int | None:
+    """Fetch batch_no from dispatch_batches without risking a write failure."""
+    try:
+        return (
+            db.query(DispatchBatch.batch_no)
+            .filter(DispatchBatch.dispatch_id == dispatch_id)
+            .scalar()
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Failed to fetch batch_no for dispatch_id=%s",
+            dispatch_id,
+        )
+        return None
+
+
+def _apply_customer_scope(query, customer_id_filter: int | None):
+    """Restrict WCC queries strictly to the destination customer (non-cancelled)."""
+    if customer_id_filter is None:
+        return query
+
+    return query.outerjoin(
+        DispatchBatch,
+        DispatchBatch.dispatch_id == WorkCompletionCertificate.dispatch_id,
+    ).filter(
+        WorkCompletionCertificate.dispatched_to_customer_id == customer_id_filter,
+        or_(
+            WorkCompletionCertificate.dispatch_id.is_(None),
+            DispatchBatch.status != "CANCELLED",
+        ),
+    )
+
+
 def _response_for_record(
     db: Session, record: WorkCompletionCertificate
 ) -> WCCResponse:
-    """Build a WCC response and enrich it with values from the linked inward row."""
+    """Build a WCC response and enrich it with values from the linked inward/batch row."""
     response_data = WCCResponse.model_validate(record).model_dump()
 
     inward_summary = (
@@ -107,14 +142,53 @@ def _response_for_record(
     response_data["customer_dc_no"] = (
         inward_summary.get("customer_dc_no") if inward_summary else None
     )
+    response_data["batch_no"] = (
+        _get_batch_no(db, record.dispatch_id)
+        if record.dispatch_id is not None
+        else None
+    )
     return WCCResponse.model_validate(response_data)
 
 
 def create_wcc(db: Session, payload: WCCCreate) -> WCCResponse:
-    """Insert one WCC record, then build its API response."""
+    """Insert one WCC record, synchronizing inward & recipient from dispatch_batch."""
     values = _payload_values(payload)
+    linked_batch: DispatchBatch | None = None
+
+    dispatch_id = values.get("dispatch_id")
+    if dispatch_id is not None:
+        linked_batch = (
+            db.query(DispatchBatch)
+            .filter(DispatchBatch.dispatch_id == dispatch_id)
+            .first()
+        )
+        if linked_batch is None:
+            raise ValueError(f"Dispatch batch {dispatch_id} was not found.")
+        if linked_batch.status == "CANCELLED":
+            raise ValueError(
+                f"Cannot create a WCC for cancelled dispatch batch {dispatch_id}."
+            )
+
+        supplied_inward_id = values.get("inward_id")
+        if (
+            supplied_inward_id is not None
+            and supplied_inward_id != linked_batch.inward_id
+        ):
+            raise ValueError(
+                "inward_id does not match the inward_id of the selected dispatch batch."
+            )
+
+        # Authoritatively derive inward_id and recipient customer from the batch
+        values["inward_id"] = linked_batch.inward_id
+        values["dispatched_to_customer_id"] = linked_batch.dispatched_to_customer_id
+
     record = WorkCompletionCertificate(**values)
     db.add(record)
+
+    if linked_batch is not None and linked_batch.status == "DRAFT":
+        linked_batch.status = "READY"
+        if values.get("nextage_dispatch_dc_no") and not linked_batch.dispatch_dc_no:
+            linked_batch.dispatch_dc_no = values["nextage_dispatch_dc_no"]
 
     try:
         db.commit()
@@ -122,8 +196,9 @@ def create_wcc(db: Session, payload: WCCCreate) -> WCCResponse:
     except SQLAlchemyError:
         db.rollback()
         logger.exception(
-            "Failed to insert WCC (inward_id=%s, wcc_no=%s)",
+            "Failed to insert WCC (inward_id=%s, dispatch_id=%s, wcc_no=%s)",
             values.get("inward_id"),
+            values.get("dispatch_id"),
             values.get("wcc_no"),
         )
         raise
@@ -132,33 +207,92 @@ def create_wcc(db: Session, payload: WCCCreate) -> WCCResponse:
     return _response_for_record(db, record)
 
 
-def get_wcc(db: Session, wcc_id: int) -> WCCResponse | None:
+def get_wcc(
+    db: Session,
+    wcc_id: int,
+    *,
+    customer_id_filter: int | None = None,
+) -> WCCResponse | None:
     """Get one certificate by its primary key."""
-    record = (
-        db.query(WorkCompletionCertificate)
-        .filter(WorkCompletionCertificate.id == wcc_id)
-        .first()
+    query = db.query(WorkCompletionCertificate).filter(
+        WorkCompletionCertificate.id == wcc_id
     )
+    query = _apply_customer_scope(query, customer_id_filter)
+    record = query.first()
     return _response_for_record(db, record) if record is not None else None
 
 
-def get_wcc_by_inward_id(db: Session, inward_id: int) -> WCCResponse | None:
-    """Get the single certificate associated with an inward record."""
-    record = (
-        db.query(WorkCompletionCertificate)
-        .filter(WorkCompletionCertificate.inward_id == inward_id)
-        .first()
+def get_wcc_by_dispatch_id(
+    db: Session,
+    dispatch_id: int,
+    *,
+    customer_id_filter: int | None = None,
+) -> WCCResponse | None:
+    """Get the certificate associated with a specific dispatch batch."""
+    query = db.query(WorkCompletionCertificate).filter(
+        WorkCompletionCertificate.dispatch_id == dispatch_id
     )
+    query = _apply_customer_scope(query, customer_id_filter)
+    record = query.first()
     return _response_for_record(db, record) if record is not None else None
+
+
+def get_wcc_by_inward_id(
+    db: Session,
+    inward_id: int,
+    *,
+    dispatch_id: int | None = None,
+    customer_id_filter: int | None = None,
+) -> WCCResponse | None:
+    """Get a certificate associated with an inward record (optionally scoped to a batch).
+
+    Kept for backward compatibility with single-batch callers. For multi-batch inwards,
+    prefer `get_wcc_by_dispatch_id` or `list_wccs_by_inward_id`.
+    """
+    query = db.query(WorkCompletionCertificate).filter(
+        WorkCompletionCertificate.inward_id == inward_id
+    )
+    if dispatch_id is not None:
+        query = query.filter(WorkCompletionCertificate.dispatch_id == dispatch_id)
+    query = _apply_customer_scope(query, customer_id_filter)
+    record = query.order_by(WorkCompletionCertificate.id.asc()).first()
+    return _response_for_record(db, record) if record is not None else None
+
+
+def list_wccs_by_inward_id(
+    db: Session,
+    inward_id: int,
+    *,
+    customer_id_filter: int | None = None,
+) -> list[WCCResponse]:
+    """Return all WCCs belonging to an inward (strictly branch-isolated for customers)."""
+    query = db.query(WorkCompletionCertificate).filter(
+        WorkCompletionCertificate.inward_id == inward_id
+    )
+    query = _apply_customer_scope(query, customer_id_filter)
+    records = query.order_by(WorkCompletionCertificate.id.asc()).all()
+    return [_response_for_record(db, record) for record in records]
 
 
 def list_wccs(
-    db: Session, *, skip: int = 0, limit: int = 100
+    db: Session,
+    *,
+    skip: int = 0,
+    limit: int = 100,
+    inward_id: int | None = None,
+    dispatch_id: int | None = None,
+    customer_id_filter: int | None = None,
 ) -> list[WCCResponse]:
     """Return certificates newest first, including linked inward SRF/DC values."""
+    query = db.query(WorkCompletionCertificate)
+    if inward_id is not None:
+        query = query.filter(WorkCompletionCertificate.inward_id == inward_id)
+    if dispatch_id is not None:
+        query = query.filter(WorkCompletionCertificate.dispatch_id == dispatch_id)
+    query = _apply_customer_scope(query, customer_id_filter)
+
     records = (
-        db.query(WorkCompletionCertificate)
-        .order_by(
+        query.order_by(
             desc(WorkCompletionCertificate.created_at),
             desc(WorkCompletionCertificate.id),
         )
@@ -185,10 +319,37 @@ def update_wcc(
     if not changes:
         return _response_for_record(db, record)
 
-    # A WCC remains tied to its original inward record. Prevent moving it to a
-    # different inward id, which could create a misleading duplicate association.
+    # A WCC remains tied to its original inward and dispatch batch. Prevent moving
+    # it to a different inward/batch, which would corrupt branch isolation.
     if "inward_id" in changes and changes["inward_id"] != record.inward_id:
         raise ValueError("inward_id cannot be changed after a WCC is created")
+
+    if (
+        "dispatch_id" in changes
+        and record.dispatch_id is not None
+        and changes["dispatch_id"] != record.dispatch_id
+    ):
+        raise ValueError("dispatch_id cannot be changed after a WCC is created")
+
+    if record.dispatch_id is not None:
+        linked_batch = (
+            db.query(DispatchBatch)
+            .filter(DispatchBatch.dispatch_id == record.dispatch_id)
+            .first()
+        )
+        if linked_batch is not None:
+            if (
+                "dispatched_to_customer_id" in changes
+                and changes["dispatched_to_customer_id"]
+                != linked_batch.dispatched_to_customer_id
+            ):
+                raise ValueError(
+                    "dispatched_to_customer_id must match the linked dispatch batch. "
+                    "Update the dispatch batch destination instead."
+                )
+            changes["dispatched_to_customer_id"] = (
+                linked_batch.dispatched_to_customer_id
+            )
 
     effective_start = changes.get("work_start_date", record.work_start_date)
     effective_completion = changes.get(
@@ -225,8 +386,22 @@ def delete_wcc(db: Session, wcc_id: int) -> bool:
     if record is None:
         return False
 
+    linked_batch: DispatchBatch | None = None
+    if record.dispatch_id is not None:
+        linked_batch = (
+            db.query(DispatchBatch)
+            .filter(DispatchBatch.dispatch_id == record.dispatch_id)
+            .first()
+        )
+        if linked_batch is not None and linked_batch.status == "DISPATCHED":
+            raise ValueError(
+                "Cannot delete a WCC belonging to an already dispatched batch."
+            )
+
     try:
         db.delete(record)
+        if linked_batch is not None and linked_batch.status == "READY":
+            linked_batch.status = "DRAFT"
         db.commit()
         return True
     except SQLAlchemyError:

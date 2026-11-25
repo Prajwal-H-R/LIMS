@@ -364,15 +364,19 @@ export const CertificatesPage: React.FC = () => {
     setQrGeneratingCertId(cert.certificate_id);
     try {
       const qrImageBase64 = await QRCode.toDataURL(getQrScanUrlForCertificate(cert.certificate_id), { width: 320, margin: 1 });
-      await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR(cert.certificate_id), { qrImageBase64 });
+      await api.post(ENDPOINTS.CERTIFICATES.GENERATE_QR(cert.certificate_id), {
+  qr_image_base64: qrImageBase64,
+});
+  
       if (activeSrfId) fetchData(); 
       toast.success(`QR generated for ${cert.certificate_no}`);
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to generate QR.");
-    } finally {
-      setQrGeneratingCertId(null);
-    }
-  };
+   } catch (err: any) {
+  const d = err?.response?.data?.detail;
+  const msg = Array.isArray(d)
+    ? d.map((e: any) => (e?.loc ? `${e.loc.filter((p: any) => p !== "body").join(".")}: ${e.msg}` : e?.msg)).filter(Boolean).join(" • ")
+    : (typeof d === "string" ? d : "Failed to generate QR.");
+  toast.error(msg || "Failed to generate QR.");
+  };}
 
   const printQrCards = (rows: Array<{ cert: Certificate; neplId?: string; description?: string }>) => {
     const htmlRows = rows.filter((r) => !!r.cert.qr_image_base64).map((r) => {

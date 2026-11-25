@@ -1,21 +1,28 @@
 from datetime import datetime
 from typing import List, Any, Optional
-from sqlalchemy import String, Text, DateTime, Boolean, TIMESTAMP, func, Integer
+from sqlalchemy import String, Text, DateTime, Boolean, TIMESTAMP, func, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db import Base
-from sqlalchemy import ForeignKey
-from sqlalchemy.orm import relationship
+
 
 class FinalInspection(Base):
     __tablename__ = "final_inspections"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    inward_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    inward_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    dispatch_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("dispatch_batches.dispatch_id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     customer_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("customers.customer_id"),
-        nullable=False
+        nullable=False,
+        index=True,
     )
 
     srf_no: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -74,6 +81,13 @@ class FinalInspection(Base):
         "Customer",
         back_populates="final_inspections"
     )
+    dispatch_batch = relationship(
+        "DispatchBatch",
+        back_populates="final_inspection"
+    )
 
     def __repr__(self):
-        return f"<FinalInspection(srf_no={self.srf_no}, inward_id={self.inward_id})>"
+        return (
+            f"<FinalInspection(srf_no={self.srf_no}, "
+            f"inward_id={self.inward_id}, dispatch_id={self.dispatch_id})>"
+        )

@@ -1,9 +1,10 @@
+# backend/services/final_inspection_service.py
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 from typing import List, Optional
 from datetime import datetime
-from backend.models import FinalInspection # Adjust import based on your structure
+from backend.models import FinalInspection  # Adjust import based on your structure
 from backend.schemas.final_inspection import FinalInspectionCreate, FinalInspectionUpdate
+
 
 class FinalInspectionService:
     @staticmethod
@@ -19,13 +20,28 @@ class FinalInspectionService:
         return db.query(FinalInspection).filter(FinalInspection.id == inspection_id).first()
 
     @staticmethod
+    def get_by_dispatch_id(
+        db: Session,
+        dispatch_id: int,
+        *,
+        customer_id_filter: Optional[int] = None,
+    ):
+        query = db.query(FinalInspection).filter(
+            FinalInspection.dispatch_id == dispatch_id,
+            FinalInspection.is_active.is_(True),
+        )
+        if customer_id_filter is not None:
+            query = query.filter(FinalInspection.customer_id == customer_id_filter)
+        return query.first()
+
+    @staticmethod
     def get_multi(db: Session, skip: int = 0, limit: int = 100):
         return db.query(FinalInspection).offset(skip).limit(limit).all()
 
     @staticmethod
     def update(db: Session, db_obj: FinalInspection, obj_in: FinalInspectionUpdate):
         update_data = obj_in.model_dump(exclude_unset=True)
-        
+
         # Logic for report_sent_at timestamp
         if update_data.get("report_sent") is True and not db_obj.report_sent:
             update_data["report_sent_at"] = datetime.now()
@@ -36,10 +52,41 @@ class FinalInspectionService:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
     @staticmethod
-    def get_by_inward_id(db: Session, inward_id: int):
-    # This will return the whole model instance including the 'id' field
-        return db.query(FinalInspection).filter(FinalInspection.inward_id == inward_id).first()
+    def get_by_inward_id(
+        db: Session,
+        inward_id: int,
+        *,
+        dispatch_id: Optional[int] = None,
+        customer_id_filter: Optional[int] = None,
+    ):
+        # Returns the matching model instance including the 'id' field
+        query = db.query(FinalInspection).filter(
+            FinalInspection.inward_id == inward_id,
+            FinalInspection.is_active.is_(True),
+        )
+        if dispatch_id is not None:
+            query = query.filter(FinalInspection.dispatch_id == dispatch_id)
+        if customer_id_filter is not None:
+            query = query.filter(FinalInspection.customer_id == customer_id_filter)
+        return query.order_by(FinalInspection.id.asc()).first()
+
+    @staticmethod
+    def list_by_inward_id(
+        db: Session,
+        inward_id: int,
+        *,
+        customer_id_filter: Optional[int] = None,
+    ) -> List[FinalInspection]:
+        query = db.query(FinalInspection).filter(
+            FinalInspection.inward_id == inward_id,
+            FinalInspection.is_active.is_(True),
+        )
+        if customer_id_filter is not None:
+            query = query.filter(FinalInspection.customer_id == customer_id_filter)
+        return query.order_by(FinalInspection.id.asc()).all()
+
     @staticmethod
     def delete(db: Session, inspection_id: int):
         db_obj = db.query(FinalInspection).filter(FinalInspection.id == inspection_id).first()
@@ -47,7 +94,7 @@ class FinalInspectionService:
             db.delete(db_obj)
             db.commit()
         return db_obj
-        
+
     @staticmethod
     def update_decision(db: Session, db_obj: FinalInspection, decision: str, remarks: Optional[str]):
         db_obj.customer_decision = decision
@@ -57,7 +104,7 @@ class FinalInspectionService:
             db_obj.status = "APPROVED"
         else:
             db_obj.status = "REJECTED"
-            
+
         db.commit()
         db.refresh(db_obj)
         return db_obj

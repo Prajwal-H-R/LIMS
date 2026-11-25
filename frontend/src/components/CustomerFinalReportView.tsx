@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Loader2,
@@ -528,7 +528,10 @@ function downloadFinalInspectionPdf(report: any): void {
   };
 
   drawPair("Inward Date", report?.created_at ? new Date(report.created_at).toLocaleDateString("en-IN") : "N/A", leftX, metaY);
-  drawPair("Customer", report?.customer_name, rightX, metaY);
+  const customerDisplay = report?.dispatched_to_location
+    ? `${wccSafe(report?.customer_name)} — ${wccSafe(report?.dispatched_to_location)}`
+    : report?.customer_name;
+  drawPair("Customer", customerDisplay, rightX, metaY);
   metaY += 6;
   drawPair("Customer DC No", report?.customer_dc_no, leftX, metaY);
   drawPair("Customer Email", report?.customer_email, rightX, metaY);
@@ -624,7 +627,11 @@ function downloadFinalInspectionPdf(report: any): void {
 
 export const CustomerFinalReportView: React.FC = () => {
   const { inwardId } = useParams<{ inwardId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  const dispatchIdParam = Number(searchParams.get("dispatch_id"));
+  const dispatchId = Number.isInteger(dispatchIdParam) && dispatchIdParam > 0 ? dispatchIdParam : null;
   
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -640,7 +647,11 @@ export const CustomerFinalReportView: React.FC = () => {
   const fetchReport = async () => {
     try {
       setLoading(true);
-      const res = await api.get(ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(Number(inwardId)));
+      const baseUrl = ENDPOINTS.FINAL_INSPECTIONS.CUSTOMER_VIEW(Number(inwardId));
+      const url = dispatchId
+        ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}dispatch_id=${dispatchId}`
+        : baseUrl;
+      const res = await api.get(url);
       setData(res.data);
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Access denied to this report.");
@@ -652,9 +663,11 @@ export const CustomerFinalReportView: React.FC = () => {
 
   useEffect(() => {
     fetchReport();
-  }, [inwardId]);
+  }, [inwardId, dispatchId]);
 
-  // Fetch the WCC for this exact inward ID. A missing WCC should not block
+  const effectiveDispatchId = dispatchId ?? data?.dispatch_id ?? null;
+
+  // Fetch the WCC for this dispatch batch (or inward ID fallback). A missing WCC should not block
   // viewing the inspection report; it simply hides the WCC viewing/download actions.
   useEffect(() => {
     let active = true;
@@ -667,7 +680,10 @@ export const CustomerFinalReportView: React.FC = () => {
       }
       setWccLoading(true);
       try {
-        const response = await api.get(`${WCC_COLLECTION}by-inward/${id}`);
+        const url = effectiveDispatchId
+          ? `${WCC_COLLECTION}by-dispatch/${effectiveDispatchId}`
+          : `${WCC_COLLECTION}by-inward/${id}`;
+        const response = await api.get(url);
         if (active) setWccData(response.data as WCCRecord);
       } catch (err: any) {
         if (active) {
@@ -683,7 +699,7 @@ export const CustomerFinalReportView: React.FC = () => {
     };
     void loadWcc();
     return () => { active = false; };
-  }, [inwardId]);
+  }, [inwardId, effectiveDispatchId]);
 
   const handleDownloadInspectionPdf = () => {
     try {
@@ -715,16 +731,17 @@ export const CustomerFinalReportView: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      await api.post(
-  ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(Number(inwardId)),
-  {
-    decision,
-    remarks:
-      decision === "REJECTED"
-        ? rejectionRemarks
-        : "Approved by customer",
-  }
-);
+      const baseUrl = ENDPOINTS.FINAL_INSPECTIONS.SUBMIT_DECISION(Number(inwardId));
+      const url = effectiveDispatchId
+        ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}dispatch_id=${effectiveDispatchId}`
+        : baseUrl;
+      await api.post(url, {
+        decision,
+        remarks:
+          decision === "REJECTED"
+            ? rejectionRemarks
+            : "Approved by customer",
+      });
 
       toast.success(`Report ${decision.toLowerCase()} successfully!`);
       setShowRejectModal(false);
@@ -864,6 +881,10 @@ export const CustomerFinalReportView: React.FC = () => {
                             <span className="font-bold text-slate-500 w-32">DC Number:</span> 
                             <span className="text-slate-900 font-mono">{data.customer_dc_no || 'N/A'}</span>
                         </div>
+                        <div className="flex border-b border-slate-50 pb-2">
+                            <span className="font-bold text-slate-500 w-32">Branch:</span>
+                            <span className="text-slate-900">{data.dispatched_to_location || "Main Branch"}</span>
+                        </div>
                     </div>
                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
                         <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2">Customer Details</p>
@@ -892,6 +913,7 @@ export const CustomerFinalReportView: React.FC = () => {
                                     <th className="border-b border-r border-slate-200 p-3 text-left">Eng Remarks</th>
                                     <th className="border-b border-r border-slate-200 p-3 text-left">Cust Remarks</th>
                                     <th className="border-b border-r border-slate-200 p-3 text-center w-40">Calib. Status</th>
+                                    <th className="border-b border-r border-slate-200 p-3 text-left w-56">Dispatched To</th>
                                     <th className="border-b border-slate-200 p-3 text-left bg-indigo-50 text-indigo-700 w-80">Final Remarks</th>
                                 </tr>
                             </thead>
@@ -915,6 +937,9 @@ export const CustomerFinalReportView: React.FC = () => {
                                                 {eq.job_status || "COMPLETED"}
                                             </span>
                                         </td>
+                                        <td className="border-r border-slate-200 p-3 text-xs font-semibold text-slate-700">
+                                            {eq.dispatched_to_label || data.customer_name || "Your Branch"}
+                                        </td>
                                         <td className="p-2 bg-indigo-50/20">
                                             <div className="w-full text-xs p-2 bg-white border border-indigo-100 rounded text-slate-700 min-h-[40px] whitespace-pre-wrap">
                                                 {eq.final_remarks || ""}
@@ -922,6 +947,42 @@ export const CustomerFinalReportView: React.FC = () => {
                                         </td>
                                     </tr>
                                 ))}
+                                {Array.isArray(data.other_dispatched_equipments) &&
+                                    data.other_dispatched_equipments.map((eq: any, idx: number) => (
+                                        <tr
+                                            key={`other-${eq.inward_eqp_id ?? idx}`}
+                                            title="Record only — dispatched to another branch/customer"
+                                            className="bg-slate-50/80 opacity-50 blur-[0.4px] select-none pointer-events-none"
+                                        >
+                                            <td className="border-r border-slate-200 p-3 text-center text-slate-400 bg-slate-50 sticky left-0">
+                                                {(data.equipments?.length || 0) + idx + 1}
+                                            </td>
+                                            <td className="border-r border-slate-200 p-3 font-mono font-bold text-slate-500">{eq.nepl_id}</td>
+                                            <td className="border-r border-slate-200 p-3 text-slate-600 font-medium">{eq.material_description}</td>
+                                            <td className="border-r border-slate-200 p-3 text-slate-500 font-mono text-xs">{eq.serial_no}</td>
+                                            <td className="border-r border-slate-200 p-3 text-center font-bold text-slate-500">{eq.quantity || 1}</td>
+                                            <td className="border-r border-slate-200 p-3 text-slate-500">{eq.make}</td>
+                                            <td className="border-r border-slate-200 p-3 text-slate-500">{eq.model}</td>
+                                            <td className="border-r border-slate-200 p-3 font-mono text-xs text-slate-500">{eq.range}</td>
+                                            <td className="border-r border-slate-200 p-3 text-xs text-slate-400 italic">{eq.visual_inspection_notes || "-"}</td>
+                                            <td className="border-r border-slate-200 p-3 text-xs text-slate-400">{eq.accessories_included || "-"}</td>
+                                            <td className="border-r border-slate-200 p-3 text-xs text-slate-400">{eq.engineer_remarks || "-"}</td>
+                                            <td className="border-r border-slate-200 p-3 text-xs text-slate-400">{eq.customer_remarks || "-"}</td>
+                                            <td className="border-r border-slate-200 p-3 text-center">
+                                                <span className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-600">
+                                                    {eq.job_status || "RECORD ONLY"}
+                                                </span>
+                                            </td>
+                                            <td className="border-r border-slate-200 p-3 text-xs font-semibold text-slate-600">
+                                                {eq.dispatched_to_label || "Other Branch"}
+                                            </td>
+                                            <td className="p-2 bg-slate-100/50">
+                                                <div className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded text-slate-500 min-h-[40px] whitespace-pre-wrap">
+                                                    {eq.final_remarks || "Dispatched to another branch (record only)"}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
                             </tbody>
                         </table>
                     </div>

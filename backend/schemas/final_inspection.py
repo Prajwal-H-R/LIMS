@@ -2,8 +2,11 @@ from pydantic import BaseModel, EmailStr, ConfigDict
 from datetime import datetime
 from typing import List, Any, Optional
 
+
 class FinalInspectionBase(BaseModel):
     inward_id: int
+    dispatch_id: Optional[int] = None
+    customer_id: Optional[int] = None
     srf_no: str
     customer_dc_no: Optional[str] = None
     receiver: Optional[str] = None
@@ -14,6 +17,8 @@ class FinalInspectionBase(BaseModel):
     status: str = "PENDING"
     customer_decision: Optional[str] = None  # APPROVED / REJECTED
     customer_remarks: Optional[str] = None
+
+
 class FinalInspectionResponse(FinalInspectionBase):
     id: int
     report_sent: bool
@@ -23,12 +28,14 @@ class FinalInspectionResponse(FinalInspectionBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class FinalInspectionDecisionRequest(BaseModel):
     decision: str  # "APPROVED" or "REJECTED"
     remarks: Optional[str] = None
 
-    
+
 class FinalInspectionUpdate(BaseModel):
+    dispatch_id: Optional[int] = None
     equipments: Optional[List[Any]] = None
     sent_emails: Optional[List[Any]] = None
     report_sent: Optional[bool] = None
@@ -36,20 +43,26 @@ class FinalInspectionUpdate(BaseModel):
     customer_dc_no: Optional[str] = None
     receiver: Optional[str] = None
 
+
 class FinalInspectionCreate(BaseModel):
+    dispatch_id: Optional[int] = None
     equipments: Optional[List[Any]] = None
     sent_emails: Optional[List[Any]] = None
     report_sent: Optional[bool] = None
     status: Optional[str] = None
     customer_dc_no: Optional[str] = None
     receiver: Optional[str] = None
+
+
 # Schema for the frontend's POST request
 class FinalReportSendRequest(BaseModel):
+    dispatch_id: Optional[int] = None
     emails: List[EmailStr]
     equipments: List[Any]  # Contains the updated final_remarks
     customer_name: str
     srf_no: str
     # Add other fields if you want to update them during send
+
 
 class FinalInspectionPage(BaseModel):
     total_count: int

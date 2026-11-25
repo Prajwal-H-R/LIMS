@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   AlertCircle,
@@ -7,6 +7,7 @@ import {
   Download,
   FileCheck2,
   FileText,
+  Layers,
   Loader2,
   Mail,
   Plus,
@@ -23,8 +24,7 @@ import { api, ENDPOINTS } from "../api/config";
 import toast from "react-hot-toast";
 
 // -----------------------------------------------------------------------------
-// Work Completion Certificate (WCC) types and defaults
-// Kept in this file so the WCC frontend can be integrated as a single TSX file.
+// Work Completion Certificate (WCC) and Dispatch Batch types and defaults
 // -----------------------------------------------------------------------------
 
 type WCCDetailItem = {
@@ -43,6 +43,8 @@ type WCCSignatureDetails = {
 
 type WCCPayload = {
   inward_id: number | null;
+  dispatch_id?: number | null;
+  dispatched_to_customer_id?: number | null;
   vendor_company_details: string;
   tax_registration_details: string;
   nextage_dispatch_dc_no: string;
@@ -68,14 +70,79 @@ type WCCPayload = {
 
 type WCCRecord = WCCPayload & {
   id: number;
-  // Values returned by the backend from the linked inward record.
+  // Values returned by the backend from the linked inward / batch record.
   srf_no?: string | null;
   customer_dc_no?: string | null;
+  batch_no?: number | null;
   created_at?: string;
   updated_at?: string;
 };
 
+type DispatchCustomerOption = {
+  customer_id: number;
+  customer_details: string;
+  location_name?: string | null;
+  contact_person?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  ship_to_address?: string | null;
+  bill_to_address?: string | null;
+};
+
+type BatchEquipmentItem = {
+  inward_eqp_id: number;
+  nepl_id: string;
+  material_description: string;
+  serial_no: string;
+  quantity: number;
+  make: string;
+  model: string;
+  range: string;
+  unit?: string;
+  visual_inspection_notes?: string;
+  accessories_included?: string;
+  engineer_remarks?: string;
+  customer_remarks?: string;
+  job_status: string;
+  flow_type?: string;
+};
+
+type DispatchBatchRecord = {
+  dispatch_id: number;
+  inward_id: number;
+  batch_no: number;
+  dispatched_to_customer_id: number;
+  dispatch_dc_no?: string | null;
+  status: string;
+  remarks?: string | null;
+  dispatched_at?: string | null;
+  destination_customer?: DispatchCustomerOption | null;
+  equipment_count: number;
+  inward_eqp_ids: number[];
+  items: BatchEquipmentItem[];
+  wcc_id?: number | null;
+  wcc_no?: string | null;
+  final_inspection_id?: number | null;
+  final_inspection_status?: string | null;
+  report_sent: boolean;
+  customer_decision?: string | null;
+  customer_remarks?: string | null;
+};
+
+type DispatchOverviewData = {
+  inward_id: number;
+  srf_no: string;
+  origin_customer_id?: number | null;
+  origin_customer_details: string;
+  total_equipments: number;
+  assigned_equipments: number;
+  remaining_equipments: number;
+  available_equipments: BatchEquipmentItem[];
+  batches: DispatchBatchRecord[];
+};
+
 const WCC_COLLECTION = "/work-completion-certificates/";
+const DISPATCH_BATCH_COLLECTION = "/dispatch-batches/";
 
 const DEFAULT_VENDOR_DETAILS =
   "Nextage Engineering Pvt Ltd\\nGF-01, Emerald Icon, #104, 5BC, III Block \\nHRBR Layout, Bangalore – 560043";
@@ -89,36 +156,61 @@ const emptyWCCDetail = (): WCCDetailItem => ({
   status_of_work_completed: "",
 });
 
-const createEmptyWCCPayload = (inwardId: number, customerName = ""): WCCPayload => ({
-  inward_id: inwardId,
-  vendor_company_details: DEFAULT_VENDOR_DETAILS.replace(/\\n/g, "\n"),
-  tax_registration_details: "29AAGCN6783L1ZM",
-  nextage_dispatch_dc_no: "",
-  date: null,
-  services_delivered_to: "",
-  work_location_1: "",
-  work_location_2: "",
-  work_location_3: "",
-  gst_no: "",
-  pan_no: "",
-  tools_received_from: "",
-  tools_dispatched_to: "",
-  wcc_no: "",
-  work_start_date: null,
-  work_completion_date: null,
-  po_no: "",
-  po_date: null,
-  project_name: "",
-  details_table: [{ ...emptyWCCDetail(), po_s_no: 1 }],
-  remarks: "",
-  signature_details: {
-    representative_and_company_seal_name: "",
-    vendor_representative_company_seal_name: "Nextage Engineering Pvt Ltd",
-  },
-});
+const createEmptyWCCPayload = (
+  inwardId: number,
+  dispatchId: number | null = null,
+  dispatchedToCustomerId: number | null = null,
+  destinationLabel = "",
+  shipToAddress = "",
+  equipmentItems: BatchEquipmentItem[] = [],
+): WCCPayload => {
+  const mappedDetails: WCCDetailItem[] =
+    equipmentItems.length > 0
+      ? equipmentItems.map((eq, idx) => ({
+          po_s_no: idx + 1,
+          description_of_work: `${eq.material_description} (${eq.nepl_id} / S.No: ${eq.serial_no})`,
+          uom: eq.unit || "Nos",
+          quantity_completed: eq.quantity ?? 1,
+          sac_no: "",
+          status_of_work_completed: eq.job_status || "COMPLETED",
+        }))
+      : [{ ...emptyWCCDetail(), po_s_no: 1 }];
+
+  return {
+    inward_id: inwardId,
+    dispatch_id: dispatchId,
+    dispatched_to_customer_id: dispatchedToCustomerId,
+    vendor_company_details: DEFAULT_VENDOR_DETAILS.replace(/\\n/g, "\n"),
+    tax_registration_details: "29AAGCN6783L1ZM",
+    nextage_dispatch_dc_no: "",
+    date: null,
+    services_delivered_to: destinationLabel,
+    work_location_1: shipToAddress,
+    work_location_2: "",
+    work_location_3: "",
+    gst_no: "",
+    pan_no: "",
+    tools_received_from: "",
+    tools_dispatched_to: destinationLabel,
+    wcc_no: "",
+    work_start_date: null,
+    work_completion_date: null,
+    po_no: "",
+    po_date: null,
+    project_name: "",
+    details_table: mappedDetails,
+    remarks: "",
+    signature_details: {
+      representative_and_company_seal_name: "",
+      vendor_representative_company_seal_name: "Nextage Engineering Pvt Ltd",
+    },
+  };
+};
 
 const payloadFromWCCRecord = (record: WCCRecord): WCCPayload => ({
   inward_id: record.inward_id,
+  dispatch_id: record.dispatch_id ?? null,
+  dispatched_to_customer_id: record.dispatched_to_customer_id ?? null,
   vendor_company_details: record.vendor_company_details ?? "",
   tax_registration_details: record.tax_registration_details ?? "",
   nextage_dispatch_dc_no: record.nextage_dispatch_dc_no ?? "",
@@ -207,25 +299,62 @@ function WCCTextArea({
 function WCCFormModal({
   open,
   inwardId,
-  customerName,
+  dispatchId,
+  dispatchedToCustomerId,
+  destinationLabel,
+  shipToAddress,
+  equipmentItems,
   existing,
   onClose,
   onSaved,
 }: {
   open: boolean;
   inwardId: number;
-  customerName: string;
+  dispatchId: number | null;
+  dispatchedToCustomerId: number | null;
+  destinationLabel: string;
+  shipToAddress: string;
+  equipmentItems: BatchEquipmentItem[];
   existing: WCCRecord | null;
   onClose: () => void;
   onSaved: (record: WCCRecord) => void;
 }) {
-  const [form, setForm] = useState<WCCPayload>(() => createEmptyWCCPayload(inwardId, customerName));
+  const [form, setForm] = useState<WCCPayload>(() =>
+    createEmptyWCCPayload(
+      inwardId,
+      dispatchId,
+      dispatchedToCustomerId,
+      destinationLabel,
+      shipToAddress,
+      equipmentItems,
+    ),
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setForm(existing ? payloadFromWCCRecord(existing) : createEmptyWCCPayload(inwardId, customerName));
-  }, [open, existing, inwardId, customerName]);
+    setForm(
+      existing
+        ? payloadFromWCCRecord(existing)
+        : createEmptyWCCPayload(
+            inwardId,
+            dispatchId,
+            dispatchedToCustomerId,
+            destinationLabel,
+            shipToAddress,
+            equipmentItems,
+          ),
+    );
+  }, [
+    open,
+    existing,
+    inwardId,
+    dispatchId,
+    dispatchedToCustomerId,
+    destinationLabel,
+    shipToAddress,
+    equipmentItems,
+  ]);
 
   if (!open) return null;
 
@@ -254,6 +383,10 @@ function WCCFormModal({
     }));
   };
 
+  const lookupUrl = dispatchId
+    ? `${WCC_COLLECTION}by-dispatch/${dispatchId}`
+    : `${WCC_COLLECTION}by-inward/${inwardId}`;
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!Number.isFinite(inwardId) || inwardId <= 0) {
@@ -272,6 +405,8 @@ function WCCFormModal({
     const payload: WCCPayload = {
       ...form,
       inward_id: inwardId,
+      dispatch_id: dispatchId,
+      dispatched_to_customer_id: dispatchedToCustomerId ?? form.dispatched_to_customer_id ?? null,
       vendor_company_details: form.vendor_company_details ?? "",
       work_start_date: form.work_start_date || null,
       work_completion_date: form.work_completion_date || null,
@@ -283,16 +418,11 @@ function WCCFormModal({
 
     setSaving(true);
     try {
-      // Re-check the inward link immediately before creating. The WCC button's
-      // initial lookup may be stale (or a previous request may have saved the
-      // record even though the browser did not receive its response).
       let certificateToUpdate: WCCRecord | null = existing;
 
       if (!certificateToUpdate) {
         try {
-          const existingResponse = await api.get(
-            `${WCC_COLLECTION}by-inward/${inwardId}`
-          );
+          const existingResponse = await api.get(lookupUrl);
           certificateToUpdate = existingResponse.data as WCCRecord;
         } catch (lookupError: any) {
           if (lookupError?.response?.status !== 404) {
@@ -307,8 +437,6 @@ function WCCFormModal({
         }
       }
 
-      // If this inward already has a WCC, update that record rather than
-      // inserting a second row against the unique inward_id constraint.
       if (certificateToUpdate) {
         const response = await api.patch(
           `${WCC_COLLECTION}${certificateToUpdate.id}`,
@@ -326,12 +454,8 @@ function WCCFormModal({
       } catch (createError: any) {
         if (createError?.response?.status !== 409) throw createError;
 
-        // A 409 can mean another request already created the WCC for this
-        // inward. Re-fetch and PATCH that record if it exists.
         try {
-          const existingResponse = await api.get(
-            `${WCC_COLLECTION}by-inward/${inwardId}`
-          );
+          const existingResponse = await api.get(lookupUrl);
           const savedRecord = existingResponse.data as WCCRecord;
           const updateResponse = await api.patch(
             `${WCC_COLLECTION}${savedRecord.id}`,
@@ -341,8 +465,6 @@ function WCCFormModal({
           onSaved(updateResponse.data as WCCRecord);
           return;
         } catch (recoveryError: any) {
-          // Only a 404 confirms that no WCC could be found for this inward.
-          // For other errors, do not hide the original unique-constraint issue.
           if (recoveryError?.response?.status !== 404) {
             const detail = recoveryError?.response?.data?.detail;
             toast.error(
@@ -355,7 +477,7 @@ function WCCFormModal({
         }
 
         toast.error(
-          "A WCC with this number may already exist, or this inward already has a certificate. Check the WCC No and reload the page to edit an existing certificate."
+          "A WCC with this number may already exist, or this batch already has a certificate. Check the WCC No and reload the page to edit an existing certificate."
         );
       }
     } catch (error: any) {
@@ -363,7 +485,7 @@ function WCCFormModal({
       const detail = error?.response?.data?.detail;
       if (statusCode === 409) {
         toast.error(
-          "The WCC No is already in use or this inward already has a certificate. Reload the page and edit the existing WCC, or enter a unique WCC No."
+          "The WCC No is already in use or this batch already has a certificate. Reload the page and edit the existing WCC, or enter a unique WCC No."
         );
       } else {
         toast.error(
@@ -388,7 +510,9 @@ function WCCFormModal({
       <div className="relative flex max-h-[78vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-4 py-3 text-white sm:px-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-300">Nextage Engineering</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-300">
+              Nextage Engineering {dispatchId ? `• Dispatch Batch` : ""}
+            </p>
             <h2 id="wcc-modal-title" className="mt-1 text-lg font-bold sm:text-xl">
               {existing ? "Edit Work Completion Certificate" : "Work Completion Certificate"}
             </h2>
@@ -418,7 +542,6 @@ function WCCFormModal({
                 <WCCTextInput label="GST No" value={form.gst_no} onChange={(value) => setField("gst_no", value)} />
                 <WCCTextInput label="PAN No" value={form.pan_no} onChange={(value) => setField("pan_no", value)} />
               </div>
-              {/* These two fields follow the GST/PAN row, matching the WCC PDF layout. */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <WCCTextInput
                   label="Tools Received From"
@@ -518,7 +641,6 @@ function WCCFormModal({
 
 // -----------------------------------------------------------------------------
 // WCC PDF generator - A4 landscape, laid out to follow the supplied certificate.
-// Requires: npm install jspdf jspdf-autotable
 // -----------------------------------------------------------------------------
 
 function wccSafe(value: unknown): string {
@@ -554,19 +676,13 @@ function downloadWCCPdf(wcc: WCCRecord) {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  // The frame sits 12 mm from the paper edge. Keep every certificate element
-  // another 4 mm inside that frame so the content has an even white buffer.
   const frameMargin = 12;
   const contentInset = 4;
   const margin = frameMargin + contentInset;
 
-  // Explicit white page background keeps the certificate readable in PDF
-  // previews/exporters that otherwise render transparent page areas as black.
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidth, pageHeight, "F");
 
-  // The title band uses the same 4 mm inset as the rest of the content.
-  // The frame is drawn again at the end so its black outline stays crisp.
   doc.setFillColor(8, 8, 110);
   doc.rect(margin, margin, pageWidth - 2 * margin, 7.5, "F");
   doc.setTextColor(255, 255, 255);
@@ -579,14 +695,12 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setTextColor(47, 128, 237);
   let vendorY = margin + 12;
   vendorLines.forEach((line, index) => {
-    // Make the company name and address slightly larger to match the reference.
     doc.setFont("helvetica", index === 0 ? "bold" : "normal");
     doc.setFontSize(index === 0 ? 9.2 : 8.5);
     doc.text(line, pageWidth / 2, vendorY, { align: "center" });
     vendorY += 4.3;
   });
   if (!vendorLines.length) vendorY += 4.3;
-  // Vendor code was removed from the database and is no longer printed.
   doc.setTextColor(255, 0, 0);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.7);
@@ -613,8 +727,6 @@ function downloadWCCPdf(wcc: WCCRecord) {
     doc.setFontSize(7.2);
 
     if (index === 0) {
-      // Match the original certificate: service recipient on the same line
-      // as its label, with only a horizontal separator below the row.
       const labelX = leftX + 0.8;
       const baselineY = leftY + 4.9;
       doc.text(label, labelX, baselineY);
@@ -633,13 +745,10 @@ function downloadWCCPdf(wcc: WCCRecord) {
       }
     }
 
-    // These rows use underlines only. Do not draw enclosing rectangles or
-    // vertical edges around Services Delivered / Work Location fields.
     doc.line(leftX, leftY + leftRowH, leftX + leftW, leftY + leftRowH);
     leftY += leftRowH;
   });
 
-  // GST and PAN share one final metadata row with a single bottom separator.
   const taxY = leftY + 5.1;
   doc.setTextColor(0, 0, 0);
   doc.setFont("helvetica", "bold");
@@ -659,11 +768,7 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setLineWidth(0.16);
   doc.line(leftX, leftY + leftRowH, leftX + leftW, leftY + leftRowH);
 
-  // Tools Received From and Tools Dispatched To sit directly below the GST/PAN row.
-  // Keep them in two equal columns within the left information area so they do not
-  // overlap the right-side date / certificate metadata.
   const toolsRowY = leftY + leftRowH + 11;
-  // Extend this row through the open space before the right-side metadata.
   const toolsRowWidth = rightX - leftX - 4;
   const toolsColumnWidth = toolsRowWidth / 2;
   const toolsFields: Array<[string, string, number]> = [
@@ -687,8 +792,6 @@ function downloadWCCPdf(wcc: WCCRecord) {
     doc.line(valueX, toolsRowY + 1.6, columnEndX, toolsRowY + 1.6);
   });
 
-  // Right-side metadata uses one fixed label column, one fixed value column,
-  // uniform row spacing, and lines that all finish at the same right margin.
   let rightY = 51.5;
   const rightFields: Array<[string, string]> = [
     ["Date", formatWCCPODate(wcc.date)],
@@ -755,7 +858,6 @@ function downloadWCCPdf(wcc: WCCRecord) {
       }
     },
     columnStyles: {
-      // Total 265 mm = A4 landscape width minus the 16 mm content margins.
       0: { cellWidth: 13, halign: "center" },
       1: { cellWidth: 128 },
       2: { cellWidth: 20, halign: "center" },
@@ -786,8 +888,6 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.line(margin, remarkBottom + 3, pageWidth - margin, remarkBottom + 3);
   doc.line(margin, remarkBottom + 7, pageWidth - margin, remarkBottom + 7);
 
-  // Reserve enough room below the signature block for the Encls footer and
-  // the 4 mm inner padding. Move the signature block to a fresh page if needed.
   let signatureY = Math.max(remarkBottom + 10, 158);
   const maxSignatureY = pageHeight - frameMargin - contentInset - 32;
   if (signatureY > maxSignatureY) {
@@ -807,8 +907,6 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.setTextColor(255, 36, 36);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.0);
-  // Preserve the original WCC PDF placement: Vendor Representative on the left,
-  // and Representative and Company Seal on the right.
   doc.text("Name of the Vendor Representative, Company Seal", leftSignatureX, signatureY + 4);
   const vendorRepresentativeSeal = wccSafe(wcc.signature_details?.vendor_representative_company_seal_name) || companyName;
   doc.text(vendorRepresentativeSeal, leftSignatureX, signatureY + 8, { maxWidth: signatureWidth });
@@ -817,7 +915,6 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.text(representativeSeal, rightSignatureX, signatureY + 8, { maxWidth: signatureWidth });
 
   doc.setTextColor(17, 17, 17);
-  // These are fixed template labels; do not read them from JSONB.
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.0);
   doc.text("Authorised Signature", leftSignatureX, signatureY + 22);
@@ -830,14 +927,11 @@ function downloadWCCPdf(wcc: WCCRecord) {
   doc.text("Name of the site Engineer", pageWidth * 0.58, signatureY + 26);
   doc.text("Name of the Site Incharge", pageWidth * 0.75, signatureY + 26);
 
-  // The page frame itself closes the certificate; do not draw an extra
-  // horizontal rule above the Encls line.
   doc.setFont("helvetica", "bold");
   doc.setFontSize(6.8);
   doc.setTextColor(17, 17, 17);
   doc.text("Encls: Other related documents of work", margin + 0.5, pageHeight - frameMargin - contentInset - 1.6);
 
-  // Draw a thin black frame around every page, after content has been placed.
   const totalPages = doc.getNumberOfPages();
   for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
     doc.setPage(pageNumber);
@@ -845,16 +939,35 @@ function downloadWCCPdf(wcc: WCCRecord) {
     doc.setLineWidth(0.2);
     doc.rect(frameMargin, frameMargin, pageWidth - 2 * frameMargin, pageHeight - 2 * frameMargin, "S");
   }
+  const batchSuffix = wcc.batch_no ? `-B${wcc.batch_no}` : "";
   const safeNumber = wccSafe(wcc.wcc_no).replace(/[^a-zA-Z0-9_-]+/g, "-") || `inward-${wcc.inward_id ?? "record"}`;
-  doc.save(`WCC-${safeNumber}.pdf`);
+  doc.save(`WCC-${safeNumber}${batchSuffix}.pdf`);
 }
 
-
-function WCCActions({ inwardId, customerName }: { inwardId: number; customerName: string }) {
+function WCCActions({
+  inwardId,
+  dispatchId,
+  dispatchedToCustomerId,
+  destinationLabel,
+  shipToAddress,
+  equipmentItems,
+  onWccChange,
+}: {
+  inwardId: number;
+  dispatchId: number | null;
+  dispatchedToCustomerId: number | null;
+  destinationLabel: string;
+  shipToAddress: string;
+  equipmentItems: BatchEquipmentItem[];
+  onWccChange?: (wcc: WCCRecord | null) => void;
+}) {
   const [existingWcc, setExistingWcc] = useState<WCCRecord | null>(null);
   const [loadingWcc, setLoadingWcc] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
+  const onWccChangeRef = useRef(onWccChange);
+  onWccChangeRef.current = onWccChange;
 
   const loadWcc = useCallback(async () => {
     if (!Number.isFinite(inwardId) || inwardId <= 0) {
@@ -864,19 +977,26 @@ function WCCActions({ inwardId, customerName }: { inwardId: number; customerName
     }
     setLoadingWcc(true);
     try {
-      const response = await api.get(`${WCC_COLLECTION}by-inward/${inwardId}`);
-      setExistingWcc(response.data as WCCRecord);
+      const url = dispatchId
+        ? `${WCC_COLLECTION}by-dispatch/${dispatchId}`
+        : `${WCC_COLLECTION}by-inward/${inwardId}`;
+      const response = await api.get(url);
+      const rec = response.data as WCCRecord;
+      setExistingWcc(rec);
+      onWccChangeRef.current?.(rec);
     } catch (error: any) {
       if (error?.response?.status === 404) {
         setExistingWcc(null);
+        onWccChangeRef.current?.(null);
       } else {
         setExistingWcc(null);
+        onWccChangeRef.current?.(null);
         toast.error(error?.response?.data?.detail || "Unable to check the saved WCC.");
       }
     } finally {
       setLoadingWcc(false);
     }
-  }, [inwardId]);
+  }, [inwardId, dispatchId]);
 
   useEffect(() => {
     void loadWcc();
@@ -884,6 +1004,7 @@ function WCCActions({ inwardId, customerName }: { inwardId: number; customerName
 
   const handleSaved = (record: WCCRecord) => {
     setExistingWcc(record);
+    onWccChange?.(record);
     setIsModalOpen(false);
   };
 
@@ -929,7 +1050,11 @@ function WCCActions({ inwardId, customerName }: { inwardId: number; customerName
       <WCCFormModal
         open={isModalOpen}
         inwardId={inwardId}
-        customerName={customerName}
+        dispatchId={dispatchId}
+        dispatchedToCustomerId={dispatchedToCustomerId}
+        destinationLabel={destinationLabel}
+        shipToAddress={shipToAddress}
+        equipmentItems={equipmentItems}
         existing={existingWcc}
         onClose={() => setIsModalOpen(false)}
         onSaved={handleSaved}
@@ -946,7 +1071,6 @@ function downloadFinalInspectionPdf(report: any): void {
   const frameMargin = 6;
   const margin = 8;
 
-  // White page and the same navy/blue visual style used by the WCC certificate.
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidth, pageHeight, "F");
   doc.setFillColor(8, 8, 110);
@@ -954,7 +1078,8 @@ function downloadFinalInspectionPdf(report: any): void {
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text("FINAL INSPECTION REPORT", margin + 4, frameMargin + 9.5);
+  const batchTag = report?.batch_no ? ` • BATCH #${report.batch_no}` : "";
+  doc.text(`FINAL INSPECTION REPORT${batchTag}`, margin + 4, frameMargin + 9.5);
   doc.setFontSize(9);
   doc.text(`SRF: ${wccSafe(report?.srf_no) || "N/A"}`, pageWidth - margin - 4, frameMargin + 9.5, { align: "right" });
 
@@ -976,7 +1101,10 @@ function downloadFinalInspectionPdf(report: any): void {
   };
 
   drawPair("Inward Date", report?.created_at ? new Date(report.created_at).toLocaleDateString("en-IN") : "N/A", leftX, metaY);
-  drawPair("Customer", report?.customer_name, rightX, metaY);
+  const customerDisplay = report?.dispatched_to_location
+    ? `${wccSafe(report?.customer_name)} — ${wccSafe(report?.dispatched_to_location)}`
+    : report?.customer_name;
+  drawPair("Customer", customerDisplay, rightX, metaY);
   metaY += 6;
   drawPair("Customer DC No", report?.customer_dc_no, leftX, metaY);
   drawPair("Customer Email", report?.customer_email, rightX, metaY);
@@ -1053,7 +1181,6 @@ function downloadFinalInspectionPdf(report: any): void {
     },
   });
 
-  // Thin border and page numbering on every page, after all table content is rendered.
   const pageCount = doc.getNumberOfPages();
   for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {
     doc.setPage(pageNo);
@@ -1066,86 +1193,160 @@ function downloadFinalInspectionPdf(report: any): void {
     doc.text(`Page ${pageNo} of ${pageCount}`, pageWidth - margin, pageHeight - frameMargin - 2, { align: "right" });
   }
 
+  const batchFileSuffix = report?.batch_no ? `-Batch-${report.batch_no}` : "";
   const safeSrf = wccSafe(report?.srf_no).replace(/[^a-zA-Z0-9_-]+/g, "-") || "inspection-report";
-  doc.save(`Final-Inspection-Report-${safeSrf}.pdf`);
+  doc.save(`Final-Inspection-Report-${safeSrf}${batchFileSuffix}.pdf`);
 }
 
 export const FinalInspectionView: React.FC = () => {
   const { inwardId } = useParams<{ inwardId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  
+
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any | null>(null);
+  const [overview, setOverview] = useState<DispatchOverviewData | null>(null);
+  const [customers, setCustomers] = useState<DispatchCustomerOption[]>([]);
+  const [selectedDispatchId, setSelectedDispatchId] = useState<number | null>(() => {
+    const paramVal = Number(searchParams.get("dispatch_id"));
+    return Number.isInteger(paramVal) && paramVal > 0 ? paramVal : null;
+  });
+
+  // New batch creator state
+  const [showCreateBatch, setShowCreateBatch] = useState(false);
+  const [newBatchCustomerId, setNewBatchCustomerId] = useState<string>("");
+  const [newBatchEqpIds, setNewBatchEqpIds] = useState<number[]>([]);
+  const [newBatchDcNo, setNewBatchDcNo] = useState<string>("");
+  const [newBatchRemarks, setNewBatchRemarks] = useState<string>("");
+  const [creatingBatch, setCreatingBatch] = useState(false);
+  const [cancellingBatchId, setCancellingBatchId] = useState<number | null>(null);
+
   const [reportEmails, setReportEmails] = useState<string[]>(['']);
   const [isSending, setIsSending] = useState(false);
   const [showSuccessUI, setShowSuccessUI] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  // WCC existence is checked by inward_id, which is the authoritative link.
   const [wccPresence, setWccPresence] = useState<"checking" | "present" | "missing" | "error">("checking");
   const [wccDispatchAlert, setWccDispatchAlert] = useState("");
 
-  const verifyWccForDispatch = useCallback(async (showAlert = false): Promise<boolean> => {
-    const linkedInwardId = Number(inwardId);
-    const requiredMessage = "Please complete and save the Work Completion Certificate first, then dispatch the Final Inspection Report.";
+  const numericInwardId = Number(inwardId);
 
-    if (!Number.isInteger(linkedInwardId) || linkedInwardId <= 0) {
-      setWccPresence("error");
-      if (showAlert) {
-        setWccDispatchAlert("Unable to identify this inward record. The Final Inspection Report has not been dispatched.");
+  const loadDispatchMetadata = useCallback(
+    async (preferredDispatchId?: number | null) => {
+      if (!Number.isInteger(numericInwardId) || numericInwardId <= 0) return;
+      try {
+        const [overviewRes, customersRes] = await Promise.allSettled([
+          api.get(`${DISPATCH_BATCH_COLLECTION}inward/${numericInwardId}/overview`),
+          api.get(`${DISPATCH_BATCH_COLLECTION}customers`),
+        ]);
+
+        if (customersRes.status === "fulfilled" && Array.isArray(customersRes.value.data)) {
+          setCustomers(customersRes.value.data as DispatchCustomerOption[]);
+        }
+
+        if (overviewRes.status === "fulfilled") {
+          const ov = overviewRes.value.data as DispatchOverviewData;
+          setOverview(ov);
+
+          const activeBatches = ov.batches.filter((b) => b.status !== "CANCELLED");
+          setSelectedDispatchId((prev) => {
+            const candidate =
+              preferredDispatchId !== undefined
+                ? preferredDispatchId
+                : prev ?? (activeBatches.length > 0 ? activeBatches[activeBatches.length - 1].dispatch_id : null);
+
+            if (candidate && activeBatches.some((b) => b.dispatch_id === candidate)) {
+              return candidate;
+            }
+            return activeBatches.length > 0 ? activeBatches[activeBatches.length - 1].dispatch_id : null;
+          });
+        }
+      } catch {
+        // Non-blocking when overview isn't available yet
       }
-      return false;
-    }
+    },
+    [numericInwardId],
+  );
 
-    try {
-      // The WCC endpoint looks up the record by the same inward_id shown in this page.
-      const response = await api.get(`${WCC_COLLECTION}by-inward/${linkedInwardId}`);
-      const certificate = response.data as WCCRecord;
+  useEffect(() => {
+    void loadDispatchMetadata();
+  }, [loadDispatchMetadata]);
 
-      // Do not accept a record associated with a different inward ID.
-      if (!certificate || Number(certificate.inward_id) !== linkedInwardId) {
-        setWccPresence("missing");
-        if (showAlert) setWccDispatchAlert(requiredMessage);
+  const verifyWccForDispatch = useCallback(
+    async (showAlert = false, targetDispatchId: number | null = selectedDispatchId): Promise<boolean> => {
+      const requiredMessage =
+        "Please complete and save the Work Completion Certificate first, then dispatch the Final Inspection Report.";
+
+      if (!Number.isInteger(numericInwardId) || numericInwardId <= 0) {
+        setWccPresence("error");
+        if (showAlert) {
+          setWccDispatchAlert("Unable to identify this inward record. The Final Inspection Report has not been dispatched.");
+        }
         return false;
       }
 
-      setWccPresence("present");
-      if (showAlert) setWccDispatchAlert("");
-      return true;
-    } catch (error: any) {
-      if (error?.response?.status === 404) {
-        setWccPresence("missing");
-        if (showAlert) setWccDispatchAlert(requiredMessage);
-      } else {
-        setWccPresence("error");
-        if (showAlert) {
-          setWccDispatchAlert("Could not verify the Work Completion Certificate. Please try again; the report has not been dispatched.");
-        }
-      }
-      return false;
-    }
-  }, [inwardId]);
+      try {
+        const url = targetDispatchId
+          ? `${WCC_COLLECTION}by-dispatch/${targetDispatchId}`
+          : `${WCC_COLLECTION}by-inward/${numericInwardId}`;
+        const response = await api.get(url);
+        const certificate = response.data as WCCRecord;
 
-  // Resolve the initial state for the page, but only show the alert after an
-  // engineer attempts to dispatch without a saved WCC.
+        if (!certificate || Number(certificate.inward_id) !== numericInwardId) {
+          setWccPresence("missing");
+          if (showAlert) setWccDispatchAlert(requiredMessage);
+          return false;
+        }
+
+        setWccPresence("present");
+        if (showAlert) setWccDispatchAlert("");
+        return true;
+      } catch (error: any) {
+        if (error?.response?.status === 404) {
+          setWccPresence("missing");
+          if (showAlert) setWccDispatchAlert(requiredMessage);
+        } else {
+          setWccPresence("error");
+          if (showAlert) {
+            setWccDispatchAlert("Could not verify the Work Completion Certificate. Please try again; the report has not been dispatched.");
+          }
+        }
+        return false;
+      }
+    },
+    [numericInwardId, selectedDispatchId],
+  );
+
   useEffect(() => {
-    void verifyWccForDispatch(false);
-  }, [verifyWccForDispatch]);
+    setWccDispatchAlert("");
+    void verifyWccForDispatch(false, selectedDispatchId);
+  }, [verifyWccForDispatch, selectedDispatchId]);
 
   const handleOpenDispatchModal = async () => {
     setWccDispatchAlert("");
-    const wccExists = await verifyWccForDispatch(true);
+    const wccExists = await verifyWccForDispatch(true, selectedDispatchId);
     if (!wccExists) return;
+    setShowSuccessUI(false);
     setIsModalOpen(true);
   };
 
   useEffect(() => {
     const fetchDetails = async () => {
+      if (!Number.isInteger(numericInwardId) || numericInwardId <= 0) {
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
-        const res = await api.get(ENDPOINTS.FINAL_INSPECTIONS.GET_DETAILS(Number(inwardId)));
+        const baseUrl = ENDPOINTS.FINAL_INSPECTIONS.GET_DETAILS(numericInwardId);
+        const url = selectedDispatchId
+          ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}dispatch_id=${selectedDispatchId}`
+          : baseUrl;
+        const res = await api.get(url);
         setData(res.data);
         if (res.data.customer_email) {
-            setReportEmails([res.data.customer_email]);
+          setReportEmails([res.data.customer_email]);
+        } else {
+          setReportEmails([""]);
         }
       } catch (err: any) {
         toast.error("Failed to load inspection details.");
@@ -1153,41 +1354,112 @@ export const FinalInspectionView: React.FC = () => {
         setLoading(false);
       }
     };
-    fetchDetails();
-  }, [inwardId]);
+    void fetchDetails();
+  }, [numericInwardId, selectedDispatchId]);
 
-  const addEmailField = () => setReportEmails(prev => [...prev, '']);
-  const removeEmailField = (index: number) => setReportEmails(prev => prev.filter((_, i) => i !== index));
+  const handleSelectBatch = (batchId: number | null) => {
+    setSelectedDispatchId(batchId);
+    const nextParams = new URLSearchParams(searchParams);
+    if (batchId) {
+      nextParams.set("dispatch_id", String(batchId));
+    } else {
+      nextParams.delete("dispatch_id");
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const toggleNewBatchEquipment = (eqpId: number) => {
+    setNewBatchEqpIds((prev) =>
+      prev.includes(eqpId) ? prev.filter((id) => id !== eqpId) : [...prev, eqpId],
+    );
+  };
+
+  const handleCreateBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const custId = Number(newBatchCustomerId);
+    if (!Number.isInteger(custId) || custId <= 0) {
+      toast.error("Please select a destination customer/branch.");
+      return;
+    }
+    if (newBatchEqpIds.length === 0) {
+      toast.error("Please select at least one equipment for this dispatch batch.");
+      return;
+    }
+
+    setCreatingBatch(true);
+    try {
+      const res = await api.post(DISPATCH_BATCH_COLLECTION, {
+        inward_id: numericInwardId,
+        dispatched_to_customer_id: custId,
+        inward_eqp_ids: newBatchEqpIds,
+        dispatch_dc_no: newBatchDcNo.trim() || null,
+        remarks: newBatchRemarks.trim() || null,
+      });
+      const created = res.data as DispatchBatchRecord;
+      toast.success(`Created Dispatch Batch #${created.batch_no} (${created.equipment_count} equipment).`);
+      setShowCreateBatch(false);
+      setNewBatchCustomerId("");
+      setNewBatchEqpIds([]);
+      setNewBatchDcNo("");
+      setNewBatchRemarks("");
+      await loadDispatchMetadata(created.dispatch_id);
+      handleSelectBatch(created.dispatch_id);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Failed to create dispatch batch.");
+    } finally {
+      setCreatingBatch(false);
+    }
+  };
+
+  const handleCancelBatch = async (batch: DispatchBatchRecord) => {
+    setCancellingBatchId(batch.dispatch_id);
+    try {
+      await api.post(`${DISPATCH_BATCH_COLLECTION}${batch.dispatch_id}/cancel`, {});
+      toast.success(`Cancelled Batch #${batch.batch_no}. Equipments released.`);
+      const nextId = selectedDispatchId === batch.dispatch_id ? null : selectedDispatchId;
+      await loadDispatchMetadata(nextId);
+      if (selectedDispatchId === batch.dispatch_id) {
+        handleSelectBatch(null);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Unable to cancel dispatch batch.");
+    } finally {
+      setCancellingBatchId(null);
+    }
+  };
+
+  const addEmailField = () => setReportEmails((prev) => [...prev, ""]);
+  const removeEmailField = (index: number) => setReportEmails((prev) => prev.filter((_, i) => i !== index));
 
   const handleSendFir = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Re-check immediately before sending so a stale/open modal cannot bypass
-    // the WCC prerequisite. The same inward_id must have a saved WCC record.
-    const wccExists = await verifyWccForDispatch(true);
+    const wccExists = await verifyWccForDispatch(true, selectedDispatchId);
     if (!wccExists) {
       setIsModalOpen(false);
       return;
     }
 
-    const validEmails = reportEmails.filter(email => email.trim() && email.includes('@'));
+    const validEmails = reportEmails.filter((email) => email.trim() && email.includes("@"));
     if (validEmails.length === 0) return toast.error("Please enter at least one valid email.");
 
     setIsSending(true);
     try {
       const payload = {
-        inward_id: Number(inwardId),
+        inward_id: numericInwardId,
+        dispatch_id: selectedDispatchId,
         srf_no: data.srf_no,
         customer_name: data.customer_name,
         customer_email: data.customer_email,
         customer_dc_no: data.customer_dc_no,
         receiver: data.receiver,
-        equipments: data.equipments, 
-        emails: validEmails
+        equipments: data.equipments,
+        emails: validEmails,
       };
-      await api.post(ENDPOINTS.FINAL_INSPECTIONS.SEND_REPORT(Number(inwardId)), payload);
+      await api.post(ENDPOINTS.FINAL_INSPECTIONS.SEND_REPORT(numericInwardId), payload);
       toast.success("Final Inspection Report saved and sent!");
       setShowSuccessUI(true);
+      await loadDispatchMetadata(selectedDispatchId);
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to process report.");
     } finally {
@@ -1211,286 +1483,580 @@ export const FinalInspectionView: React.FC = () => {
 
   if (!data) return <div className="p-10 text-center">Inward data not found.</div>;
 
-  // New logic for engineer view
   const hasCustomerDecision = !!data.customer_decision;
+  const activeBatch =
+    overview?.batches.find((b) => b.dispatch_id === selectedDispatchId) ?? null;
+  const destCustomerObj =
+    activeBatch?.destination_customer ??
+    customers.find((c) => c.customer_id === activeBatch?.dispatched_to_customer_id) ??
+    null;
+  const destinationLabel =
+    destCustomerObj?.location_name
+      ? `${destCustomerObj.customer_details} (${destCustomerObj.location_name})`
+      : destCustomerObj?.customer_details || data.customer_name || "";
+  const shipToAddress = destCustomerObj?.ship_to_address || "";
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-7xl mx-auto space-y-6">
-        
-        <div className="flex items-center justify-between gap-4 px-2">
-            <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
-                <ArrowLeft className="h-4 w-4" /> Back to List
-            </button>
 
-            <div className="flex flex-wrap items-center justify-end gap-3">
-                <WCCActions
-                    inwardId={Number(inwardId)}
-                    customerName={data.customer_name || ""}
-                />
-                {data.report_sent && (
-                    <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-full text-xs font-bold">
-                        <Send size={12} /> REPORT DISPATCHED
-                    </div>
-                )}
+        <div className="flex items-center justify-between gap-4 px-2">
+          <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
+            <ArrowLeft className="h-4 w-4" /> Back to List
+          </button>
+
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <WCCActions
+              inwardId={numericInwardId}
+              dispatchId={selectedDispatchId}
+              dispatchedToCustomerId={activeBatch?.dispatched_to_customer_id ?? data.dispatched_to_customer_id ?? null}
+              destinationLabel={destinationLabel}
+              shipToAddress={shipToAddress}
+              equipmentItems={Array.isArray(data.equipments) ? data.equipments : []}
+              onWccChange={(wccRec) => {
+                setWccPresence(wccRec ? "present" : "missing");
+              }}
+            />
+            {data.report_sent && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-full text-xs font-bold">
+                <Send size={12} /> REPORT DISPATCHED
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* DISPATCH BATCHES BAR (Split Multi-Customer Dispatch) */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100">
+                <Layers size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">
+                  Dispatch Batches (Branch / Customer Split)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {overview
+                    ? `${overview.assigned_equipments} of ${overview.total_equipments} equipments assigned across batches • ${overview.remaining_equipments} remaining in inward`
+                    : "Create separate dispatch batches per recipient customer/branch with individual WCC and Final Inspection Report."}
+                </p>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreateBatch((prev) => !prev);
+                if (!newBatchCustomerId) {
+                  const defaultId =
+                    overview?.origin_customer_id ??
+                    (customers.length > 0 ? customers[0].customer_id : null);
+                  if (defaultId) {
+                    setNewBatchCustomerId(String(defaultId));
+                  }
+                }
+              }}
+              disabled={!overview || overview.remaining_equipments === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus size={15} />
+              New Dispatch Batch
+            </button>
+          </div>
+
+          {overview && overview.batches.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {overview.batches.map((batch) => {
+                const isSelected = batch.dispatch_id === selectedDispatchId;
+                const isCancelled = batch.status === "CANCELLED";
+                const destName =
+                  batch.destination_customer?.location_name
+                    ? `${batch.destination_customer.customer_details} (${batch.destination_customer.location_name})`
+                    : batch.destination_customer?.customer_details || `Customer #${batch.dispatched_to_customer_id}`;
+
+                return (
+                  <div
+                    key={batch.dispatch_id}
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition ${
+                      isSelected
+                        ? "border-indigo-600 bg-indigo-50 text-indigo-900 font-bold shadow-sm"
+                        : isCancelled
+                          ? "border-slate-200 bg-slate-50 text-slate-400 line-through"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      disabled={isCancelled}
+                      onClick={() => handleSelectBatch(batch.dispatch_id)}
+                      className="flex items-center gap-1.5 text-left disabled:cursor-not-allowed"
+                    >
+                      <span>Batch #{batch.batch_no}</span>
+                      <span className="text-slate-400">•</span>
+                      <span className="max-w-[200px] truncate">{destName}</span>
+                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold border border-slate-200">
+                        {batch.equipment_count} eqp
+                      </span>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                          batch.status === "DISPATCHED"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : batch.status === "CANCELLED"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {batch.status}
+                      </span>
+                    </button>
+
+                    {batch.status !== "DISPATCHED" && batch.status !== "CANCELLED" && (
+                      <button
+                        type="button"
+                        disabled={cancellingBatchId === batch.dispatch_id}
+                        onClick={() => void handleCancelBatch(batch)}
+                        title="Cancel batch and release equipments"
+                        className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                      >
+                        {cancellingBatchId === batch.dispatch_id ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <X size={13} />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Create Dispatch Batch Panel */}
+          {showCreateBatch && overview && (
+            <form
+              onSubmit={handleCreateBatch}
+              className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-900">
+                  Create New Dispatch Batch
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateBatch(false)}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Dispatch To (Customer / Branch) <span className="text-red-500">*</span>
+                  </span>
+                  <select
+                    required
+                    value={newBatchCustomerId}
+                    onChange={(e) => setNewBatchCustomerId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                  >
+                    <option value="">Select Customer / Branch</option>
+                    {overview?.origin_customer_id &&
+                      !customers.some((c) => c.customer_id === overview.origin_customer_id) && (
+                        <option value={overview.origin_customer_id}>
+                          {overview.origin_customer_details || `Customer #${overview.origin_customer_id}`} — Main Branch
+                        </option>
+                      )}
+                    {customers.map((c) => (
+                      <option key={c.customer_id} value={c.customer_id}>
+                        {c.customer_details}
+                        {c.location_name
+                          ? ` — ${c.location_name}`
+                          : c.customer_id === overview?.origin_customer_id
+                            ? " — Main Branch"
+                            : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-700">Dispatch DC No</span>
+                  <input
+                    type="text"
+                    value={newBatchDcNo}
+                    onChange={(e) => setNewBatchDcNo(e.target.value)}
+                    placeholder="Optional DC number"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                  />
+                </label>
+
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-700">Remarks</span>
+                  <input
+                    type="text"
+                    value={newBatchRemarks}
+                    onChange={(e) => setNewBatchRemarks(e.target.value)}
+                    placeholder="Optional batch notes"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                  />
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-700">
+                    Select Equipments ({newBatchEqpIds.length} of {overview.available_equipments.length} available selected)
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewBatchEqpIds(overview.available_equipments.map((eq) => eq.inward_eqp_id))}
+                      className="font-semibold text-indigo-600 hover:underline"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewBatchEqpIds([])}
+                      className="font-semibold text-slate-500 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                  {overview.available_equipments.map((eq) => {
+                    const checked = newBatchEqpIds.includes(eq.inward_eqp_id);
+                    return (
+                      <label
+                        key={eq.inward_eqp_id}
+                        className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-slate-50 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleNewBatchEquipment(eq.inward_eqp_id)}
+                            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="font-mono font-bold text-blue-700 shrink-0">{eq.nepl_id}</span>
+                          <span className="font-medium text-slate-800 truncate">{eq.material_description}</span>
+                          <span className="text-slate-400 font-mono shrink-0">S.No: {eq.serial_no}</span>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                            eq.job_status === "ISSUED" || eq.job_status === "COMPLETED"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {eq.job_status}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={creatingBatch}
+                  onClick={() => setShowCreateBatch(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingBatch || newBatchEqpIds.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {creatingBatch && <Loader2 size={14} className="animate-spin" />}
+                  {creatingBatch ? "Creating..." : "Create Batch"}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         <div className="bg-white shadow-xl rounded-xl border border-gray-200 overflow-hidden">
-            
-            {/* NEW: CUSTOMER DECISION BANNER FOR ENGINEER */}
-            {hasCustomerDecision && (
-                <div className={`${data.customer_decision === 'APPROVED' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'} border-b px-6 py-4 flex items-center gap-4`}>
-                    <div className={`p-2 rounded-full ${data.customer_decision === 'APPROVED' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-                        {data.customer_decision === 'APPROVED' ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
-                    </div>
-                    <div className="flex-grow">
-                        <div className="flex items-center justify-between">
-                            <h3 className={`text-sm font-bold uppercase tracking-wide ${data.customer_decision === 'APPROVED' ? 'text-emerald-800' : 'text-red-800'}`}>
-                                Customer Decision: {data.customer_decision}
-                            </h3>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                                Updated: {data.updated_at ? new Date(data.updated_at).toLocaleString() : ""}
-                            </span>
-                        </div>
-                        {data.customer_decision === 'REJECTED' && (
-                            <div className="mt-1 p-3 bg-white/50 border border-red-100 rounded-lg">
-                                <p className="text-sm text-red-900">
-                                    <span className="font-bold">Rejection Reason:</span> {data.customer_remarks || "No remarks provided"}
-                                </p>
-                            </div>
-                        )}
-                        {data.customer_decision === 'APPROVED' && (
-                            <p className="text-xs text-emerald-700 mt-0.5">Report has been reviewed and accepted by the customer.</p>
-                        )}
-                    </div>
+
+          {/* CUSTOMER DECISION BANNER FOR ENGINEER */}
+          {hasCustomerDecision && (
+            <div className={`${data.customer_decision === 'APPROVED' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'} border-b px-6 py-4 flex items-center gap-4`}>
+              <div className={`p-2 rounded-full ${data.customer_decision === 'APPROVED' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                {data.customer_decision === 'APPROVED' ? <CheckCircle2 size={24} /> : <XCircle size={24} />}
+              </div>
+              <div className="flex-grow">
+                <div className="flex items-center justify-between">
+                  <h3 className={`text-sm font-bold uppercase tracking-wide ${data.customer_decision === 'APPROVED' ? 'text-emerald-800' : 'text-red-800'}`}>
+                    Customer Decision: {data.customer_decision}
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    Updated: {data.updated_at ? new Date(data.updated_at).toLocaleString() : ""}
+                  </span>
                 </div>
+                {data.customer_decision === 'REJECTED' && (
+                  <div className="mt-1 p-3 bg-white/50 border border-red-100 rounded-lg">
+                    <p className="text-sm text-red-900">
+                      <span className="font-bold">Rejection Reason:</span> {data.customer_remarks || "No remarks provided"}
+                    </p>
+                  </div>
+                )}
+                {data.customer_decision === 'APPROVED' && (
+                  <p className="text-xs text-emerald-700 mt-0.5">Report has been reviewed and accepted by the customer.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-slate-800 text-white p-5 sm:p-6 flex flex-wrap justify-between items-center gap-4">
+            <div className="flex items-center gap-3">
+              <FileText size={24} className="text-blue-400" />
+              <div>
+                <h2 className="text-xl font-bold tracking-tight">Final Inspection Report</h2>
+                {data.batch_no && (
+                  <p className="text-xs text-blue-300 font-semibold">
+                    Dispatch Batch #{data.batch_no} • To: {data.customer_name}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    downloadFinalInspectionPdf(data);
+                  } catch (error) {
+                    console.error("Failed to export Final Inspection Report PDF", error);
+                    toast.error("Could not export the Final Inspection Report PDF. Please try again.");
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-blue-300/50 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-blue-50 hover:text-blue-800"
+              >
+                <Download size={17} /> Export PDF
+              </button>
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400 uppercase font-bold">SRF Number</p>
+                <p className="text-lg font-mono font-bold text-blue-400">{data.srf_no}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 sm:p-8">
+            {data.customer_decision === 'REJECTED' && (
+              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-amber-800">
+                <AlertCircle size={20} className="text-amber-600 flex-shrink-0" />
+                <p className="text-sm font-medium">
+                  Action Required: Please update the "Final Remarks" below based on customer feedback and re-dispatch the report.
+                </p>
+              </div>
             )}
 
-            <div className="bg-slate-800 text-white p-5 sm:p-6 flex flex-wrap justify-between items-center gap-4">
-                <div className="flex items-center gap-3">
-                    <FileText size={24} className="text-blue-400" />
-                    <h2 className="text-xl font-bold tracking-tight">Final Inspection Report</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 pb-8 border-b border-gray-100">
+              <div className="space-y-3 text-sm">
+                <div className="flex border-b border-slate-50 pb-2">
+                  <span className="font-bold text-slate-500 w-32">Inward Date:</span>
+                  <span className="text-slate-900">{data.created_at ? new Date(data.created_at).toLocaleDateString() : "N/A"}</span>
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-4">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            try {
-                                downloadFinalInspectionPdf(data);
-                            } catch (error) {
-                                console.error("Failed to export Final Inspection Report PDF", error);
-                                toast.error("Could not export the Final Inspection Report PDF. Please try again.");
-                            }
-                        }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-blue-300/50 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-blue-50 hover:text-blue-800"
-                    >
-                        <Download size={17} /> Export PDF
-                    </button>
-                    <div className="text-right">
-                        <p className="text-[10px] text-slate-400 uppercase font-bold">SRF Number</p>
-                        <p className="text-lg font-mono font-bold text-blue-400">{data.srf_no}</p>
-                    </div>
+                <div className="flex border-b border-slate-50 pb-2">
+                  <span className="font-bold text-slate-500 w-32">DC Number:</span>
+                  <span className="text-slate-900 font-mono">{data.customer_dc_no}</span>
                 </div>
-            </div>
-
-            <div className="p-6 sm:p-8">
-                {/* Warnings for Engineer */}
-                {data.customer_decision === 'REJECTED' && (
-                    <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-amber-800">
-                        <AlertCircle size={20} className="text-amber-600 flex-shrink-0" />
-                        <p className="text-sm font-medium">
-                            Action Required: Please update the "Final Remarks" below based on customer feedback and re-dispatch the report.
-                        </p>
-                    </div>
+                <div className="flex">
+                  <span className="font-bold text-slate-500 w-32">Received By:</span>
+                  <span className="text-slate-900">{data.receiver}</span>
+                </div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-lg">
+                <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2">
+                  {data.batch_no ? `Dispatch To (Batch #${data.batch_no})` : "Customer Details"}
+                </p>
+                <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed font-bold">
+                  {data.customer_name}
+                  {data.dispatched_to_location ? ` — ${data.dispatched_to_location}` : ""}
+                </p>
+                {data.origin_customer_name && data.origin_customer_name !== data.customer_name && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Origin Inward: {data.origin_customer_name}
+                  </p>
                 )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 pb-8 border-b border-gray-100">
-                    <div className="space-y-3 text-sm">
-                        <div className="flex border-b border-slate-50 pb-2">
-                            <span className="font-bold text-slate-500 w-32">Inward Date:</span> 
-                            <span className="text-slate-900">{data.created_at ? new Date(data.created_at).toLocaleDateString() : "N/A"}</span>
-                        </div>
-                        <div className="flex border-b border-slate-50 pb-2">
-                            <span className="font-bold text-slate-500 w-32">DC Number:</span> 
-                            <span className="text-slate-900 font-mono">{data.customer_dc_no}</span>
-                        </div>
-                        <div className="flex">
-                            <span className="font-bold text-slate-500 w-32">Received By:</span> 
-                            <span className="text-slate-900">{data.receiver}</span>
-                        </div>
-                    </div>
-                    <div className="bg-slate-50 p-4 rounded-lg">
-                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2">Customer Details</p>
-                        <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed font-bold">
-                            {data.customer_name}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-2 font-mono">{data.customer_email}</p>
-                    </div>
-                </div>
-
-                {/* Table remains the same but Engineer can still edit Final Remarks */}
-                <div className="relative rounded-lg border border-slate-200 overflow-hidden">
-                    <div className="overflow-x-auto overflow-y-hidden">
-                        <table className="w-full text-sm border-collapse min-w-[1800px]">
-                            <thead>
-                                <tr className="bg-slate-50 text-slate-600 font-bold text-xs uppercase tracking-wider">
-                                    <th className="border-b border-r border-slate-200 p-3 w-12 text-center sticky left-0 bg-slate-50 z-10">Sl</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left w-40">NEPL ID</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left w-64">Description</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Serial No</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-center w-16">Qty</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Make</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Model</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Range</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Visual Notes</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Accessories</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Eng Remarks</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-left">Cust Remarks</th>
-                                    <th className="border-b border-r border-slate-200 p-3 text-center w-40">Calib. Status</th>
-                                    <th className="border-b border-slate-200 p-3 text-left bg-indigo-50 text-indigo-700 w-80">Final Remarks</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {data.equipments.map((eq: any, idx: number) => (
-                                    <tr key={idx} className="hover:bg-slate-50 transition-colors group">
-                                        <td className="border-r border-slate-200 p-3 text-center text-slate-400 bg-white sticky left-0 group-hover:bg-slate-50">{idx + 1}</td>
-                                        <td className="border-r border-slate-200 p-3 font-mono font-bold text-blue-700">{eq.nepl_id}</td>
-                                        <td className="border-r border-slate-200 p-3 text-slate-800 font-medium">{eq.material_description}</td>
-                                        <td className="border-r border-slate-200 p-3 text-slate-600 font-mono text-xs">{eq.serial_no}</td>
-                                        <td className="border-r border-slate-200 p-3 text-center font-bold">{eq.quantity}</td>
-                                        <td className="border-r border-slate-200 p-3">{eq.make}</td>
-                                        <td className="border-r border-slate-200 p-3">{eq.model}</td>
-                                        <td className="border-r border-slate-200 p-3 font-mono text-xs">{eq.range}</td>
-                                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500 italic">{eq.visual_inspection_notes || "-"}</td>
-                                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500">{eq.accessories_included || "-"}</td>
-                                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500">{eq.engineer_remarks || "-"}</td>
-                                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500">{eq.customer_remarks || "-"}</td>
-                                        <td className="border-r border-slate-200 p-3 text-center">
-                                            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${eq.job_status === 'ISSUED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                {eq.job_status || "PENDING"}
-                                            </span>
-                                        </td>
-                                        <td className="p-2 bg-indigo-50/20">
-                                            <textarea
-                                                value={eq.final_remarks || ""}
-                                                onChange={(e) => handleRemarkChange(idx, e.target.value)}
-                                                placeholder="Update remarks here..."
-                                                rows={1}
-                                                className="w-full text-xs p-2 bg-white border border-indigo-100 rounded focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none transition-all resize-none min-h-[40px]"
-                                            />
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                <p className="text-xs text-slate-400 mt-2 font-mono">{data.customer_email}</p>
+              </div>
             </div>
+
+            <div className="relative rounded-lg border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto overflow-y-hidden">
+                <table className="w-full text-sm border-collapse min-w-[1800px]">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600 font-bold text-xs uppercase tracking-wider">
+                      <th className="border-b border-r border-slate-200 p-3 w-12 text-center sticky left-0 bg-slate-50 z-10">Sl</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left w-40">NEPL ID</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left w-64">Description</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Serial No</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-center w-16">Qty</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Make</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Model</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Range</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Visual Notes</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Accessories</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Eng Remarks</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-left">Cust Remarks</th>
+                      <th className="border-b border-r border-slate-200 p-3 text-center w-40">Calib. Status</th>
+                      <th className="border-b border-slate-200 p-3 text-left bg-indigo-50 text-indigo-700 w-80">Final Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {data.equipments.map((eq: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors group">
+                        <td className="border-r border-slate-200 p-3 text-center text-slate-400 bg-white sticky left-0 group-hover:bg-slate-50">{idx + 1}</td>
+                        <td className="border-r border-slate-200 p-3 font-mono font-bold text-blue-700">{eq.nepl_id}</td>
+                        <td className="border-r border-slate-200 p-3 text-slate-800 font-medium">{eq.material_description}</td>
+                        <td className="border-r border-slate-200 p-3 text-slate-600 font-mono text-xs">{eq.serial_no}</td>
+                        <td className="border-r border-slate-200 p-3 text-center font-bold">{eq.quantity}</td>
+                        <td className="border-r border-slate-200 p-3">{eq.make}</td>
+                        <td className="border-r border-slate-200 p-3">{eq.model}</td>
+                        <td className="border-r border-slate-200 p-3 font-mono text-xs">{eq.range}</td>
+                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500 italic">{eq.visual_inspection_notes || "-"}</td>
+                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500">{eq.accessories_included || "-"}</td>
+                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500">{eq.engineer_remarks || "-"}</td>
+                        <td className="border-r border-slate-200 p-3 text-xs text-slate-500">{eq.customer_remarks || "-"}</td>
+                        <td className="border-r border-slate-200 p-3 text-center">
+                          <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${eq.job_status === 'ISSUED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {eq.job_status || "PENDING"}
+                          </span>
+                        </td>
+                        <td className="p-2 bg-indigo-50/20">
+                          <textarea
+                            value={eq.final_remarks || ""}
+                            onChange={(e) => handleRemarkChange(idx, e.target.value)}
+                            placeholder="Update remarks here..."
+                            rows={1}
+                            className="w-full text-xs p-2 bg-white border border-indigo-100 rounded focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none transition-all resize-none min-h-[40px]"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Dispatch is permitted only when a WCC exists for this exact inward_id. */}
         <div className="flex flex-col items-end gap-2 pt-4 pb-12">
-            {wccDispatchAlert && (
-                <div
-                    id="wcc-dispatch-prerequisite-alert"
-                    role="alert"
-                    aria-live="polite"
-                    className="flex max-w-xl items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm"
-                >
-                    <AlertCircle size={17} className="mt-0.5 shrink-0 text-amber-600" />
-                    <span>{wccDispatchAlert}</span>
-                </div>
-            )}
-            <button
-                type="button"
-                onClick={() => void handleOpenDispatchModal()}
-                disabled={isSending}
-                title={wccPresence === "checking" ? "Verify Work Completion Certificate before dispatch" : wccPresence === "present" ? "Dispatch Final Inspection Report" : "A saved WCC is required before dispatch"}
-                aria-describedby={wccDispatchAlert ? "wcc-dispatch-prerequisite-alert" : undefined}
-                className={`flex items-center gap-3 rounded-xl px-10 py-4 font-bold text-white shadow-lg transition-all active:scale-95 disabled:cursor-wait disabled:opacity-60 ${
-                    data.customer_decision === 'REJECTED'
-                    ? 'bg-red-600 hover:bg-red-700 shadow-red-100'
-                    : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
-                }`}
+          {wccDispatchAlert && (
+            <div
+              id="wcc-dispatch-prerequisite-alert"
+              role="alert"
+              aria-live="polite"
+              className="flex max-w-xl items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm"
             >
-                <Share2 size={20} />
-                {data.customer_decision === 'REJECTED' ? 'Re-Dispatch Final Report' : 'Dispatch Final Report'}
-            </button>
+              <AlertCircle size={17} className="mt-0.5 shrink-0 text-amber-600" />
+              <span>{wccDispatchAlert}</span>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleOpenDispatchModal()}
+            disabled={isSending}
+            title={wccPresence === "checking" ? "Verify Work Completion Certificate before dispatch" : wccPresence === "present" ? "Dispatch Final Inspection Report" : "A saved WCC is required before dispatch"}
+            aria-describedby={wccDispatchAlert ? "wcc-dispatch-prerequisite-alert" : undefined}
+            className={`flex items-center gap-3 rounded-xl px-10 py-4 font-bold text-white shadow-lg transition-all active:scale-95 disabled:cursor-wait disabled:opacity-60 ${
+              data.customer_decision === 'REJECTED'
+                ? 'bg-red-600 hover:bg-red-700 shadow-red-100'
+                : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
+            }`}
+          >
+            <Share2 size={20} />
+            {data.customer_decision === 'REJECTED' ? 'Re-Dispatch Final Report' : 'Dispatch Final Report'}
+          </button>
         </div>
 
         {isModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <div 
-                    className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-                    onClick={() => !isSending && setIsModalOpen(false)}
-                ></div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={() => !isSending && setIsModalOpen(false)}
+            ></div>
 
-                <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-                    <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                        <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                            <Mail size={18} className="text-indigo-600" />
-                            Email Final Report
-                        </h3>
-                        <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                            <X size={20} className="text-slate-500" />
-                        </button>
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <Mail size={18} className="text-indigo-600" />
+                  Email Final Report {data.batch_no ? `(Batch #${data.batch_no})` : ""}
+                </h3>
+                <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                  <X size={20} className="text-slate-500" />
+                </button>
+              </div>
+
+              {!showSuccessUI ? (
+                <div className="p-6">
+                  <p className="text-sm text-slate-500 mb-6">Enter the email addresses where the report and certificates should be sent.</p>
+                  <form onSubmit={handleSendFir} className="space-y-4">
+                    <div className="max-h-[250px] overflow-y-auto pr-2 space-y-3">
+                      {reportEmails.map((email, index) => (
+                        <div key={index} className="flex gap-2">
+                          <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => {
+                              const next = [...reportEmails];
+                              next[index] = e.target.value;
+                              setReportEmails(next);
+                            }}
+                            required
+                            placeholder="recipient@email.com"
+                            className="flex-grow px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                          />
+                          {reportEmails.length > 1 && (
+                            <button type="button" onClick={() => removeEmailField(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><X size={18} /></button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-
-                    {!showSuccessUI ? (
-                        <div className="p-6">
-                            <p className="text-sm text-slate-500 mb-6">Enter the email addresses where the report and certificates should be sent.</p>
-                            <form onSubmit={handleSendFir} className="space-y-4">
-                                <div className="max-h-[250px] overflow-y-auto pr-2 space-y-3">
-                                    {reportEmails.map((email, index) => (
-                                        <div key={index} className="flex gap-2">
-                                            <input 
-                                                type="email" value={email} 
-                                                onChange={(e) => {
-                                                    const next = [...reportEmails];
-                                                    next[index] = e.target.value;
-                                                    setReportEmails(next);
-                                                }} 
-                                                required placeholder="recipient@email.com" 
-                                                className="flex-grow px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                            />
-                                            {reportEmails.length > 1 && (
-                                                <button type="button" onClick={() => removeEmailField(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><X size={18} /></button>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="pt-4 border-t border-slate-100 space-y-4">
-                                    <button type="button" onClick={addEmailField} className="text-sm text-indigo-600 font-bold flex items-center gap-1 hover:underline">
-                                        <Plus size={16} /> Add Recipient
-                                    </button>
-                                    <button 
-                                        type="submit" disabled={isSending}
-                                        className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                                    >
-                                        {isSending ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
-                                        {isSending ? "Sending..." : "Confirm & Send Emails"}
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    ) : (
-                        <div className="p-10 text-center">
-                            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <CheckCircle2 size={32} />
-                            </div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-2">Successfully Sent!</h3>
-                            <p className="text-sm text-slate-500 mb-6">The documents for SRF {data.srf_no} have been dispatched.</p>
-                            <button 
-                                onClick={() => { setIsModalOpen(false); setShowSuccessUI(false); navigate(-1); }} 
-                                className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all"
-                            >
-                                Finish & Exit
-                            </button>
-                        </div>
-                    )}
+                    <div className="pt-4 border-t border-slate-100 space-y-4">
+                      <button type="button" onClick={addEmailField} className="text-sm text-indigo-600 font-bold flex items-center gap-1 hover:underline">
+                        <Plus size={16} /> Add Recipient
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSending}
+                        className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isSending ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
+                        {isSending ? "Sending..." : "Confirm & Send Emails"}
+                      </button>
+                    </div>
+                  </form>
                 </div>
+              ) : (
+                <div className="p-10 text-center">
+                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">Successfully Sent!</h3>
+                  <p className="text-sm text-slate-500 mb-6">
+                    The documents for SRF {data.srf_no}
+                    {data.batch_no ? ` (Batch #${data.batch_no})` : ""} have been dispatched.
+                  </p>
+                  <button
+                    onClick={() => { setIsModalOpen(false); setShowSuccessUI(false); navigate(-1); }}
+                    className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all"
+                  >
+                    Finish & Exit
+                  </button>
+                </div>
+              )}
             </div>
+          </div>
         )}
       </div>
     </div>
