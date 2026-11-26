@@ -939,7 +939,7 @@ const CalibrationReminderDetailsPage: React.FC = () => {
   const busyDaysCount = useMemo(() => {
     let count = 0;
     certificatesByDate.forEach((certs) => {
-      if (certs.length >= 5) count += 1;
+      if (certs.length >= 21) count += 1;
     });
     return count;
   }, [certificatesByDate]);
@@ -1124,7 +1124,7 @@ const CalibrationReminderDetailsPage: React.FC = () => {
               </div>
               <div className="text-sm font-bold text-slate-900 mt-0.5">
                 {busyDaysCount > 0
-                  ? `${busyDaysCount} Heavy Day(s) — Plan Ahead`
+                  ? `${busyDaysCount} Heavy Day(s)-Plan Ahead`
                   : "Balanced Daily Load"}
               </div>
             </div>
@@ -1351,15 +1351,15 @@ const CalibrationReminderDetailsPage: React.FC = () => {
               <div className="flex items-center gap-4 text-xs flex-wrap">
                 <span className="flex items-center gap-1.5 text-slate-600">
                   <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                  1–2 Normal
+                  1–10 Normal
                 </span>
                 <span className="flex items-center gap-1.5 text-slate-600">
                   <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                  3–4 Moderate
+                  11–20 Moderate
                 </span>
                 <span className="flex items-center gap-1.5 text-rose-700 font-semibold">
                   <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                  5+ Heavy Load (Plan Ahead)
+                  21+ Heavy Load (Plan Ahead)
                 </span>
               </div>
             </div>
@@ -1418,8 +1418,8 @@ const CalibrationReminderDetailsPage: React.FC = () => {
                       ).padStart(2, "0")}`;
                       const dayCerts = certificatesByDate.get(dateKey) || [];
                       const count = dayCerts.length;
-                      const isHeavy = count >= 5;
-                      const isModerate = count >= 3 && count < 5;
+                      const isHeavy = count >= 21;
+                      const isModerate = count >= 11 && count <=20;
                       const isToday = dateKey === todayStr;
                       const isSelected = selectedCalendarDate === dateKey;
 
@@ -1648,7 +1648,7 @@ const CalibrationReminderDetailsPage: React.FC = () => {
               {/* Capacity Readiness Banner */}
               <div
                 className={`rounded-2xl p-4 border flex items-start gap-3 ${
-                  selectedDayCerts.length >= 5
+                  selectedDayCerts.length >= 21
                     ? "bg-rose-50 border-rose-200 text-rose-900"
                     : selectedDayCerts.length > 0
                     ? "bg-blue-50 border-blue-200 text-blue-900"
@@ -1657,7 +1657,7 @@ const CalibrationReminderDetailsPage: React.FC = () => {
               >
                 <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
                 <div className="text-xs leading-relaxed">
-                  {selectedDayCerts.length >= 5 ? (
+                  {selectedDayCerts.length >= 21 ? (
                     <>
                       <strong className="font-bold block text-sm">
                         Heavy Equipment Traffic ({selectedDayCerts.length} items due)

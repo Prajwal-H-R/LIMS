@@ -275,37 +275,6 @@ CREATE TABLE IF NOT EXISTS public.report_log(
     CONSTRAINT report_log_pkey PRIMARY KEY (id)
 );
 
-CREATE TABLE IF NOT EXISTS public.work_completion_certificates
-(
-    id bigserial NOT NULL,
-    inward_id bigint,
-    vendor_company_details character varying COLLATE pg_catalog."default",
-    tax_registration_details character varying COLLATE pg_catalog."default",
-    nextage_dispatch_dc_no character varying COLLATE pg_catalog."default",
-    date date,
-    services_delivered_to character varying COLLATE pg_catalog."default",
-    work_location_1 character varying COLLATE pg_catalog."default",
-    work_location_2 character varying COLLATE pg_catalog."default",
-    work_location_3 character varying COLLATE pg_catalog."default",
-    gst_no character varying COLLATE pg_catalog."default",
-    pan_no character varying COLLATE pg_catalog."default",
-    wcc_no character varying COLLATE pg_catalog."default",
-    work_start_date date,
-    work_completion_date date,
-    po_no character varying COLLATE pg_catalog."default",
-    po_date date,
-    project_name character varying COLLATE pg_catalog."default",
-    details_table jsonb NOT NULL DEFAULT '[{"uom": "", "sac_no": "", "po_s_no": null, "quantity_completed": null, "description_of_work": "", "status_of_work_completed": ""}]'::jsonb,
-    remarks text COLLATE pg_catalog."default",
-    signature_details jsonb NOT NULL DEFAULT '{"representative_and_company_seal_name": "", "vendor_representative_company_seal_name": ""}'::jsonb,
-    tools_received_from character varying COLLATE pg_catalog."default",
-    tools_dispatched_to character varying  COLLATE pg_catalog."default",
-    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT work_completion_certificates_pkey PRIMARY KEY (id),
-    CONSTRAINT work_completion_certificates_inward_id_key UNIQUE (inward_id),
-    CONSTRAINT work_completion_certificates_wcc_no_key UNIQUE (wcc_no)
-);
 
 CREATE TABLE IF NOT EXISTS public.calibration_bookings
 (
@@ -321,30 +290,6 @@ CREATE TABLE IF NOT EXISTS public.calibration_bookings
     CONSTRAINT calibration_bookings_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers (customer_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION
 );
 
-CREATE TABLE IF NOT EXISTS public.final_inspections
-(
-    id serial NOT NULL,
-    inward_id integer NOT NULL,
-    customer_id integer NOT NULL,
-    srf_no character varying(100) COLLATE pg_catalog."default" NOT NULL,
-    customer_dc_no character varying(255) COLLATE pg_catalog."default",
-    receiver character varying(255) COLLATE pg_catalog."default",
-    customer_name text COLLATE pg_catalog."default" NOT NULL,
-    customer_email character varying(320) COLLATE pg_catalog."default",
-    customer_decision character varying(20) COLLATE pg_catalog."default",
-    customer_remarks text COLLATE pg_catalog."default",
-    equipments jsonb NOT NULL,
-    sent_emails jsonb NOT NULL,
-    report_sent boolean NOT NULL,
-    report_sent_at timestamp with time zone,
-    status character varying(50) COLLATE pg_catalog."default" NOT NULL,
-    is_active boolean NOT NULL,
-    created_at timestamp with time zone NOT NULL DEFAULT now(),
-    updated_at timestamp with time zone,
-    CONSTRAINT final_inspections_pkey PRIMARY KEY (id),
-    CONSTRAINT final_inspections_inward_id_key UNIQUE (inward_id),
-    CONSTRAINT final_inspections_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers (customer_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION
-);
 
 CREATE TABLE IF NOT EXISTS public.htw_nomenclature_range
 (
@@ -683,7 +628,6 @@ CREATE TABLE IF NOT EXISTS public.htw_job
     CONSTRAINT htw_job_pkey
         PRIMARY KEY (job_id),
 
-    -- Retain uniqueness for inward equipment.
     CONSTRAINT htw_job_inward_eqp_id_key
         UNIQUE (inward_eqp_id),
 
@@ -987,6 +931,114 @@ CREATE TABLE IF NOT EXISTS public.htw_repeatability_reading
     CONSTRAINT htw_repeatability_reading_repeatability_id_fkey FOREIGN KEY (repeatability_id) REFERENCES public.htw_repeatability (id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE CASCADE
 );
 
+-- New tables added during dispatch to feature
+CREATE TABLE IF NOT EXISTS public.dispatch_batches
+(
+    dispatch_id serial NOT NULL,
+    inward_id integer NOT NULL,
+    dispatched_to_customer_id integer NOT NULL,
+    batch_no integer NOT NULL,
+    dispatch_dc_no character varying(100) COLLATE pg_catalog."default",
+    status character varying(30) COLLATE pg_catalog."default" NOT NULL DEFAULT 'DRAFT',
+    remarks text COLLATE pg_catalog."default",
+    created_by integer,
+    dispatched_at timestamp with time zone,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT dispatch_batches_pkey PRIMARY KEY (dispatch_id),
+    CONSTRAINT uq_dispatch_batches_inward_batch UNIQUE (inward_id, batch_no),
+    CONSTRAINT dispatch_batches_inward_id_fkey FOREIGN KEY (inward_id)
+        REFERENCES public.inward (inward_id) ON DELETE CASCADE,
+    CONSTRAINT dispatch_batches_dispatched_to_customer_id_fkey FOREIGN KEY (dispatched_to_customer_id)
+        REFERENCES public.customers (customer_id) ON DELETE RESTRICT,
+    CONSTRAINT dispatch_batches_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES public.users (user_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.dispatch_batch_items
+(
+    id serial NOT NULL,
+    dispatch_id integer NOT NULL,
+    inward_eqp_id integer NOT NULL,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT dispatch_batch_items_pkey PRIMARY KEY (id),
+    CONSTRAINT dispatch_batch_items_dispatch_id_fkey FOREIGN KEY (dispatch_id)
+        REFERENCES public.dispatch_batches (dispatch_id) ON DELETE CASCADE,
+    CONSTRAINT dispatch_batch_items_inward_eqp_id_fkey FOREIGN KEY (inward_eqp_id)
+        REFERENCES public.inward_equipments (inward_eqp_id) ON DELETE CASCADE
+);
+
+-- Moved below dispatch_batches: these FK dispatch_batches, so they must be created after it
+CREATE TABLE IF NOT EXISTS public.final_inspections
+(
+    id serial NOT NULL,
+    inward_id integer NOT NULL,
+    customer_id integer NOT NULL,
+    srf_no character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    customer_dc_no character varying(255) COLLATE pg_catalog."default",
+    receiver character varying(255) COLLATE pg_catalog."default",
+    customer_name text COLLATE pg_catalog."default" NOT NULL,
+    customer_email character varying(320) COLLATE pg_catalog."default",
+    customer_decision character varying(20) COLLATE pg_catalog."default",
+    customer_remarks text COLLATE pg_catalog."default",
+    equipments jsonb NOT NULL,
+    sent_emails jsonb NOT NULL,
+    report_sent boolean NOT NULL,
+    report_sent_at timestamp with time zone,
+    status character varying(50) COLLATE pg_catalog."default" NOT NULL,
+    is_active boolean NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at timestamp with time zone,
+    dispatch_id integer,
+    CONSTRAINT final_inspections_pkey PRIMARY KEY (id),
+    CONSTRAINT final_inspections_customer_id_fkey FOREIGN KEY (customer_id)
+        REFERENCES public.customers (customer_id) MATCH SIMPLE ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT final_inspections_dispatch_id_fkey FOREIGN KEY (dispatch_id)
+        REFERENCES public.dispatch_batches (dispatch_id) ON UPDATE NO ACTION ON DELETE CASCADE,
+    CONSTRAINT final_inspections_dispatch_id_key UNIQUE (dispatch_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.work_completion_certificates
+(
+    id bigserial NOT NULL,
+    inward_id integer,
+    vendor_company_details character varying COLLATE pg_catalog."default",
+    tax_registration_details character varying COLLATE pg_catalog."default",
+    nextage_dispatch_dc_no character varying COLLATE pg_catalog."default",
+    date date,
+    services_delivered_to character varying COLLATE pg_catalog."default",
+    work_location_1 character varying COLLATE pg_catalog."default",
+    work_location_2 character varying COLLATE pg_catalog."default",
+    work_location_3 character varying COLLATE pg_catalog."default",
+    gst_no character varying COLLATE pg_catalog."default",
+    pan_no character varying COLLATE pg_catalog."default",
+    wcc_no character varying COLLATE pg_catalog."default",
+    work_start_date date,
+    work_completion_date date,
+    po_no character varying COLLATE pg_catalog."default",
+    po_date date,
+    project_name character varying COLLATE pg_catalog."default",
+    details_table jsonb NOT NULL DEFAULT '[{"uom": "", "sac_no": "", "po_s_no": null, "quantity_completed": null, "description_of_work": "", "status_of_work_completed": ""}]'::jsonb,
+    remarks text COLLATE pg_catalog."default",
+    signature_details jsonb NOT NULL DEFAULT '{"representative_and_company_seal_name": "", "vendor_representative_company_seal_name": ""}'::jsonb,
+    tools_received_from character varying COLLATE pg_catalog."default",
+    tools_dispatched_to character varying COLLATE pg_catalog."default",
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    dispatch_id integer,
+    dispatched_to_customer_id integer,
+    CONSTRAINT work_completion_certificates_pkey PRIMARY KEY (id),
+    CONSTRAINT work_completion_certificates_inward_id_fkey FOREIGN KEY (inward_id)
+        REFERENCES public.inward (inward_id) ON UPDATE NO ACTION ON DELETE CASCADE,
+    CONSTRAINT work_completion_certificates_dispatch_id_fkey FOREIGN KEY (dispatch_id)
+        REFERENCES public.dispatch_batches (dispatch_id) ON UPDATE NO ACTION ON DELETE CASCADE,
+    CONSTRAINT work_completion_certificates_dispatched_to_customer_id_fkey FOREIGN KEY (dispatched_to_customer_id)
+        REFERENCES public.customers (customer_id) ON UPDATE NO ACTION ON DELETE RESTRICT,
+    CONSTRAINT work_completion_certificates_dispatch_id_key UNIQUE (dispatch_id),
+    CONSTRAINT work_completion_certificates_wcc_no_key UNIQUE (wcc_no)
+);
+
 -- Explicit indexes from the pgAdmin export.
 CREATE INDEX IF NOT EXISTS external_uploads_inward_eqp_id_key
     ON public.external_uploads(inward_eqp_id);
@@ -1004,5 +1056,18 @@ CREATE INDEX IF NOT EXISTS srf_equipments_inward_eqp_id_key
     ON public.srf_equipments(inward_eqp_id);
 CREATE INDEX IF NOT EXISTS ix_srfs_inward_id
     ON public.srfs(inward_id);
+-- New indexes added during dispatch to feature
+CREATE INDEX IF NOT EXISTS ix_final_inspections_inward_id ON public.final_inspections (inward_id);
+CREATE INDEX IF NOT EXISTS ix_final_inspections_customer_id ON public.final_inspections (customer_id);
+CREATE INDEX IF NOT EXISTS ix_wcc_inward_id ON public.work_completion_certificates (inward_id);
+CREATE INDEX IF NOT EXISTS ix_wcc_dispatched_to_customer_id ON public.work_completion_certificates (dispatched_to_customer_id);
 
+CREATE INDEX IF NOT EXISTS ix_dispatch_batches_inward_id ON public.dispatch_batches (inward_id);
+CREATE INDEX IF NOT EXISTS ix_dispatch_batches_dispatched_to_customer_id ON public.dispatch_batches (dispatched_to_customer_id);
+CREATE INDEX IF NOT EXISTS ix_dispatch_batch_items_dispatch_id ON public.dispatch_batch_items (dispatch_id);
+
+-- Partial unique index from the model: one active dispatch row per equipment
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dispatch_batch_items_active_eqp
+    ON public.dispatch_batch_items (inward_eqp_id)
+    WHERE is_active = true;
 COMMIT;
