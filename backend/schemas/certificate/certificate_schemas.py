@@ -15,6 +15,8 @@ class CertificateUpdate(BaseModel):
     recommended_cal_due_date: Optional[date] = None
     item_status: Optional[str] = None
     authorised_signatory: Optional[str] = None
+    certificate_issue_name: Optional[str] = None
+    certificate_issue_adress: Optional[str] = None
 
 # --- Admin approval payload ---
 class CertificateApproval(BaseModel):
@@ -67,6 +69,8 @@ class CertificateResponse(BaseModel):
     recommended_cal_due_date: Optional[date] = None
     item_status: Optional[str] = None
     authorised_signatory: Optional[str] = None
+    certificate_issue_name: Optional[str] = None
+    certificate_issue_adress: Optional[str] = None
     permissible_deviation_iso_6789: Optional[List[str]] = None
     iso_6789_results: Optional[List[str]] = None
     status: str

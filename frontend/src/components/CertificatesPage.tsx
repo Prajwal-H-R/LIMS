@@ -43,6 +43,8 @@ interface Certificate {
   field_of_parameter: string | null;
   recommended_cal_due_date: string | null;
   item_status?: string | null;
+  certificate_issue_name?: string | null;
+  certificate_issue_adress?: string | null;
   authorised_signatory: string | null;
   status: string;
   created_at?: string | null;
@@ -208,6 +210,8 @@ export const CertificatesPage: React.FC = () => {
     field_of_parameter: "Torque",
     recommended_cal_due_date: "",
     item_status: "Satisfactory",
+    certificate_issue_name: "",
+    certificate_issue_adress: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -540,6 +544,8 @@ export const CertificatesPage: React.FC = () => {
       field_of_parameter: cert.field_of_parameter || "Torque",
       recommended_cal_due_date: cert.recommended_cal_due_date ? cert.recommended_cal_due_date.slice(0, 10) : "",
       item_status: cert.item_status || "Satisfactory",
+      certificate_issue_name: cert.certificate_issue_name || "",
+      certificate_issue_adress: cert.certificate_issue_adress || "",
     });
     setShowEditModal(true);
   };
@@ -561,7 +567,8 @@ export const CertificatesPage: React.FC = () => {
       if (editForm.field_of_parameter) payload.field_of_parameter = editForm.field_of_parameter;
       if (editForm.recommended_cal_due_date) payload.recommended_cal_due_date = editForm.recommended_cal_due_date;
       if (editForm.item_status !== undefined) payload.item_status = editForm.item_status || "Satisfactory";
-
+      payload.certificate_issue_name = editForm.certificate_issue_name?.trim() || null;
+      payload.certificate_issue_adress = editForm.certificate_issue_adress?.trim() || null;
       await api.patch(ENDPOINTS.CERTIFICATES.UPDATE(selectedCertificate.certificate_id), payload);
 
       setShowEditModal(false); setSelectedCertificate(null);
@@ -1105,6 +1112,17 @@ export const CertificatesPage: React.FC = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Item Status</label>
                       <input type="text" value={editForm.item_status} onChange={(e) => setEditForm((f) => ({ ...f, item_status: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
+                    </div>
+                    <div>
+                      <p className="text-base font-bold text-indigo-700 border-t border-gray-200 pt-4 mt-2 -ml-2">
+  Customer Name & Address :
+</p>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name on Certificate</label>
+                      <input type="text" maxLength={255} value={editForm.certificate_issue_name} onChange={(e) => setEditForm((f) => ({ ...f, certificate_issue_name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Leave blank to use SRF value" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Customer Address on Certificate</label>
+                      <input type="text" maxLength={300} value={editForm.certificate_issue_adress} onChange={(e) => setEditForm((f) => ({ ...f, certificate_issue_adress: e.target.value }))} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Leave blank to use SRF value" />
                     </div>
                     <div className="flex gap-2 pt-4">
                       <button onClick={handleSaveEdit} disabled={isSubmitting} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex justify-center items-center">{isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Draft"}</button>

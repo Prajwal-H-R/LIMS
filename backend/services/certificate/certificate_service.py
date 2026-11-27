@@ -622,6 +622,11 @@ def build_template_data(
         inward,
     )
 
+    if certificate is not None:
+        if (certificate.certificate_issue_name or "").strip():
+            eqp_map["customer_name"] = certificate.certificate_issue_name
+        if (certificate.certificate_issue_adress or "").strip():
+            eqp_map["customer_address"] = certificate.certificate_issue_adress
     # ------------------------------------------------------------------
     # CERTIFICATE DATES / NUMBER
     # ------------------------------------------------------------------
@@ -1300,8 +1305,9 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
     Creates htw_certificate with auto-filled data and AUTO-GENERATED ULR.
     """
     job = db.query(HTWJob).options(
-        joinedload(HTWJob.equipment_rel),
-        joinedload(HTWJob.inward_rel),
+    joinedload(HTWJob.equipment_rel),
+    joinedload(HTWJob.inward_rel).joinedload(Inward.srf),
+    joinedload(HTWJob.inward_rel).joinedload(Inward.customer),
     ).filter(HTWJob.job_id == job_id).first()
  
     if not job:
@@ -1314,7 +1320,15 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
     equipment = job.equipment_rel
     if not equipment:
         raise HTTPException(status_code=400, detail="Job has no equipment")
- 
+
+    inward = job.inward_rel
+    srf = getattr(inward, "srf", None)
+    customer = getattr(inward, "customer", None)
+    seed_name = ((getattr(srf, "certificate_issue_name", None) or "").strip()
+                 or (getattr(customer, "customer_details", None) or "").strip() or None)
+    seed_addr = ((getattr(srf, "certificate_issue_adress", None) or "").strip()
+                 or (getattr(customer, "bill_to_address", None) or "").strip() or None)
+    
     # ---------------------------------------------------------
     # ULR GENERATION LOGIC (START)
     # ---------------------------------------------------------
@@ -1382,6 +1396,10 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
             # If draft exists but somehow has no ULR, assign it now
             if not existing.ulr_no:
                 existing.ulr_no = generated_ulr
+            if not (existing.certificate_issue_name or "").strip():
+                existing.certificate_issue_name = seed_name
+            if not (existing.certificate_issue_adress or "").strip():
+                existing.certificate_issue_adress = seed_addr
             
             if getattr(existing, "permissible_deviation_iso_6789", None) is None or getattr(existing, "iso_6789_results", None) is None:
                 existing.permissible_deviation_iso_6789 = permissible_arr
@@ -1406,6 +1424,8 @@ def generate_certificate(db: Session, job_id: int, created_by: Optional[int] = N
         recommended_cal_due_date=default_due,
         item_status="Satisfactory",
         authorised_signatory=None,
+        certificate_issue_name=seed_name,
+        certificate_issue_adress=seed_addr,
         status="DRAFT",
         created_by=created_by,
         permissible_deviation_iso_6789=permissible_arr,
@@ -1435,6 +1455,10 @@ def update_certificate(db: Session, certificate_id: int, payload: Dict[str, Any]
         cert.recommended_cal_due_date = payload["recommended_cal_due_date"]
     if "item_status" in payload and payload["item_status"] is not None:
         cert.item_status = payload["item_status"]
+    if "certificate_issue_name" in payload:
+        cert.certificate_issue_name = (payload["certificate_issue_name"] or "").strip() or None
+    if "certificate_issue_adress" in payload:
+        cert.certificate_issue_adress = (payload["certificate_issue_adress"] or "").strip() or None
     if cert.status == "CREATED" and "authorised_signatory" in payload and payload["authorised_signatory"] is not None:
         cert.authorised_signatory = payload["authorised_signatory"]
  
@@ -1887,6 +1911,8 @@ def list_srf_groups_with_eligible_equipment(
                     "field_of_parameter": getattr(cert, "field_of_parameter", ""),
                     "recommended_cal_due_date": cert.recommended_cal_due_date.isoformat() if getattr(cert, "recommended_cal_due_date", None) else None,
                     "item_status": getattr(cert, "item_status", None) or "Satisfactory",
+                    "certificate_issue_name": getattr(cert, "certificate_issue_name", None),
+                    "certificate_issue_adress": getattr(cert, "certificate_issue_adress", None),
                     "authorised_signatory": getattr(cert, "authorised_signatory", ""),
                     "admin_rework_comment": getattr(cert, "admin_rework_comment", None) or "",
                     "qr_token": getattr(cert, "qr_token", None),

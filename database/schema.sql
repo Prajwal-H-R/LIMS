@@ -680,6 +680,8 @@ CREATE TABLE IF NOT EXISTS public.certificate
     recommended_cal_due_date date,
     item_status character varying(255) COLLATE pg_catalog."default",
     authorised_signatory character varying(255) COLLATE pg_catalog."default",
+    certificate_issue_name character varying(255) COLLATE pg_catalog."default",
+    certificate_issue_adress text COLLATE pg_catalog."default",
     status character varying(50) COLLATE pg_catalog."default" NOT NULL,
     admin_rework_comment text COLLATE pg_catalog."default",
     permissible_deviation_iso_6789 jsonb,

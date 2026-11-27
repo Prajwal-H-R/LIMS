@@ -5,7 +5,7 @@ import {
   Plus, Trash2, Eye, Save, FileText, Loader2, X, ArrowLeft, 
   Camera, Clock, Send, Wrench, AlertCircle, CheckCircle2, 
   Download, UserPlus, MapPin, Receipt, PackagePlus, MessageSquare, 
-  Lock, Settings, Pencil, Search, ChevronDown, Star, Building2, UserCog
+  Lock, Settings, Pencil, Search, ChevronDown, Star, Building2, UserCog, Upload
 } from 'lucide-react';
 import { InwardForm as InwardFormType, EquipmentDetail as BaseEquipmentDetail, InwardDetail } from '../types/inward';
 import { api, ENDPOINTS, BACKEND_ROOT_URL } from '../api/config';
@@ -13,6 +13,8 @@ import { useAuth } from '../auth/AuthProvider';
 import { generateStandardInwardPDF } from '../utils/InwardPDFHelper'; 
 import { useRecordLock } from '../hooks/useRecordLock'; 
 import { HTWManufacturerSpecsManager } from './AdminComponents/HTWManufacturerSpecsManager';
+import { EquipmentImportModal } from './InwardImport/EquipmentImportModal';
+import { ImportedEquipmentRow } from './InwardImport/types';
 
 // --- TYPE DEFINITIONS ---
 
@@ -502,6 +504,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
   const [activeRowForNewMaterial, setActiveRowForNewMaterial] = useState<number | null>(null);
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false); 
   const [showSpecsManager, setShowSpecsManager] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const [makeOptions, setMakeOptions] = useState<string[]>([]);
   const [modelCache, setModelCache] = useState<Record<string, string[]>>({});
@@ -990,6 +993,85 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     }
   };
 
+  const hasExistingNonEmptyEquipment = useMemo(
+    () =>
+      equipmentList.some(
+        (eq) =>
+          Boolean(eq.material_desc?.trim()) ||
+          Boolean(eq.make?.trim()) ||
+          Boolean(eq.model?.trim()) ||
+          Boolean(eq.serial_no?.trim())
+      ),
+    [equipmentList]
+  );
+
+  const handleImportEquipments = async (
+    importedRows: ImportedEquipmentRow[],
+    mode: 'replace' | 'append'
+  ) => {
+    if (isLocked || isEditMode) return;
+
+    const htwMakes = Array.from(
+      new Set(
+        importedRows
+          .filter((r) => r.material_desc === "Hydraulic Torque Wrench" && r.make)
+          .map((r) => r.make)
+      )
+    );
+    if (htwMakes.length > 0) {
+      setMakeOptions((prev) => Array.from(new Set([...prev, ...htwMakes])).sort());
+      await Promise.all(htwMakes.map((make) => fetchModelsForMake(make)));
+    }
+
+    if (mode === 'replace') {
+      cleanupAllPreviews();
+    }
+
+    setEquipmentList((currentList) => {
+      const isSingleBlankRow =
+        currentList.length === 1 &&
+        !currentList[0].material_desc?.trim() &&
+        !currentList[0].make?.trim() &&
+        !currentList[0].model?.trim() &&
+        !currentList[0].serial_no?.trim();
+
+      const baseList = mode === 'replace' || isSingleBlankRow ? [] : currentList;
+      const mappedNew: EquipmentDetail[] = importedRows.map((row) => {
+        const baseItem: any = {
+          nepl_id: '',
+          material_desc: row.material_desc,
+          make: row.make,
+          model: row.model,
+          range: row.range || '',
+          serial_no: row.serial_no || '',
+          qty: row.qty || 1,
+          calibration_by: row.calibration_by,
+          accessories_included: row.accessories_included || '',
+          inspe_status: row.inspe_status,
+          inspe_remarks: '',
+          engineer_remarks:
+            row.inspe_status === 'Not OK' ? row.engineer_remarks || '' : '',
+          photos: [],
+          photoPreviews: [],
+          existingPhotoUrls: [],
+        };
+        if (row.calibration_by === 'Outsource') {
+          baseItem.supplier = row.supplier || '';
+          baseItem.in_dc = row.in_dc || '';
+          baseItem.out_dc = row.out_dc || '';
+        }
+        return baseItem as EquipmentDetail;
+      });
+
+      return [...baseList, ...mappedNew].map((item, idx) => ({
+        ...item,
+        nepl_id: `${formData.srf_no}-${idx + 1}`,
+      }));
+    });
+
+    showMessage('success', `Imported ${importedRows.length} equipment row(s) from CSV.`);
+  };
+
   const addEquipmentRow = () => {
     if (isLocked) return; 
     setEquipmentList(currentList => {
@@ -1381,7 +1463,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
                        setSelectedCustomerId(null);
                     }}
                     onAddNew={() => setShowAddCustomerModal(true)}
-                    addNewLabel="+ Add New Company"
+                    addNewLabel="Add New Company"
                     disabled={isEditMode || isLocked}
                   />
                 </div>
@@ -1412,7 +1494,7 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
         </div>
 
         <div className="mb-6">
-           <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2"><Wrench size={24} className="text-blue-600" />Equipment Details</h2><div className="relative"><button type="button" onClick={() => setShowSettingsDropdown(!showSettingsDropdown)} className="p-2 bg-gray-100 border rounded-lg transition-colors"><Settings size={20} /></button>{showSettingsDropdown && (<><div className="fixed inset-0 z-[90]" onClick={() => setShowSettingsDropdown(false)}></div><div className="absolute right-0 mt-2 w-72 bg-white border rounded-lg shadow-xl z-[100] py-1"><button type="button" onClick={() => { setShowSettingsDropdown(false); setShowSpecsManager(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2 font-medium transition-colors"><Settings size={16} /><span>Add/Update Manufacturer Specs</span></button></div></>)}</div></div>
+           <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2"><Wrench size={24} className="text-blue-600" />Equipment Details</h2><div className="flex items-center gap-2">{!isEditMode && !isLocked && (<button type="button" onClick={() => setShowImportModal(true)} className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg text-sm font-semibold transition-colors"><Upload size={16} /><span>Import CSV</span></button>)}<div className="relative"><button type="button" onClick={() => setShowSettingsDropdown(!showSettingsDropdown)} className="p-2 bg-gray-100 border rounded-lg transition-colors"><Settings size={20} /></button>{showSettingsDropdown && (<><div className="fixed inset-0 z-[90]" onClick={() => setShowSettingsDropdown(false)}></div><div className="absolute right-0 mt-2 w-72 bg-white border rounded-lg shadow-xl z-[100] py-1"><button type="button" onClick={() => { setShowSettingsDropdown(false); setShowSpecsManager(true); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2 font-medium transition-colors"><Settings size={16} /><span>Add/Update Manufacturer Specs</span></button></div></>)}</div></div></div>
            <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
               <table className="w-full text-sm border-collapse min-w-[2500px]">
                 <thead className="bg-slate-100">
@@ -1549,6 +1631,21 @@ export const InwardForm: React.FC<InwardFormProps> = ({ initialDraftId, onDraftU
     {renderDownloadModal()}
     {renderDeleteRowModal()}
     {isCompanyModalOpen && <CompanyEntryModal isOpen={isCompanyModalOpen} onClose={() => setCompanyModalOpen(false)} initialCompanyName={modalInitialCompany} onConfirm={(c, l) => { setCompanyName(c); setLocationName(l); setIsCustomCompany(true); setCompanyModalOpen(false); }} />}
+    <EquipmentImportModal
+      isOpen={showImportModal}
+      onClose={() => setShowImportModal(false)}
+      materialOptions={materialOptions}
+      configuredTypes={configuredTypes}
+      hasExistingEquipment={hasExistingNonEmptyEquipment}
+      onAddMaterialOption={(newMaterial) => {
+        setMaterialOptions((prev) =>
+          prev.some((m) => m.toLowerCase() === newMaterial.toLowerCase())
+            ? prev
+            : [...prev, newMaterial].sort()
+        );
+      }}
+      onImport={handleImportEquipments}
+    />
     </>
   );
 };

@@ -55,6 +55,8 @@ class HTWCertificate(Base):
     )
 
     authorised_signatory: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    certificate_issue_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    certificate_issue_adress: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(50),
